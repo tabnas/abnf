@@ -25,7 +25,7 @@
  *  doc/bnf-to-tabnas-feasibility.md for the full plan.
  */
 
-import type { GrammarSpec, Rule } from 'tabnas'
+import type { GrammarSpec, Rule } from '@tabnas/parser'
 
 
 // BNF converter options.
@@ -476,7 +476,7 @@ let _bnfParser: ((src: string) => BnfProduction[]) | null = null
 function getBnfParser(): (src: string) => BnfProduction[] {
   if (_bnfParser) return _bnfParser
 
-  const { Tabnas } = require('tabnas')
+  const { Tabnas } = require('@tabnas/parser')
 
   // BNF defines its own grammar from scratch, so we don't load any
   // grammar plugin — just use the bare engine with default tokens.

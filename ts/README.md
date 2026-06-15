@@ -8,13 +8,13 @@ CLI (`tabnas-bnf`) that does the same thing from the shell.
 ## Install
 
 ```bash
-npm install tabnas @tabnas/bnf
+npm install @tabnas/parser @tabnas/bnf
 ```
 
 ## Use
 
 ```js
-const { Tabnas } = require('tabnas')
+const { Tabnas } = require('@tabnas/parser')
 const { bnf } = require('@tabnas/bnf')
 
 const tn = new Tabnas({ plugins: [bnf] })

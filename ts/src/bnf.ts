@@ -13,7 +13,7 @@ import type {
   Tabnas,
   GrammarSpec,
   Plugin,
-} from 'tabnas'
+} from '@tabnas/parser'
 
 import {
   bnf as bnfConvert,

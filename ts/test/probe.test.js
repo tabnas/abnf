@@ -17,7 +17,7 @@
 const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
-const { Tabnas } = require('tabnas')
+const { Tabnas } = require('@tabnas/parser')
 const { bnf: bnfPlugin } = require('..')
 const tn = new Tabnas({ plugins: [bnfPlugin] })
 const J = (src, meta, ctx) => tn.parse(src, meta, ctx)

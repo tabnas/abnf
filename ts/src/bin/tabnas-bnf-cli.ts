@@ -7,7 +7,7 @@
 import Fs from 'node:fs'
 
 import { bnfConvert } from '../bnf'
-import { Tabnas } from 'tabnas'
+import { Tabnas } from '@tabnas/parser'
 
 
 export async function run(argv: string[], console: Console) {

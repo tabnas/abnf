@@ -30,7 +30,7 @@ const assert = require('node:assert')
 const Fs = require('node:fs')
 const Path = require('node:path')
 
-const { Tabnas } = require('tabnas')
+const { Tabnas } = require('@tabnas/parser')
 const { bnf: bnfPlugin } = require('..')
 const tn = new Tabnas({ plugins: [bnfPlugin] })
 const J = (src, meta, ctx) => tn.parse(src, meta, ctx)
