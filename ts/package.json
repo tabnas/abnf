@@ -42,8 +42,13 @@
     "@tabnas/parser": "file:../../parser/ts"
   },
   "devDependencies": {
-    "@types/node": "25.6.0",
+    "@tabnas/debug": "file:../../debug/ts",
     "@tabnas/parser": "file:../../parser/ts",
+    "@tabnas/railroad": "file:../../railroad/ts",
+    "@types/node": "25.6.0",
     "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
