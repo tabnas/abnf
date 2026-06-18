@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Richard Rodger and other contributors, MIT License */
 'use strict'
 
-// Composition test: a BNF-compiled grammar layered with the official
+// Composition test: an ABNF-compiled grammar layered with the official
 // @tabnas/debug plugin, asserting its structured `debug.model()` output.
 // @tabnas/debug is a devDependency, but this resolves it dynamically and
 // SKIPS when it is absent so the suite stays runnable outside the package;
@@ -12,7 +12,7 @@ const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
 const { Tabnas } = require('@tabnas/parser')
-const { bnf: bnfPlugin } = require('..')
+const { abnf: abnfPlugin } = require('..')
 
 function loadDebug() {
   const candidates = [process.env.TABNAS_DEBUG_PATH, '@tabnas/debug'].filter(
@@ -31,7 +31,7 @@ function loadDebug() {
 const Debug = loadDebug()
 const skip = Debug ? false : '@tabnas/debug not available (set TABNAS_DEBUG_PATH)'
 
-// A small self-contained ABNF grammar compiled via j.bnf(...), the same
+// A small self-contained ABNF grammar compiled via j.abnf(...), the same
 // way this repo's own tests build a grammar instance (see probe.test.js).
 //   greeting = hello / hi
 //   hello    = "hello" name
@@ -45,26 +45,26 @@ name     = "world" / "there"
 `
 
 const makeParser = () => {
-  const tn = new Tabnas({ plugins: [bnfPlugin] })
+  const tn = new Tabnas({ plugins: [abnfPlugin] })
   const j = tn.make({ rewind: { history: 4096 } })
-  j.bnf(GRAMMAR)
+  j.abnf(GRAMMAR)
   j.use(Debug, { print: false, trace: false })
   return j
 }
 
-describe('compose: bnf + @tabnas/debug', () => {
+describe('compose: abnf + @tabnas/debug', () => {
   it('parses normally with the debug plugin installed', { skip }, () => {
     const j = makeParser()
     assert.doesNotThrow(() => j.parse('hello world'))
     assert.doesNotThrow(() => j.parse('hi there'))
   })
 
-  it('debug.model() returns the structured BNF-compiled grammar', { skip }, () => {
+  it('debug.model() returns the structured ABNF-compiled grammar', { skip }, () => {
     const j = makeParser()
     const m = j.debug.model()
 
     // The structured rule set: the four user productions plus the
-    // synthetic `__start__` wrapper the BNF converter injects to ensure
+    // synthetic `__start__` wrapper the ABNF converter injects to ensure
     // end-of-source is consumed.
     assert.deepStrictEqual(
       m.rules.map((r) => r.name).sort(),
@@ -86,7 +86,7 @@ describe('compose: bnf + @tabnas/debug', () => {
     )
 
     // Both plugins are listed.
-    assert.ok(m.plugins.some((p) => p.name === 'bnf'), 'plugins should list bnf')
+    assert.ok(m.plugins.some((p) => p.name === 'abnf'), 'plugins should list abnf')
     assert.ok(
       m.plugins.some((p) => p.name === 'Debug'),
       'plugins should list Debug',

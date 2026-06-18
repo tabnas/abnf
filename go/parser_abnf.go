@@ -1,10 +1,10 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
-// parser_bnf.go — the BNF grammar itself, expressed as a tabnas
+// parser_abnf.go — the ABNF grammar itself, expressed as a tabnas
 // GrammarSpec installed on a bare engine. This is the Go port of the TS
-// `bnfRules` table + `getBnfParser`. The BNF source is parsed by a
+// `abnfRules` table + `getAbnfParser`. The ABNF source is parsed by a
 // tabnas instance whose grammar is defined here; AST assembly happens in
 // the bo/bc/a closures registered in the Ref map.
 //
@@ -46,41 +46,41 @@ func tokString(t *tabnas.Token, r *tabnas.Rule, ctx *tabnas.Context) string {
 	return t.Src
 }
 
-// productionList is the slice type accumulated on the bnf rule's node.
-type productionList = []*bnfProduction
+// productionList is the slice type accumulated on the abnf rule's node.
+type productionList = []*abnfProduction
 
-// childAlts reads the alts ([]bnfSequence) a child `alts` rule produced.
-// The child node is a *[]bnfSequence (pointer for reference semantics).
-func childAlts(r *tabnas.Rule) []bnfSequence {
+// childAlts reads the alts ([]abnfSequence) a child `alts` rule produced.
+// The child node is a *[]abnfSequence (pointer for reference semantics).
+func childAlts(r *tabnas.Rule) []abnfSequence {
 	if r.Child == nil || r.Child == tabnas.NoRule {
 		return nil
 	}
-	if p, ok := r.Child.Node.(*[]bnfSequence); ok {
+	if p, ok := r.Child.Node.(*[]abnfSequence); ok {
 		return *p
 	}
 	return nil
 }
 
-// bnfParseRef builds the Ref map of AST-assembly closures for the BNF
+// abnfParseRef builds the Ref map of AST-assembly closures for the ABNF
 // parser grammar. State actions are wired by the engine via the
 // @<rule>-bo / @<rule>-bc reserved names.
-func bnfParseRef() map[tabnas.FuncRef]any {
+func abnfParseRef() map[tabnas.FuncRef]any {
 	// Node types use POINTERS to slices so that an append performed by a
 	// child rule (which inherits the parent's node by reference, as the
 	// engine passes r.Node down on push/replace) is visible to the
-	// parent — matching the TS reference-array semantics. bnf.node is a
-	// *productionList; alts.node a *[]bnfSequence; seq.node a *bnfSequence.
+	// parent — matching the TS reference-array semantics. abnf.node is a
+	// *productionList; alts.node a *[]abnfSequence; seq.node a *abnfSequence.
 	return map[tabnas.FuncRef]any{
-		// --- bnf (top level) ---
-		"@bnf-bo": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
+		// --- abnf (top level) ---
+		"@abnf-bo": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.Node = &productionList{}
 		}),
 
 		// --- prod ---
 		"@prod-bc": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			if r.Child != nil && r.Child != tabnas.NoRule && r.Child.Node != nil {
-				if altsPtr, ok := r.Child.Node.(*[]bnfSequence); ok {
-					prod := &bnfProduction{
+				if altsPtr, ok := r.Child.Node.(*[]abnfSequence); ok {
+					prod := &abnfProduction{
 						Name: asStr(r.U["name"]),
 						Alts: *altsPtr,
 					}
@@ -104,12 +104,12 @@ func bnfParseRef() map[tabnas.FuncRef]any {
 
 		// --- alts ---
 		"@alts-bo": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.Node = &[]bnfSequence{}
+			r.Node = &[]abnfSequence{}
 		}),
 		"@alts-bc": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			if r.Child != nil && r.Child != tabnas.NoRule && r.Child.Node != nil {
-				if seqPtr, ok := r.Child.Node.(*bnfSequence); ok {
-					if listPtr, ok := r.Node.(*[]bnfSequence); ok {
+				if seqPtr, ok := r.Child.Node.(*abnfSequence); ok {
+					if listPtr, ok := r.Node.(*[]abnfSequence); ok {
 						*listPtr = append(*listPtr, *seqPtr)
 					}
 				}
@@ -118,7 +118,7 @@ func bnfParseRef() map[tabnas.FuncRef]any {
 
 		// --- seq ---
 		"@seq-bo": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.Node = &bnfSequence{}
+			r.Node = &abnfSequence{}
 		}),
 
 		// --- elem ---
@@ -148,9 +148,9 @@ func bnfParseRef() map[tabnas.FuncRef]any {
 			r.U["max"] = n
 		}),
 		"@elem-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			var item *bnfElement
+			var item *abnfElement
 			if r.Child != nil && r.Child != tabnas.NoRule {
-				if it, ok := r.Child.Node.(*bnfElement); ok {
+				if it, ok := r.Child.Node.(*abnfElement); ok {
 					item = it
 				}
 			}
@@ -159,22 +159,22 @@ func bnfParseRef() map[tabnas.FuncRef]any {
 			}
 			min := asInt(r.U["min"])
 			max := asInt(r.U["max"])
-			var wrapped *bnfElement
+			var wrapped *abnfElement
 			switch {
 			case min == 1 && max == 1:
 				wrapped = item
 			case min == 0 && max == maxInfinity:
-				wrapped = &bnfElement{Kind: kindStar, Inner: item}
+				wrapped = &abnfElement{Kind: kindStar, Inner: item}
 			case min == 1 && max == maxInfinity:
-				wrapped = &bnfElement{Kind: kindPlus, Inner: item}
+				wrapped = &abnfElement{Kind: kindPlus, Inner: item}
 			case min == 0 && max == 1:
-				wrapped = &bnfElement{Kind: kindOpt, Inner: item}
+				wrapped = &abnfElement{Kind: kindOpt, Inner: item}
 			default:
-				wrapped = &bnfElement{Kind: kindRep, Min: min, Max: max, Inner: item}
+				wrapped = &abnfElement{Kind: kindRep, Min: min, Max: max, Inner: item}
 			}
-			// elem inherits seq's node (a *bnfSequence) by reference; append
+			// elem inherits seq's node (a *abnfSequence) by reference; append
 			// through the pointer so seq sees the new element.
-			if seqPtr, ok := r.Node.(*bnfSequence); ok {
+			if seqPtr, ok := r.Node.(*abnfSequence); ok {
 				*seqPtr = append(*seqPtr, wrapped)
 			}
 		}),
@@ -184,22 +184,22 @@ func bnfParseRef() map[tabnas.FuncRef]any {
 			r.Node = nil
 		}),
 		"@atom-ss": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &bnfElement{
+			r.Node = &abnfElement{
 				Kind: kindTerm, Literal: tokString(r.O[1], r, ctx),
 				CaseSensitive: true, hasCaseSens: true,
 			}
 		}),
 		"@atom-si": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &bnfElement{Kind: kindTerm, Literal: tokString(r.O[1], r, ctx)}
+			r.Node = &abnfElement{Kind: kindTerm, Literal: tokString(r.O[1], r, ctx)}
 		}),
 		"@atom-st": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &bnfElement{Kind: kindTerm, Literal: tokString(r.O[0], r, ctx)}
+			r.Node = &abnfElement{Kind: kindTerm, Literal: tokString(r.O[0], r, ctx)}
 		}),
 		"@atom-nv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.Node = parseNumericValue(r.O[0].Src)
 		}),
 		"@atom-tx": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &bnfElement{Kind: kindRef, Name: tokString(r.O[0], r, ctx)}
+			r.Node = &abnfElement{Kind: kindRef, Name: tokString(r.O[0], r, ctx)}
 		}),
 		"@atom-lp": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.U["groupKind"] = "group"
@@ -212,23 +212,23 @@ func bnfParseRef() map[tabnas.FuncRef]any {
 		}),
 		"@atom-group-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			alts := childAlts(r)
-			r.Node = &bnfElement{Kind: kindGroup, Alts: alts}
+			r.Node = &abnfElement{Kind: kindGroup, Alts: alts}
 		}),
 		"@atom-opt-c": tabnas.AltCond(func(r *tabnas.Rule, _ *tabnas.Context) bool {
 			return r.U["groupKind"] == "opt"
 		}),
 		"@atom-opt-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			alts := childAlts(r)
-			r.Node = &bnfElement{
+			r.Node = &abnfElement{
 				Kind:  kindOpt,
-				Inner: &bnfElement{Kind: kindGroup, Alts: alts},
+				Inner: &abnfElement{Kind: kindGroup, Alts: alts},
 			}
 		}),
 	}
 }
 
-// bnfRuleSpec returns the rule map for the BNF parser grammar.
-func bnfRuleSpec() map[string]*tabnas.GrammarRuleSpec {
+// abnfRuleSpec returns the rule map for the ABNF parser grammar.
+func abnfRuleSpec() map[string]*tabnas.GrammarRuleSpec {
 	// Element-starter alternatives shared by seq.open / seq.close.
 	seqElemAlts := func() []*tabnas.GrammarAltSpec {
 		return []*tabnas.GrammarAltSpec{
@@ -251,8 +251,8 @@ func bnfRuleSpec() map[string]*tabnas.GrammarRuleSpec {
 	}
 
 	rules := map[string]*tabnas.GrammarRuleSpec{
-		// bnf: accumulate productions.
-		"bnf": {
+		// abnf: accumulate productions.
+		"abnf": {
 			Open: []*tabnas.GrammarAltSpec{
 				{S: "#ZZ", G: "empty"},
 				{P: "prod"},
@@ -342,8 +342,8 @@ func bnfRuleSpec() map[string]*tabnas.GrammarRuleSpec {
 	return rules
 }
 
-// bnfParserOptions returns the engine Options for the BNF parser.
-func bnfParserOptions() tabnas.Options {
+// abnfParserOptions returns the engine Options for the ABNF parser.
+func abnfParserOptions() tabnas.Options {
 	f := false
 	del := func(s string) *string { return nil }
 	_ = del
@@ -384,7 +384,7 @@ func bnfParserOptions() tabnas.Options {
 	matchEager := map[string]bool{"#NV": true}
 
 	return tabnas.Options{
-		Rule:  &tabnas.RuleOptions{Start: "bnf"},
+		Rule:  &tabnas.RuleOptions{Start: "abnf"},
 		Fixed: &tabnas.FixedOptions{Token: fixedTok},
 		Match: &tabnas.MatchOptions{Token: matchTok, TokenEager: matchEager},
 		TokenSet: map[string][]string{
@@ -402,18 +402,18 @@ func bnfParserOptions() tabnas.Options {
 
 var boolTrue = true
 
-// _bnfParser is the lazily-built BNF parser instance.
+// _abnfParser is the lazily-built ABNF parser instance.
 var (
-	bnfParserOnce sync.Once
-	bnfParserInst *tabnas.Tabnas
-	bnfParserErr  error
+	abnfParserOnce sync.Once
+	abnfParserInst *tabnas.Tabnas
+	abnfParserErr  error
 )
 
-// getBnfParser returns a tabnas instance that parses BNF source into a
+// getAbnfParser returns a tabnas instance that parses ABNF source into a
 // production list. Built once, lazily.
-func getBnfParser() (*tabnas.Tabnas, error) {
-	bnfParserOnce.Do(func() {
-		j := tabnas.Make(bnfParserOptions())
+func getAbnfParser() (*tabnas.Tabnas, error) {
+	abnfParserOnce.Do(func() {
+		j := tabnas.Make(abnfParserOptions())
 
 		// `%s` / `%i` prefixes require a following `"` (RFC 5234 string
 		// prefixes). RE2 has no lookahead, so use function-form matchers
@@ -468,23 +468,23 @@ func getBnfParser() (*tabnas.Tabnas, error) {
 			j.Rule(name, nil)
 		}
 
-		ref := bnfParseRef()
+		ref := abnfParseRef()
 		if err := j.Grammar(&tabnas.GrammarSpec{
 			Ref:  ref,
-			Rule: bnfRuleSpec(),
+			Rule: abnfRuleSpec(),
 		}); err != nil {
-			bnfParserErr = err
+			abnfParserErr = err
 			return
 		}
-		bnfParserInst = j
+		abnfParserInst = j
 	})
-	return bnfParserInst, bnfParserErr
+	return abnfParserInst, abnfParserErr
 }
 
-// parseBnfRaw runs the BNF parser grammar over src and returns the raw
+// parseAbnfRaw runs the ABNF parser grammar over src and returns the raw
 // production list.
-func parseBnfRaw(src string) ([]*bnfProduction, error) {
-	j, err := getBnfParser()
+func parseAbnfRaw(src string) ([]*abnfProduction, error) {
+	j, err := getAbnfParser()
 	if err != nil {
 		return nil, err
 	}
@@ -498,7 +498,7 @@ func parseBnfRaw(src string) ([]*bnfProduction, error) {
 	if p, ok := out.(*productionList); ok {
 		return *p, nil
 	}
-	if prods, ok := out.([]*bnfProduction); ok {
+	if prods, ok := out.([]*abnfProduction); ok {
 		return prods, nil
 	}
 	return nil, nil

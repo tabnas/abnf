@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
-// emit.go — emitGrammarSpec and friends: turn a BNF grammar AST into a
+// emit.go — emitGrammarSpec and friends: turn an ABNF grammar AST into a
 // tabnas GrammarSpec. The Go port of the emitter half of converter.ts.
 //
 // Tree-building actions are emitted either as registered closures
@@ -20,10 +20,10 @@ import (
 	tabnas "github.com/tabnas/parser/go"
 )
 
-// emitGrammarSpec converts a BNF grammar AST into a tabnas GrammarSpec.
-func emitGrammarSpec(grammar *bnfGrammar, opts *BnfConvertOptions) (*tabnas.GrammarSpec, error) {
+// emitGrammarSpec converts an ABNF grammar AST into a tabnas GrammarSpec.
+func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.GrammarSpec, error) {
 	if opts == nil {
-		opts = &BnfConvertOptions{}
+		opts = &AbnfConvertOptions{}
 	}
 	start := opts.Start
 	if start == "" {
@@ -31,7 +31,7 @@ func emitGrammarSpec(grammar *bnfGrammar, opts *BnfConvertOptions) (*tabnas.Gram
 	}
 	tag := opts.Tag
 	if tag == "" {
-		tag = "bnf"
+		tag = "abnf"
 	}
 
 	grammar = eliminateLeftRecursion(grammar)
@@ -53,7 +53,7 @@ func emitGrammarSpec(grammar *bnfGrammar, opts *BnfConvertOptions) (*tabnas.Gram
 	// char case-insensitive literal) both match the same source char.
 	var matchOrder []string
 
-	allocTerm := func(el *bnfElement) {
+	allocTerm := func(el *abnfElement) {
 		key := termKey(el)
 		if _, ok := literals[key]; ok {
 			return
@@ -70,7 +70,7 @@ func emitGrammarSpec(grammar *bnfGrammar, opts *BnfConvertOptions) (*tabnas.Gram
 			matchOrder = append(matchOrder, name)
 		}
 	}
-	allocRegex := func(el *bnfElement) {
+	allocRegex := func(el *abnfElement) {
 		key := regexKey(el)
 		if _, ok := regexTokens[key]; ok {
 			return
@@ -181,7 +181,7 @@ type segment struct {
 	ref   string
 }
 
-func segmentize(alt bnfSequence, literals, regexTokens map[string]string) []segment {
+func segmentize(alt abnfSequence, literals, regexTokens map[string]string) []segment {
 	segs := []segment{}
 	current := segment{}
 	for _, el := range alt {
@@ -195,7 +195,7 @@ func segmentize(alt bnfSequence, literals, regexTokens map[string]string) []segm
 			segs = append(segs, current)
 			current = segment{}
 		default:
-			panic(fmt.Sprintf("bnf: internal — unexpected element kind '%s' in emitter", el.Kind))
+			panic(fmt.Sprintf("abnf: internal — unexpected element kind '%s' in emitter", el.Kind))
 		}
 	}
 	if len(current.terms) > 0 || len(segs) == 0 {
@@ -204,7 +204,7 @@ func segmentize(alt bnfSequence, literals, regexTokens map[string]string) []segm
 	return segs
 }
 
-func isSingleSegment(alt bnfSequence) bool {
+func isSingleSegment(alt abnfSequence) bool {
 	sawRef := false
 	for _, el := range alt {
 		switch el.Kind {
@@ -224,10 +224,10 @@ func isSingleSegment(alt bnfSequence) bool {
 	return true
 }
 
-func validateRefs(alt bnfSequence, knownRules map[string]bool, ruleName string) error {
+func validateRefs(alt abnfSequence, knownRules map[string]bool, ruleName string) error {
 	for _, el := range alt {
 		if el.Kind == kindRef && !knownRules[el.Name] {
-			return fmt.Errorf("bnf: rule '%s' references unknown rule '%s'", ruleName, el.Name)
+			return fmt.Errorf("abnf: rule '%s' references unknown rule '%s'", ruleName, el.Name)
 		}
 	}
 	return nil
@@ -251,7 +251,7 @@ func newRefRegistry() *refRegistry {
 func (rr *refRegistry) refMap() map[tabnas.FuncRef]any { return rr.refs }
 
 func (rr *refRegistry) registerAction(fn tabnas.AltAction) tabnas.FuncRef {
-	name := tabnas.FuncRef("@bnf_a" + strconv.Itoa(rr.counter))
+	name := tabnas.FuncRef("@abnf_a" + strconv.Itoa(rr.counter))
 	rr.counter++
 	rr.refs[name] = fn
 	return name
@@ -363,7 +363,7 @@ func sameMap(a, b map[string]any) bool {
 
 // ---- marks ---------------------------------------------------------
 
-func altDiscriminator(alt bnfSequence, literals, regexTokens map[string]string) string {
+func altDiscriminator(alt abnfSequence, literals, regexTokens map[string]string) string {
 	if len(alt) == 0 {
 		return "_"
 	}
@@ -392,7 +392,7 @@ type markTable struct {
 	byIndex map[int]string
 }
 
-func buildMarks(alts []bnfSequence, literals, regexTokens map[string]string) *markTable {
+func buildMarks(alts []abnfSequence, literals, regexTokens map[string]string) *markTable {
 	mt := &markTable{byIndex: map[int]string{}}
 	seen := map[string]int{}
 	for i, alt := range alts {
@@ -433,7 +433,7 @@ func captureChildFields(refs *refRegistry, ruleName, nodeKind string) map[string
 
 // ---- emitProduction ------------------------------------------------
 
-func emitProduction(prod *bnfProduction, grammar *bnfGrammar, literals, regexTokens map[string]string,
+func emitProduction(prod *abnfProduction, grammar *abnfGrammar, literals, regexTokens map[string]string,
 	knownRules map[string]bool, tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec,
 	firstSets map[string]map[string]bool, nullable map[string]bool, refs *refRegistry) error {
 
@@ -455,7 +455,7 @@ func emitProduction(prod *bnfProduction, grammar *bnfGrammar, literals, regexTok
 
 	if allSimple {
 		// Order non-empty alts first, empty alts last (stable).
-		ordered := []bnfSequence{}
+		ordered := []abnfSequence{}
 		for _, alt := range prod.Alts {
 			if len(alt) > 0 {
 				ordered = append(ordered, alt)
@@ -569,7 +569,7 @@ func emitProduction(prod *bnfProduction, grammar *bnfGrammar, literals, regexTok
 		} else {
 			firstTokens := firstOfAlt(alt, literals, regexTokens, firstSets, nullable)
 			if firstTokens == nil {
-				return fmt.Errorf("bnf: rule '%s' alternative %d is nullable "+
+				return fmt.Errorf("abnf: rule '%s' alternative %d is nullable "+
 					"but is not the only empty alt; FIRST set is ambiguous", prod.Name, i)
 			}
 			for _, tok := range sortedKeys(firstTokens) {
@@ -608,7 +608,7 @@ func emitProduction(prod *bnfProduction, grammar *bnfGrammar, literals, regexTok
 }
 
 // emitChain emits a (possibly single-step) chain of rules for one alt.
-func emitChain(headName string, alt bnfSequence, literals, regexTokens map[string]string,
+func emitChain(headName string, alt abnfSequence, literals, regexTokens map[string]string,
 	tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec, refs *refRegistry, headKind string) {
 
 	segs := segmentize(alt, literals, regexTokens)
@@ -648,7 +648,7 @@ func emitChain(headName string, alt bnfSequence, literals, regexTokens map[strin
 
 // ---- helpers -------------------------------------------------------
 
-func allRefs(alt bnfSequence) bool {
+func allRefs(alt abnfSequence) bool {
 	for _, el := range alt {
 		if el.Kind != kindRef {
 			return false
@@ -657,7 +657,7 @@ func allRefs(alt bnfSequence) bool {
 	return true
 }
 
-func anyHasRef(alts []bnfSequence) bool {
+func anyHasRef(alts []abnfSequence) bool {
 	for _, alt := range alts {
 		for _, el := range alt {
 			if el.Kind == kindRef {

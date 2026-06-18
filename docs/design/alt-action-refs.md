@@ -3,12 +3,12 @@
 | | |
 |---|---|
 | **Status** | **Shipped (TS + Go).** Engine (`$`-builtins, array-`a`, eager sentinel, `$`-reservation, schema-version gate) landed in `@tabnas/parser` for **both** the TS engine and the Go port; the compiler emits `v:1` and reserves `$`. A serialized, function-free grammar recognizes identically on both engines, pinned by shared cross-engine fixtures. |
-| **Scope** | `@tabnas/bnf` (ABNF → `GrammarSpec` compiler) + a proposed `@tabnas/parser` engine extension |
+| **Scope** | `@tabnas/abnf` (ABNF → `GrammarSpec` compiler) + a proposed `@tabnas/parser` engine extension |
 | **Repo** | This document lives in `tabnas/abnf` because that is where the feature is driven. The engine-side changes (the alt `m` field and the `fnref` resolver extension) ultimately belong in `tabnas/parser`. |
 
 ## 1. Problem
 
-The `@tabnas/bnf` compiler turns ABNF source into a tabnas `GrammarSpec`. The
+The `@tabnas/abnf` compiler turns ABNF source into a tabnas `GrammarSpec`. The
 grammar it emits is purely *structural* — it can match input and build a tree,
 but there is no way for a grammar author to attach **custom code** (semantic
 actions) to the productions, the way the hand-written programmatic grammars do.
@@ -220,7 +220,7 @@ add = NR [ PL add ]
 Actions supplied entirely out of band, keyed by the convention:
 
 ```js
-tn.bnf(src, {
+tn.abnf(src, {
   ref: {
     '@val:bo':   (r) => { r.node = 0 },                    // A: rule-phase hook
     '@add:o:NR': (r) => { r.parent.node += r.o[0].val },   // B: alt action, NR branch
@@ -236,7 +236,7 @@ tn.bnf(src, {
 
 > **Implemented** (closure mode). Marks are assigned from each alt's leading
 > discriminator (token name sans `#` / pushed rule / `_`), opt-in via
-> `bnfConvert(src,{marks:true})` and listed by CLI `--marks`. Verified demo:
+> `abnfConvert(src,{marks:true})` and listed by CLI `--marks`. Verified demo:
 > `op = "inc" / "dec"` with `{'@op:o:INC':…, '@op:o:DEC':…}`. See
 > [`implementation-diary.md`](./implementation-diary.md) §6.
 
@@ -263,7 +263,7 @@ splitting the rule into named sub-rules and using `@<rule>:<phase>` (which needs
 Determinism without a lookup is a guessing game, so two cheap supports make the
 feature usable:
 
-- **Emit marks into the CLI output.** `tabnas-bnf` already prints the compiled
+- **Emit marks into the CLI output.** `tabnas-abnf` already prints the compiled
   `GrammarSpec`; include `m` on each alt, and add a `--marks` listing:
   `rule → phase → mark → matched tokens → source span`. "Predict the mark"
   becomes "look it up."
@@ -274,7 +274,7 @@ feature usable:
 
 ## 6. Compilation mode: pure-recognition output and `$`-builtins
 
-A separate `@tabnas/bnf` operating mode — **compilation mode** — emits a
+A separate `@tabnas/abnf` operating mode — **compilation mode** — emits a
 serializable tabnas grammar (jsonic format) rather than installing a live one.
 The key realisation that makes this clean is that **functions are not needed to
 *represent* ABNF; they are only used to *shape the output tree*.**
@@ -369,10 +369,10 @@ the user's supplied ref map — and **never in the wire format**. "Does
 compilation need functions?" → no; it *references* named ones.
 
 > **Implemented.** The tree builtins (`@node$`, `@capture$`, `@bubble$`) and the
-> full pure-data mode now exist (CLI `--full`, `bnfCompile(src,
+> full pure-data mode now exist (CLI `--full`, `abnfCompile(src,
 > {recognition:false})`). A full-mode grammar reloaded on a bare engine builds
 > trees **deep-equal** to the live plugin (greet / pair / arith / probe), and
-> `bnfConvert(src,{builtins:true}).ref` is empty — zero closures reach the wire.
+> `abnfConvert(src,{builtins:true}).ref` is empty — zero closures reach the wire.
 > See [`implementation-diary.md`](./implementation-diary.md).
 
 ### 6.5 Caveats
@@ -394,19 +394,19 @@ compilation need functions?" → no; it *references* named ones.
 
 Implemented and verified end-to-end against a locally-built engine.
 
-**`@tabnas/bnf` (this repo):**
+**`@tabnas/abnf` (this repo):**
 
 - `toRecognitionSpec(spec)` — RegExp-preserving transform that drops the `ref`
   map and the `a`/`bo`/`bc` tree-building functions. It **refuses**
-  (`BnfCompileError`) any spec with *control* refs surviving the strip — i.e. a
+  (`AbnfCompileError`) any spec with *control* refs surviving the strip — i.e. a
   closure-mode probe dispatcher (§6.1/§6.2 boundary, enforced).
 - `toJsonic(value)` — relaxed-jsonic serialiser (unquoted identifier keys,
   single-quoted strings, `RegExp → @/source/flags`), plus a strict-JSON mode
   used for round-trip verification.
 - A `builtins` convert option that emits the probe dispatcher with `@probe…$`
-  refs + `k` config (§6.3) instead of closures; `bnfCompile` turns it on so
+  refs + `k` config (§6.3) instead of closures; `abnfCompile` turns it on so
   probe grammars serialise as **pure data**.
-- `bnfCompile(src, opts)` and a CLI `--compile` flag.
+- `abnfCompile(src, opts)` and a CLI `--compile` flag.
 
 **`@tabnas/parser` (engine — prototyped locally, captured in
 [`engine-prototype.patch`](./engine-prototype.patch)):**
@@ -418,22 +418,22 @@ Implemented and verified end-to-end against a locally-built engine.
   resolving, so a serialized function-free spec resolves `@probe…$` by name.
 
 Verified: an optional-prefix grammar (`R = [ A "@" ] A`) compiles with **no**
-`@bnf_` closures, only `@probe…$` builtins; round-trips (reparse → resolve →
+`@abnf_` closures, only `@probe…$` builtins; round-trips (reparse → resolve →
 install on a bare engine) and recognises correctly (`ab`, `a@b`, `a` accept;
-`a@`, `@` reject). Full suites green: engine 169/169, `@tabnas/bnf` 122 pass /
+`a@`, `@` reject). Full suites green: engine 169/169, `@tabnas/abnf` 122 pass /
 5 skipped.
 
 **Tree-builder generalisation (§6.4) — now implemented.** `@node$`/`@capture$`/
 `@bubble$` ship in the engine builtins; the converter's `builtins` option routes
 *all* tree closures through them, so a full grammar serialises as pure data and
 round-trips to identical trees (verified greet / pair / arith / probe).
-`bnfCompile` gained `recognition:false` and the CLI a `--full` flag;
+`abnfCompile` gained `recognition:false` and the CLI a `--full` flag;
 `toPureSpec` emits the full AST grammar.
 
-**`m`-mark user actions (§3) — now implemented.** `bnfConvert(src,{marks:true})`
-stamps user-rule alts; `tn.bnf(src,{actions})` binds `@<rule>:o|c:<mark>` (alt)
+**`m`-mark user actions (§3) — now implemented.** `abnfConvert(src,{marks:true})`
+stamps user-rule alts; `tn.abnf(src,{actions})` binds `@<rule>:o|c:<mark>` (alt)
 and `@<rule>:bo|ao|bc|ac` (phase) user functions, composed after the compiler's
-own action (`attachActions`, with `BnfActionError` validation). CLI `--marks`
+own action (`attachActions`, with `AbnfActionError` validation). CLI `--marks`
 lists them. Works in **both** closure and `builtins` (pure-data) mode via the
 engine's array-`a` composition; `attachActionSlots` injects load-time slots so a
 serialized grammar can carry user-action hooks bound by name at load.
@@ -478,7 +478,7 @@ A full engineer's log — contracts, gotchas, and a productionising checklist fo
    extended cleanly, do we fall back to an ordinal suffix (`NR#1`) or error?
 4. **Engine vs compiler split.** The `m` field + wrapper composition + `:`-ref
    parsing belong in `@tabnas/parser`; mark derivation + CLI `--marks` belong in
-   `@tabnas/bnf`. Confirm the seam and whether `:`-separated refs should be the
+   `@tabnas/abnf`. Confirm the seam and whether `:`-separated refs should be the
    engine's canonical form (with `-` kept as a deprecated alias).
 </content>
 </invoke>

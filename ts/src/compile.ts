@@ -22,7 +22,7 @@
 import type { GrammarSpec } from '@tabnas/parser'
 import { BUILTIN_SCHEMA_VERSION } from '@tabnas/parser'
 
-import { bnf as bnfConvert, BnfConvertOptions } from './converter'
+import { abnf as abnfConvert, AbnfConvertOptions } from './converter'
 
 
 // Hook fields whose string value is a `@`-ref into `spec.ref`. These
@@ -36,11 +36,11 @@ const TREE_BUILTINS = new Set(['@node$', '@capture$', '@bubble$'])
 const TREE_CONFIG_KEYS = ['node$', 'capture$']
 
 
-export class BnfCompileError extends Error {
+export class AbnfCompileError extends Error {
   rules: string[]
   constructor(message: string, rules: string[]) {
     super(message)
-    this.name = 'BnfCompileError'
+    this.name = 'AbnfCompileError'
     this.rules = rules
   }
 }
@@ -116,7 +116,7 @@ function controlRefRules(
 
 
 // Strip a converted spec down to a function-free recognition grammar.
-// Throws `BnfCompileError` for grammars whose control logic is still
+// Throws `AbnfCompileError` for grammars whose control logic is still
 // closures (i.e. a probe dispatcher converted without `builtins`).
 export function toRecognitionSpec(spec: GrammarSpec): GrammarSpec {
   const ref: Record<string, unknown> = (spec as any).ref ?? {}
@@ -124,8 +124,8 @@ export function toRecognitionSpec(spec: GrammarSpec): GrammarSpec {
 
   const offenders = controlRefRules(spec, isRef)
   if (offenders.length > 0) {
-    throw new BnfCompileError(
-      'bnf: grammar needs control functions (probe / unbounded ' +
+    throw new AbnfCompileError(
+      'abnf: grammar needs control functions (probe / unbounded ' +
       'lookahead) and cannot be emitted as a pure recognition grammar; ' +
       'recompile with `builtins: true`. Offending rule(s): ' +
       offenders.join(', '),
@@ -151,8 +151,8 @@ export function toPureSpec(spec: GrammarSpec): GrammarSpec {
   const ref: Record<string, unknown> = (spec as any).ref ?? {}
   const closures = Object.keys(ref)
   if (closures.length > 0) {
-    throw new BnfCompileError(
-      'bnf: spec still contains closures; convert with `builtins: true` ' +
+    throw new AbnfCompileError(
+      'abnf: spec still contains closures; convert with `builtins: true` ' +
       'for pure-data output. Stray ref(s): ' + closures.slice(0, 3).join(', '),
       [],
     )
@@ -223,10 +223,10 @@ export function toJsonic(value: any, opts: JsonicOptions = {}): string {
 
 // ---- User semantic actions (the `m`-mark feature) -----------------
 
-export class BnfActionError extends Error {
+export class AbnfActionError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = 'BnfActionError'
+    this.name = 'AbnfActionError'
   }
 }
 
@@ -272,33 +272,33 @@ function resolveTarget(
   // action ref may not contain it. The engine enforces the same on
   // spec.ref keys at load — fail early here with a clearer message.
   if (key.includes('$')) {
-    throw new BnfActionError(
-      `bnf: '$' is reserved for engine builtins; user action ref ` +
+    throw new AbnfActionError(
+      `abnf: '$' is reserved for engine builtins; user action ref ` +
       `'${key}' may not contain '$'`)
   }
   const m = /^@([^:]+):(.+)$/.exec(key)
   if (!m) {
-    throw new BnfActionError(
-      `bnf: malformed action ref '${key}' ` +
+    throw new AbnfActionError(
+      `abnf: malformed action ref '${key}' ` +
       `(expected @rule:phase or @rule:o|c:mark)`)
   }
   const rule = m[1]
   const sel = m[2]
   const rules = (spec.rule ?? {}) as any
   if (!rules[rule]) {
-    throw new BnfActionError(
-      `bnf: action ref '${key}' targets unknown rule '${rule}'`)
+    throw new AbnfActionError(
+      `abnf: action ref '${key}' targets unknown rule '${rule}'`)
   }
   if (PHASES.has(sel)) return { phase: sel }
 
   const pm = /^([oc]):(.+)$/.exec(sel)
-  if (!pm) throw new BnfActionError(`bnf: malformed action ref '${key}'`)
+  if (!pm) throw new AbnfActionError(`abnf: malformed action ref '${key}'`)
   const phase = 'o' === pm[1] ? 'open' : 'close'
   const mark = pm[2]
   const alts = altListOf(rules[rule][phase]).filter((a) => a && a.m === mark)
   if (0 === alts.length) {
-    throw new BnfActionError(
-      `bnf: action ref '${key}' matches no ${phase} alt with mark ` +
+    throw new AbnfActionError(
+      `abnf: action ref '${key}' matches no ${phase} alt with mark ` +
       `'${mark}' in rule '${rule}'`)
   }
   return { alts, rule }
@@ -309,7 +309,7 @@ function resolveTarget(
 // function or array of functions, run *after* the compiler's own action
 // in attachment order. Works in both closure and `builtins` mode — alt
 // actions are injected as the engine's array-`a` form (the alt's own
-// action, builtin or closure, runs first). Throws `BnfActionError` for
+// action, builtin or closure, runs first). Throws `AbnfActionError` for
 // a ref matching no rule / hook / marked alt.
 export function attachActions(spec: GrammarSpec, actions: ActionsMap): GrammarSpec {
   const ref: Record<string, any> =
@@ -331,7 +331,7 @@ export function attachActions(spec: GrammarSpec, actions: ActionsMap): GrammarSp
     }
 
     for (const alt of target.alts) {
-      const userRef = `@bnf_user${counter++}`
+      const userRef = `@abnf_user${counter++}`
       ref[userRef] = seqActions(fns)
       alt.a = appendAction(alt.a, userRef)
     }
@@ -348,8 +348,8 @@ export function attachActionSlots(spec: GrammarSpec, refNames: string[]): Gramma
   for (const name of refNames) {
     const target = resolveTarget(spec, name)
     if ('phase' in target) {
-      throw new BnfActionError(
-        `bnf: slot '${name}' is a rule-phase ref; slots are for ` +
+      throw new AbnfActionError(
+        `abnf: slot '${name}' is a rule-phase ref; slots are for ` +
         `@rule:o|c:mark alt actions`)
     }
     for (const alt of target.alts) alt.a = appendAction(alt.a, name)
@@ -378,7 +378,7 @@ export function markListing(spec: GrammarSpec): string {
 }
 
 
-export type BnfCompileOptions = BnfConvertOptions & JsonicOptions & {
+export type AbnfCompileOptions = AbnfConvertOptions & JsonicOptions & {
   // Default `true`: emit a pure *recognition* grammar (tree-building
   // dropped). Set `false` to emit the full AST grammar with tree
   // `$`-builtins retained — still pure data, builds `{rule,src,kids}`.
@@ -389,8 +389,8 @@ export type BnfCompileOptions = BnfConvertOptions & JsonicOptions & {
 // Compile ABNF source into a pure-data tabnas grammar as jsonic text.
 // Always converts with `builtins: true` so probe dispatch and tree
 // building serialise as `@…$` builtin refs (no closures).
-export function bnfCompile(src: string, opts: BnfCompileOptions = {}): string {
-  const spec = bnfConvert(src,
+export function abnfCompile(src: string, opts: AbnfCompileOptions = {}): string {
+  const spec = abnfConvert(src,
     { start: opts.start, tag: opts.tag, builtins: true, marks: true })
   const out = (false === opts.recognition)
     ? toPureSpec(spec)

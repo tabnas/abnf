@@ -1,14 +1,13 @@
 {
-  "name": "@tabnas/bnf",
+  "name": "@tabnas/abnf",
   "version": "0.1.0",
-  "main": "dist/bnf.js",
+  "main": "dist/abnf.js",
   "type": "commonjs",
-  "types": "dist/bnf.d.ts",
-  "description": "BNF / ABNF grammar compiler for the tabnas parser.",
-  "homepage": "https://github.com/rjrodger/tabnas-bnf",
+  "types": "dist/abnf.d.ts",
+  "description": "ABNF grammar compiler for the tabnas parser.",
+  "homepage": "https://github.com/tabnas/abnf",
   "keywords": [
     "tabnas",
-    "bnf",
     "abnf",
     "grammar",
     "parser",
@@ -17,7 +16,7 @@
   "author": "Richard Rodger (http://richardrodger.com)",
   "repository": {
     "type": "git",
-    "url": "git://github.com/rjrodger/tabnas-bnf.git"
+    "url": "git://github.com/tabnas/abnf.git"
   },
   "scripts": {
     "test": "node --enable-source-maps --test test/**/*.test.js",
@@ -33,10 +32,10 @@
     "LICENSE"
   ],
   "bin": {
-    "tabnas-bnf": "bin/tabnas-bnf"
+    "tabnas-abnf": "bin/tabnas-abnf"
   },
   "exports": {
-    ".": "./dist/bnf.js"
+    ".": "./dist/abnf.js"
   },
   "peerDependencies": {
     "@tabnas/parser": "file:../../parser/ts"

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
 // actions.go — user semantic actions (the `m`-mark feature). The Go
 // port of the action-attachment half of ts/src/compile.ts.
@@ -18,10 +18,10 @@ import (
 	tabnas "github.com/tabnas/parser/go"
 )
 
-// BnfActionError is raised for a malformed or unresolvable action ref.
-type BnfActionError struct{ Message string }
+// AbnfActionError is raised for a malformed or unresolvable action ref.
+type AbnfActionError struct{ Message string }
 
-func (e *BnfActionError) Error() string { return e.Message }
+func (e *AbnfActionError) Error() string { return e.Message }
 
 // ActionFn is a user semantic action.
 type ActionFn = tabnas.AltAction
@@ -70,27 +70,27 @@ type targetResult struct {
 
 func resolveTarget(spec *tabnas.GrammarSpec, key string) (*targetResult, error) {
 	if strings.Contains(key, "$") {
-		return nil, &BnfActionError{Message: fmt.Sprintf(
-			"bnf: '$' is reserved for engine builtins; user action ref '%s' may not contain '$'", key)}
+		return nil, &AbnfActionError{Message: fmt.Sprintf(
+			"abnf: '$' is reserved for engine builtins; user action ref '%s' may not contain '$'", key)}
 	}
 	m := actionRefRe.FindStringSubmatch(key)
 	if m == nil {
-		return nil, &BnfActionError{Message: fmt.Sprintf(
-			"bnf: malformed action ref '%s' (expected @rule:phase or @rule:o|c:mark)", key)}
+		return nil, &AbnfActionError{Message: fmt.Sprintf(
+			"abnf: malformed action ref '%s' (expected @rule:phase or @rule:o|c:mark)", key)}
 	}
 	rule := m[1]
 	sel := m[2]
 	rspec, ok := spec.Rule[rule]
 	if !ok || rspec == nil {
-		return nil, &BnfActionError{Message: fmt.Sprintf(
-			"bnf: action ref '%s' targets unknown rule '%s'", key, rule)}
+		return nil, &AbnfActionError{Message: fmt.Sprintf(
+			"abnf: action ref '%s' targets unknown rule '%s'", key, rule)}
 	}
 	if phaseSet[sel] {
 		return &targetResult{phase: sel}, nil
 	}
 	pm := ocRe.FindStringSubmatch(sel)
 	if pm == nil {
-		return nil, &BnfActionError{Message: fmt.Sprintf("bnf: malformed action ref '%s'", key)}
+		return nil, &AbnfActionError{Message: fmt.Sprintf("abnf: malformed action ref '%s'", key)}
 	}
 	phase := "close"
 	var alts any
@@ -108,8 +108,8 @@ func resolveTarget(spec *tabnas.GrammarSpec, key string) (*targetResult, error) 
 		}
 	}
 	if len(matched) == 0 {
-		return nil, &BnfActionError{Message: fmt.Sprintf(
-			"bnf: action ref '%s' matches no %s alt with mark '%s' in rule '%s'", key, phase, mark, rule)}
+		return nil, &AbnfActionError{Message: fmt.Sprintf(
+			"abnf: action ref '%s' matches no %s alt with mark '%s' in rule '%s'", key, phase, mark, rule)}
 	}
 	return &targetResult{alts: matched, rule: rule}, nil
 }
@@ -159,7 +159,7 @@ func AttachActions(spec *tabnas.GrammarSpec, actions ActionsMap) error {
 			continue
 		}
 		for _, alt := range target.alts {
-			userRef := tabnas.FuncRef(fmt.Sprintf("@bnf_user%d", counter))
+			userRef := tabnas.FuncRef(fmt.Sprintf("@abnf_user%d", counter))
 			counter++
 			spec.Ref[userRef] = seqActions(fns)
 			alt.A = appendAction(alt.A, string(userRef))
@@ -177,8 +177,8 @@ func AttachActionSlots(spec *tabnas.GrammarSpec, refNames []string) error {
 			return err
 		}
 		if target.phase != "" {
-			return &BnfActionError{Message: fmt.Sprintf(
-				"bnf: slot '%s' is a rule-phase ref; slots are for @rule:o|c:mark alt actions", name)}
+			return &AbnfActionError{Message: fmt.Sprintf(
+				"abnf: slot '%s' is a rule-phase ref; slots are for @rule:o|c:mark alt actions", name)}
 		}
 		for _, alt := range target.alts {
 			alt.A = appendAction(alt.A, name)

@@ -1,12 +1,12 @@
 /* Copyright (c) 2025 Richard Rodger and other contributors, MIT License */
 
-/*  tabnas-bnf-cli.ts
- *  CLI wrapper for the BNF -> tabnas grammar spec converter.
+/*  tabnas-abnf-cli.ts
+ *  CLI wrapper for the ABNF -> tabnas grammar spec converter.
  */
 
 import Fs from 'node:fs'
 
-import { bnfConvert, bnfCompile, markListing, BnfCompileError } from '../bnf'
+import { abnfConvert, abnfCompile, markListing, AbnfCompileError } from '../abnf'
 import { Tabnas } from '@tabnas/parser'
 
 
@@ -80,11 +80,11 @@ export async function run(argv: string[], console: Console) {
     src += await readStdin(console)
   }
 
-  const spec = bnfConvert(src, { start: args.start, tag: args.tag })
+  const spec = abnfConvert(src, { start: args.start, tag: args.tag })
 
   // Marks mode: list the user-action marks the compiler assigns.
   if (args.marks) {
-    console.log(markListing(bnfConvert(src, {
+    console.log(markListing(abnfConvert(src, {
       start: args.start, tag: args.tag, marks: true,
     })))
     return
@@ -96,14 +96,14 @@ export async function run(argv: string[], console: Console) {
   // refused until those ship as engine `$`-builtins.
   if (args.compile) {
     try {
-      console.log(bnfCompile(src, {
+      console.log(abnfCompile(src, {
         start: args.start,
         tag: args.tag,
         indent: args.space || 2,
         recognition: !args.full,
       }))
     } catch (e: any) {
-      if (e instanceof BnfCompileError) {
+      if (e instanceof AbnfCompileError) {
         console.error(e.message)
         process.exitCode = 1
         return
@@ -127,7 +127,7 @@ export async function run(argv: string[], console: Console) {
       samples.push({ label: inp, input: inp })
     }
 
-    // Bare engine: the BNF spec we're about to install supplies the
+    // Bare engine: the ABNF spec we're about to install supplies the
     // grammar, so we don't need any other plugin.
     const j = new Tabnas()
     j.grammar(spec)
@@ -169,20 +169,20 @@ async function readStdin(console: Console): Promise<string> {
 
 function help(console: Console) {
   console.log(`
-tabnas-bnf: convert a BNF grammar into a tabnas grammar spec.
+tabnas-abnf: convert an ABNF grammar into a tabnas grammar spec.
 
-Usage: tabnas-bnf <args> [<bnf-source>]*
+Usage: tabnas-abnf <args> [<abnf-source>]*
 
 Arguments:
-  -                      Read BNF source from stdin.
-  --file <path>          Read BNF source from <path> (repeatable).
+  -                      Read ABNF source from stdin.
+  --file <path>          Read ABNF source from <path> (repeatable).
   -f <path>
 
   --start <name>         Set the start rule (defaults to the first
   -s <name>                production).
 
   --tag <name>           Group tag applied to every emitted alt.
-  -t <name>                Defaults to \`bnf\`.
+  -t <name>                Defaults to \`abnf\`.
 
   --compact              Emit single-line JSON (default indent is 2).
   -c
@@ -214,9 +214,9 @@ Grammar dialect:
   double-quoted literals. For example: \`greet = "hi" / "hello"\`.
 
 Examples:
-  > tabnas-bnf 'greet = "hi" / "hello"'
-  > tabnas-bnf -f grammar.bnf
-  > echo 'g = "a"' | tabnas-bnf -
-  > tabnas-bnf -f grammar.bnf --parse 'hi'
+  > tabnas-abnf 'greet = "hi" / "hello"'
+  > tabnas-abnf -f grammar.abnf
+  > echo 'g = "a"' | tabnas-abnf -
+  > tabnas-abnf -f grammar.abnf --parse 'hi'
 `)
 }

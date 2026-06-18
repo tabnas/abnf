@@ -1,4 +1,4 @@
-package abnf
+package tabnasabnf
 
 import (
 	"encoding/json"
@@ -58,12 +58,12 @@ func recognisesJsonic(t *testing.T, jsonicText, input string) bool {
 func TestCompileRecognitionStrict(t *testing.T) {
 	for _, tc := range recognitionCases {
 		t.Run(tc.name, func(t *testing.T) {
-			text, err := BnfCompile(tc.src, &BnfCompileOptions{Strict: true})
+			text, err := AbnfCompile(tc.src, &AbnfCompileOptions{Strict: true})
 			if err != nil {
-				t.Fatalf("BnfCompile: %v", err)
+				t.Fatalf("AbnfCompile: %v", err)
 			}
 			// No function references / live functions in the text.
-			if strings.Contains(text, "@bnf_a") {
+			if strings.Contains(text, "@abnf_a") {
 				t.Errorf("recognition spec leaked a closure ref:\n%s", text)
 			}
 			if strings.Contains(text, "@node$") || strings.Contains(text, "@capture$") ||
@@ -85,7 +85,7 @@ func TestCompileRecognitionStrict(t *testing.T) {
 }
 
 func TestCompileRelaxedFormat(t *testing.T) {
-	text, err := BnfCompile(recognitionCases[0].src, nil)
+	text, err := AbnfCompile(recognitionCases[0].src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestCompileRelaxedFormat(t *testing.T) {
 func TestCompileEagerRegexSerialisation(t *testing.T) {
 	// "hi" is case-insensitive -> an eager regex match token, emitted as
 	// @~/^hi/i.
-	text, err := BnfCompile(`greet = "hi"`, nil)
+	text, err := AbnfCompile(`greet = "hi"`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestCompileEagerRegexSerialisation(t *testing.T) {
 
 func TestCompileFullKeepsTreeBuiltins(t *testing.T) {
 	rec := false
-	full, err := BnfCompile(`pair = "a" "b"`, &BnfCompileOptions{Recognition: &rec})
+	full, err := AbnfCompile(`pair = "a" "b"`, &AbnfCompileOptions{Recognition: &rec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestCompileFullKeepsTreeBuiltins(t *testing.T) {
 		t.Errorf("full mode should retain @node$:\n%s", full)
 	}
 	recT := true
-	recog, err := BnfCompile(`pair = "a" "b"`, &BnfCompileOptions{Recognition: &recT})
+	recog, err := AbnfCompile(`pair = "a" "b"`, &AbnfCompileOptions{Recognition: &recT})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,9 +155,9 @@ func TestCompileFullModeParity(t *testing.T) {
 			// Pure-data tree from the compiled full grammar (strict JSON
 			// so it round-trips via encoding/json).
 			rec := false
-			text, err := BnfCompile(tc.src, &BnfCompileOptions{Recognition: &rec, Strict: true})
+			text, err := AbnfCompile(tc.src, &AbnfCompileOptions{Recognition: &rec, Strict: true})
 			if err != nil {
-				t.Fatalf("BnfCompile: %v", err)
+				t.Fatalf("AbnfCompile: %v", err)
 			}
 			j := loadJsonicSpec(t, text)
 			pureTree, err := j.Parse(tc.input)
@@ -178,7 +178,7 @@ func TestCompileBuiltinsNoClosures(t *testing.T) {
 		`pair = "a" "b"`,
 		"R = [ A \"@\" ] A\nA = 1*ALPHA",
 	} {
-		spec, err := Bnf(tc, &BnfConvertOptions{Builtins: true})
+		spec, err := Abnf(tc, &AbnfConvertOptions{Builtins: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,14 +193,14 @@ func TestCompileBuiltinsNoClosures(t *testing.T) {
 }
 
 func TestToPureRejectsClosureSpec(t *testing.T) {
-	spec, err := Bnf(`greet = "hi"`, nil) // closure mode (no builtins)
+	spec, err := Abnf(`greet = "hi"`, nil) // closure mode (no builtins)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := toPureData(spec); err == nil {
 		t.Errorf("toPureData should reject a closure spec")
-	} else if _, ok := err.(*BnfCompileError); !ok {
-		t.Errorf("expected *BnfCompileError, got %T", err)
+	} else if _, ok := err.(*AbnfCompileError); !ok {
+		t.Errorf("expected *AbnfCompileError, got %T", err)
 	}
 }
 

@@ -1,4 +1,4 @@
-package abnf
+package tabnasabnf
 
 import (
 	"regexp"
@@ -39,7 +39,7 @@ func TestProbeEmptyInput(t *testing.T) {
 // ---- emitter shape -------------------------------------------------
 
 func TestProbeEmitterShape(t *testing.T) {
-	spec, err := Bnf(probeGrammar, nil)
+	spec, err := Abnf(probeGrammar, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestProbeEmitterShape(t *testing.T) {
 func TestProbeNoAmbiguityLeftAlone(t *testing.T) {
 	// The optional's body ends with a terminal "!" that can't be in the
 	// tail's (digit) vocabulary, so FIRST-set dispatch suffices.
-	spec, err := Bnf("top = [ X \"!\" ] Y\nX   = *( ALPHA )\nY   = *DIGIT", nil)
+	spec, err := Abnf("top = [ X \"!\" ] Y\nX   = *( ALPHA )\nY   = *DIGIT", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestProbeNoAmbiguityLeftAlone(t *testing.T) {
 }
 
 func TestProbeVocabExcludesDisambiguator(t *testing.T) {
-	spec, err := Bnf("top = [ X \"@\" ] Y\nX   = *( ALPHA / \"@\" )\nY   = *( ALPHA )", nil)
+	spec, err := Abnf("top = [ X \"@\" ] Y\nX   = *( ALPHA / \"@\" )\nY   = *( ALPHA )", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

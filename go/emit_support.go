@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
 // emit_support.go — map->AltSpec conversion, FIRST-set computation,
 // literal-prefix / k-prefix enumeration, and the probe-dispatch emitter.
@@ -74,7 +74,7 @@ func mapsToAlts(ms []map[string]any) []*tabnas.GrammarAltSpec {
 
 // ---- FIRST sets ----------------------------------------------------
 
-func computeFirstSets(grammar *bnfGrammar, literals, regexTokens map[string]string) (map[string]map[string]bool, map[string]bool) {
+func computeFirstSets(grammar *abnfGrammar, literals, regexTokens map[string]string) (map[string]map[string]bool, map[string]bool) {
 	firstSets := map[string]map[string]bool{}
 	nullable := map[string]bool{}
 	for _, p := range grammar.Productions {
@@ -112,7 +112,7 @@ func computeFirstSets(grammar *bnfGrammar, literals, regexTokens map[string]stri
 						}
 						continue
 					}
-					panic("bnf: internal — unexpected kind in FIRST: " + string(el.Kind))
+					panic("abnf: internal — unexpected kind in FIRST: " + string(el.Kind))
 				}
 				if altNullable && !nullable[prod.Name] {
 					nullable[prod.Name] = true
@@ -124,7 +124,7 @@ func computeFirstSets(grammar *bnfGrammar, literals, regexTokens map[string]stri
 	return firstSets, nullable
 }
 
-func tokenForTerminal(el *bnfElement, literals, regexTokens map[string]string) string {
+func tokenForTerminal(el *abnfElement, literals, regexTokens map[string]string) string {
 	if el.Kind == kindTerm {
 		return literals[termKey(el)]
 	}
@@ -133,7 +133,7 @@ func tokenForTerminal(el *bnfElement, literals, regexTokens map[string]string) s
 
 // firstOfAlt returns the FIRST set for a specific alt, or nil if the alt
 // is nullable.
-func firstOfAlt(alt bnfSequence, literals, regexTokens map[string]string,
+func firstOfAlt(alt abnfSequence, literals, regexTokens map[string]string,
 	firstSets map[string]map[string]bool, nullable map[string]bool) map[string]bool {
 	out := map[string]bool{}
 	for _, el := range alt {
@@ -150,7 +150,7 @@ func firstOfAlt(alt bnfSequence, literals, regexTokens map[string]string,
 			}
 			continue
 		}
-		panic("bnf: internal — unexpected kind in firstOfAlt: " + string(el.Kind))
+		panic("abnf: internal — unexpected kind in firstOfAlt: " + string(el.Kind))
 	}
 	return nil
 }
@@ -162,7 +162,7 @@ type prefixPath struct {
 	done   bool
 }
 
-func altPrefixesRaw(alt bnfSequence, grammar *bnfGrammar, literals, regexTokens map[string]string,
+func altPrefixesRaw(alt abnfSequence, grammar *abnfGrammar, literals, regexTokens map[string]string,
 	maxK int, visited map[string]bool) []prefixPath {
 	paths := []prefixPath{{tokens: []string{}, done: false}}
 
@@ -219,7 +219,7 @@ func altPrefixesRaw(alt bnfSequence, grammar *bnfGrammar, literals, regexTokens 
 	return paths
 }
 
-func altPrefixes(alt bnfSequence, grammar *bnfGrammar, literals, regexTokens map[string]string, maxK int) [][]string {
+func altPrefixes(alt abnfSequence, grammar *abnfGrammar, literals, regexTokens map[string]string, maxK int) [][]string {
 	raw := altPrefixesRaw(alt, grammar, literals, regexTokens, maxK, map[string]bool{})
 	seen := map[string]bool{}
 	out := [][]string{}
@@ -233,7 +233,7 @@ func altPrefixes(alt bnfSequence, grammar *bnfGrammar, literals, regexTokens map
 	return out
 }
 
-func findProd(grammar *bnfGrammar, name string) *bnfProduction {
+func findProd(grammar *abnfGrammar, name string) *abnfProduction {
 	for _, p := range grammar.Productions {
 		if p.Name == name {
 			return p
@@ -244,7 +244,7 @@ func findProd(grammar *bnfGrammar, name string) *bnfProduction {
 
 // ---- probe-dispatch emitters ---------------------------------------
 
-func emitProbeHelper(prod *bnfProduction, tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec,
+func emitProbeHelper(prod *abnfProduction, tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec,
 	literals, regexTokens map[string]string) {
 	elems := prod.ProbeHelper.VocabElements
 	opens := []map[string]any{}
@@ -264,7 +264,7 @@ func emitProbeHelper(prod *bnfProduction, tag string, ruleSpec map[string]*tabna
 	ruleSpec[prod.Name] = &tabnas.GrammarRuleSpec{Open: mapsToAlts(opens)}
 }
 
-func emitProbeDispatch(prod *bnfProduction, tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec,
+func emitProbeDispatch(prod *abnfProduction, tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec,
 	refs *refRegistry, literals, regexTokens map[string]string, useBuiltins bool) {
 	pd := prod.ProbeDisp
 	var disambiguatorToken string
@@ -274,7 +274,7 @@ func emitProbeDispatch(prod *bnfProduction, tag string, ruleSpec map[string]*tab
 		disambiguatorToken = regexTokens[regexKey(pd.Disambiguator)]
 	}
 	if disambiguatorToken == "" {
-		panic("bnf: probe-dispatch rule '" + prod.Name + "' has unresolvable disambiguator")
+		panic("abnf: probe-dispatch rule '" + prod.Name + "' has unresolvable disambiguator")
 	}
 
 	bubbleFields := refs.bubble()
@@ -340,7 +340,7 @@ func emitProbeDispatch(prod *bnfProduction, tag string, ruleSpec map[string]*tab
 }
 
 func (rr *refRegistry) registerCond(fn tabnas.AltCond) tabnas.FuncRef {
-	name := tabnas.FuncRef("@bnf_a" + itoa(rr.counter))
+	name := tabnas.FuncRef("@abnf_a" + itoa(rr.counter))
 	rr.counter++
 	rr.refs[name] = fn
 	return name

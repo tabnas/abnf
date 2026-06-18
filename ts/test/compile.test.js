@@ -18,24 +18,24 @@ const assert = require('node:assert')
 const { Tabnas, BUILTIN_SCHEMA_VERSION } = require('@tabnas/parser')
 const { resolveFuncRefs } = require('@tabnas/parser/utility')
 const {
-  bnf: bnfPlugin,
-  bnfConvert,
-  bnfCompile,
+  abnf: abnfPlugin,
+  abnfConvert,
+  abnfCompile,
   toRecognitionSpec,
   toPureSpec,
   toJsonic,
   attachActions,
   attachActionSlots,
   markListing,
-  BnfCompileError,
-  BnfActionError,
+  AbnfCompileError,
+  AbnfActionError,
 } = require('..')
 
 
 // Parse `input` with the live plugin (closures) — the reference tree.
 function liveTree(src, input) {
-  const tn = new Tabnas({ plugins: [bnfPlugin] })
-  tn.bnf(src)
+  const tn = new Tabnas({ plugins: [abnfPlugin] })
+  tn.abnf(src)
   return tn.parse(input)
 }
 
@@ -43,7 +43,7 @@ function liveTree(src, input) {
 // `$`-builtins reconstructed by the engine).
 function pureTree(src, input) {
   const spec = resolveFuncRefs(JSON.parse(
-    bnfCompile(src, { recognition: false, strict: true })))
+    abnfCompile(src, { recognition: false, strict: true })))
   const tn = new Tabnas()
   tn.grammar(spec)
   return tn.parse(input)
@@ -109,7 +109,7 @@ const RECOGNITION_CASES = [
 describe('compile: pure recognition grammar', () => {
   for (const tc of RECOGNITION_CASES) {
     it(`${tc.name}: spec is function-free and still recognises`, () => {
-      const spec = bnfConvert(tc.src)
+      const spec = abnfConvert(tc.src)
       const refKeys = new Set(Object.keys(spec.ref || {}))
       assert.ok(refKeys.size > 0, 'sanity: converted spec has refs')
 
@@ -138,7 +138,7 @@ describe('compile: pure recognition grammar', () => {
 
 describe('compile: jsonic serialisation', () => {
   it('strict mode round-trips into a working grammar', () => {
-    const spec = bnfConvert(RECOGNITION_CASES[0].src)
+    const spec = abnfConvert(RECOGNITION_CASES[0].src)
     const rspec = toRecognitionSpec(spec)
     const text = toJsonic(rspec, { strict: true })
 
@@ -154,7 +154,7 @@ describe('compile: jsonic serialisation', () => {
   })
 
   it('relaxed mode uses bare identifier keys and single quotes', () => {
-    const text = bnfCompile(RECOGNITION_CASES[0].src)
+    const text = abnfCompile(RECOGNITION_CASES[0].src)
     assert.match(text, /\n\s*open:/, 'bare identifier key (open:)')
     assert.match(text, /'#HI'|'#HELLO'/, 'single-quoted token strings')
     assert.doesNotMatch(text, /"open"/, 'keys are not double-quoted')
@@ -162,7 +162,7 @@ describe('compile: jsonic serialisation', () => {
 
   it('emits eager RegExp match tokens as @~/source/flags', () => {
     // "hi" is case-insensitive -> an eager regex match token.
-    const text = bnfCompile('greet = "hi"')
+    const text = abnfCompile('greet = "hi"')
     assert.match(text, /'@~\/\^hi\/i'/)
   })
 })
@@ -188,7 +188,7 @@ describe('compile: full pure-data AST mode', () => {
     })
 
     it(`${name}: builtins conversion leaves no closures`, () => {
-      const spec = bnfConvert(src, { builtins: true })
+      const spec = abnfConvert(src, { builtins: true })
       assert.deepStrictEqual(Object.keys(spec.ref || {}), [],
         'ref map must be empty — every action is a $-builtin')
     })
@@ -196,10 +196,10 @@ describe('compile: full pure-data AST mode', () => {
 
   it('full mode keeps tree builtins; recognition mode drops them', () => {
     const src = 'pair = "a" "b"'
-    const full = bnfCompile(src, { recognition: false })
+    const full = abnfCompile(src, { recognition: false })
     assert.match(full, /@node\$/, 'full mode retains @node$')
 
-    const recog = bnfCompile(src, { recognition: true })
+    const recog = abnfCompile(src, { recognition: true })
     assert.doesNotMatch(recog, /@node\$|@capture\$|@bubble\$/,
       'recognition mode drops all tree builtins')
     assert.doesNotMatch(recog, /node\$|capture\$/,
@@ -208,8 +208,8 @@ describe('compile: full pure-data AST mode', () => {
 
   it('toPureSpec rejects a closure spec (needs builtins:true)', () => {
     assert.throws(
-      () => toPureSpec(bnfConvert('greet = "hi"')),
-      (e) => e instanceof BnfCompileError,
+      () => toPureSpec(abnfConvert('greet = "hi"')),
+      (e) => e instanceof AbnfCompileError,
     )
   })
 })
@@ -218,7 +218,7 @@ describe('compile: full pure-data AST mode', () => {
 describe('compile: eager match tokens', () => {
   it('preserves eager$ across serialization round-trip', () => {
     const spec = resolveFuncRefs(JSON.parse(
-      bnfCompile('greet = "hi" / "hello"', { recognition: false, strict: true })))
+      abnfCompile('greet = "hi" / "hello"', { recognition: false, strict: true })))
     const hi = spec.options.match.token['#HI']
     assert.ok(hi instanceof RegExp, 'reconstructed as RegExp')
     assert.strictEqual(hi.eager$, true, 'eager$ flag survives')
@@ -232,9 +232,9 @@ describe('compile: eager match tokens', () => {
 
 describe('user actions (m-marks)', () => {
   it('binds alt actions by mark; compiler action runs first', () => {
-    const tn = new Tabnas({ plugins: [bnfPlugin] })
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
     const log = []
-    tn.bnf('op = "inc" / "dec"', {
+    tn.abnf('op = "inc" / "dec"', {
       actions: {
         '@op:o:INC': (r) => { log.push('inc'); r.node.delta = 1 },
         '@op:o:DEC': (r) => { log.push('dec'); r.node.delta = -1 },
@@ -250,9 +250,9 @@ describe('user actions (m-marks)', () => {
   })
 
   it('multiple actions on one alt run in attachment order', () => {
-    const tn = new Tabnas({ plugins: [bnfPlugin] })
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
     const log = []
-    tn.bnf('op = "inc"', {
+    tn.abnf('op = "inc"', {
       actions: { '@op:o:INC': [() => log.push('a'), () => log.push('b')] },
     })
     tn.parse('inc')
@@ -260,31 +260,31 @@ describe('user actions (m-marks)', () => {
   })
 
   it('binds rule-phase hooks (bo)', () => {
-    const tn = new Tabnas({ plugins: [bnfPlugin] })
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
     const log = []
-    tn.bnf('g = "x"', { actions: { '@g:bo': () => log.push('enter') } })
+    tn.abnf('g = "x"', { actions: { '@g:bo': () => log.push('enter') } })
     tn.parse('x')
     assert.deepStrictEqual(log, ['enter'])
   })
 
   it('rejects refs that match no rule/alt/hook', () => {
-    const tn = new Tabnas({ plugins: [bnfPlugin] })
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
     for (const bad of ['@op:o:NOPE', '@nope:o:INC', '@op:zz']) {
       assert.throws(
-        () => tn.bnf('op = "inc" / "dec"', { actions: { [bad]: () => {} } }),
-        (e) => e instanceof BnfActionError,
+        () => tn.abnf('op = "inc" / "dec"', { actions: { [bad]: () => {} } }),
+        (e) => e instanceof AbnfActionError,
         `should reject ${bad}`)
     }
   })
 
   it('markListing reports the assigned marks', () => {
-    const listing = markListing(bnfConvert('op = "inc" / "dec"', { marks: true }))
+    const listing = markListing(abnfConvert('op = "inc" / "dec"', { marks: true }))
     assert.match(listing, /op\s+o:INC/)
     assert.match(listing, /op\s+o:DEC/)
   })
 
   it('marks are opt-in (default conversion is unchanged)', () => {
-    const spec = bnfConvert('op = "inc" / "dec"')
+    const spec = abnfConvert('op = "inc" / "dec"')
     const hasMark = JSON.stringify(spec.rule).includes('"m":')
     assert.strictEqual(hasMark, false)
   })
@@ -293,7 +293,7 @@ describe('user actions (m-marks)', () => {
 
 describe('user actions composed with $-builtins (pure data)', () => {
   it('live builtins-mode: user action runs after the @node$ tree builtin', () => {
-    const spec = bnfConvert('op = "inc" / "dec"', { builtins: true, marks: true })
+    const spec = abnfConvert('op = "inc" / "dec"', { builtins: true, marks: true })
     attachActions(spec, { '@op:o:INC': (r) => { r.node.delta = 1 } })
     // no closures except the injected user fn; the tree action is @node$
     const tn = new Tabnas()
@@ -304,11 +304,11 @@ describe('user actions composed with $-builtins (pure data)', () => {
   })
 
   it('serialized slot bound at load time', () => {
-    const spec = bnfConvert('op = "inc" / "dec"', { builtins: true, marks: true })
+    const spec = abnfConvert('op = "inc" / "dec"', { builtins: true, marks: true })
     attachActionSlots(spec, ['@op:o:INC'])
     const text = toJsonic(toPureSpec(spec), { strict: true })
     assert.match(text, /@op:o:INC/, 'slot serialized by name')
-    assert.doesNotMatch(text, /@bnf_/, 'no closures in the wire format')
+    assert.doesNotMatch(text, /@abnf_/, 'no closures in the wire format')
 
     // Consumer binds the slot at load.
     const obj = JSON.parse(text)
@@ -341,11 +341,11 @@ describe('compile: probe grammars', () => {
   it('closure-mode probe is refused by toRecognitionSpec', () => {
     // Without `builtins`, the dispatcher uses registered closures for
     // its control logic, which cannot be emitted as pure data.
-    const spec = bnfConvert(PROBE_SRC)
+    const spec = abnfConvert(PROBE_SRC)
     assert.throws(
       () => toRecognitionSpec(spec),
       (e) => {
-        assert.ok(e instanceof BnfCompileError, 'is BnfCompileError')
+        assert.ok(e instanceof AbnfCompileError, 'is AbnfCompileError')
         assert.ok(e.rules.length > 0, 'lists offending rules')
         assert.match(e.message, /probe|lookahead/)
         return true
@@ -354,15 +354,15 @@ describe('compile: probe grammars', () => {
   })
 
   it('builtin-mode probe compiles to pure data', () => {
-    const text = bnfCompile(PROBE_SRC)
-    assert.doesNotMatch(text, /@bnf_/, 'no registered closures remain')
+    const text = abnfCompile(PROBE_SRC)
+    assert.doesNotMatch(text, /@abnf_/, 'no registered closures remain')
     assert.match(text, /@probeInit\$/)
     assert.match(text, /@probeDecide\$/)
     assert.match(text, /@probePhase0\$/)
   })
 
   it('builtin-mode probe round-trips into a working grammar', () => {
-    const spec = resolveFuncRefs(JSON.parse(bnfCompile(PROBE_SRC, { strict: true })))
+    const spec = resolveFuncRefs(JSON.parse(abnfCompile(PROBE_SRC, { strict: true })))
     const tn = new Tabnas()
     tn.grammar(spec)
     const acc = (s) => {
@@ -381,19 +381,19 @@ describe('compile: probe grammars', () => {
 describe('compile: builtin schema version', () => {
   it('emits v = BUILTIN_SCHEMA_VERSION in recognition and full modes', () => {
     for (const recognition of [true, false]) {
-      const spec = JSON.parse(bnfCompile('g = "hi"', { strict: true, recognition }))
+      const spec = JSON.parse(abnfCompile('g = "hi"', { strict: true, recognition }))
       assert.equal(spec.v, BUILTIN_SCHEMA_VERSION)
     }
   })
 
   it('the engine refuses a compiled grammar bumped past the supported schema', () => {
-    const spec = JSON.parse(bnfCompile('g = "hi"', { strict: true }))
+    const spec = JSON.parse(abnfCompile('g = "hi"', { strict: true }))
     spec.v = BUILTIN_SCHEMA_VERSION + 1
     assert.throws(() => new Tabnas().grammar(spec), /requires builtin schema version/)
   })
 
   it('a compiled grammar reloads and recognises with v honoured', () => {
-    const spec = resolveFuncRefs(JSON.parse(bnfCompile('g = "hi"', { strict: true })))
+    const spec = resolveFuncRefs(JSON.parse(abnfCompile('g = "hi"', { strict: true })))
     const tn = new Tabnas()
     tn.grammar(spec)
     assert.doesNotThrow(() => tn.parse('HI'))
@@ -405,34 +405,34 @@ describe('user actions: marks, slots, $-reservation', () => {
   const COLLIDE = 'g = "a" X / "a" Y\nX = "x"\nY = "y"'
 
   it('disambiguates same-leading-token alts with ~N collision marks', () => {
-    const listing = markListing(bnfConvert(COLLIDE, { marks: true }))
+    const listing = markListing(abnfConvert(COLLIDE, { marks: true }))
     assert.match(listing, /g\s+o:A\b/)
     assert.match(listing, /g\s+o:A~2\b/)
     // both collision marks are bindable; a nonexistent mark throws.
     assert.doesNotThrow(() =>
-      attachActions(bnfConvert(COLLIDE, { marks: true }), { '@g:o:A~2': () => { } }))
+      attachActions(abnfConvert(COLLIDE, { marks: true }), { '@g:o:A~2': () => { } }))
     assert.throws(
-      () => attachActions(bnfConvert(COLLIDE, { marks: true }), { '@g:o:Zzz': () => { } }),
-      BnfActionError)
+      () => attachActions(abnfConvert(COLLIDE, { marks: true }), { '@g:o:Zzz': () => { } }),
+      AbnfActionError)
   })
 
   it('markListing reports token (s:), pushed-rule (p:) and empty alts', () => {
-    const listing = markListing(bnfConvert('g = [ "a" ]', { marks: true }))
+    const listing = markListing(abnfConvert('g = [ "a" ]', { marks: true }))
     assert.match(listing, /p:/)
     assert.match(listing, /\(empty\)/)
   })
 
   it('attachActionSlots rejects a rule-phase ref', () => {
-    const spec = JSON.parse(bnfCompile('g = "x"', { strict: true, recognition: false }))
+    const spec = JSON.parse(abnfCompile('g = "x"', { strict: true, recognition: false }))
     assert.throws(() => attachActionSlots(spec, ['@g:bo']), /rule-phase ref/)
   })
 
   it('rejects a user action ref containing `$` (attachActions and slots)', () => {
     assert.throws(
-      () => attachActions(bnfConvert('g = "x"', { marks: true }), { '@g$x:o:X': () => { } }),
+      () => attachActions(abnfConvert('g = "x"', { marks: true }), { '@g$x:o:X': () => { } }),
       /reserved for engine builtins/)
     assert.throws(
-      () => attachActionSlots(bnfConvert('g = "x"', { marks: true }), ['@g$x:o:X']),
+      () => attachActionSlots(abnfConvert('g = "x"', { marks: true }), ['@g$x:o:X']),
       /reserved for engine builtins/)
   })
 })
