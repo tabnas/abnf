@@ -1,4 +1,4 @@
-package abnf
+package tabnasabnf
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	tabnas "github.com/tabnas/parser/go"
 )
 
-// fixturesDir is the shared .bnf/.abnf fixture directory used by both
+// fixturesDir is the shared .abnf fixture directory used by both
 // the TS and Go test suites, keeping them in lockstep.
 func fixturesDir() string { return filepath.Join("..", "ts", "test", "grammar") }
 
@@ -24,11 +24,11 @@ func loadFixture(t *testing.T, name string) string {
 
 // makeParser converts src and installs it on a fresh engine, returning
 // the engine. A generous rewind history covers probe dispatch.
-func makeParser(t *testing.T, src string, opts *BnfConvertOptions) *tabnas.Tabnas {
+func makeParser(t *testing.T, src string, opts *AbnfConvertOptions) *tabnas.Tabnas {
 	t.Helper()
-	spec, err := Bnf(src, opts)
+	spec, err := Abnf(src, opts)
 	if err != nil {
-		t.Fatalf("Bnf(%q): %v", src, err)
+		t.Fatalf("Abnf(%q): %v", src, err)
 	}
 	rh := 4096
 	j := tabnas.Make(tabnas.Options{Rewind: &tabnas.RewindOptions{History: &rh}})
@@ -80,7 +80,7 @@ func firstLineOf(e error) string {
 	return s
 }
 
-// ---- AST output contract (mirrors bnf.test.js) ---------------------
+// ---- AST output contract (mirrors abnf.test.js) ---------------------
 
 func TestAstAlternationOfTerminals(t *testing.T) {
 	j := makeParser(t, `g = "hi" / "hello"`, nil)
@@ -206,44 +206,44 @@ func TestCaseSensitiveExplicit(t *testing.T) {
 // ---- start rule + multi-production ---------------------------------
 
 func TestStartOverride(t *testing.T) {
-	j := makeParser(t, "a = \"x\"\nb = \"y\"", &BnfConvertOptions{Start: "b"})
+	j := makeParser(t, "a = \"x\"\nb = \"y\"", &AbnfConvertOptions{Start: "b"})
 	assertParse(t, j, "y", node("b", "y"))
 }
 
 // ---- error cases ---------------------------------------------------
 
 func TestRejectUnknownRule(t *testing.T) {
-	_, err := Bnf(`g = missing`, nil)
+	_, err := Abnf(`g = missing`, nil)
 	if err == nil {
 		t.Fatalf("expected error for unknown rule reference")
 	}
 }
 
 func TestRejectNoProductions(t *testing.T) {
-	_, err := Bnf("; just a comment\n", nil)
+	_, err := Abnf("; just a comment\n", nil)
 	if err == nil {
 		t.Fatalf("expected error for no productions")
 	}
-	if _, ok := err.(*BnfParseError); !ok {
-		t.Errorf("expected *BnfParseError, got %T", err)
+	if _, ok := err.(*AbnfParseError); !ok {
+		t.Errorf("expected *AbnfParseError, got %T", err)
 	}
 }
 
 // ---- fixtures: parse representative inputs --------------------------
 
 func TestFixtureGreet(t *testing.T) {
-	j := makeParser(t, loadFixture(t, "greet.bnf"), nil)
+	j := makeParser(t, loadFixture(t, "greet.abnf"), nil)
 	assertParse(t, j, "hi", node("greet", "hi"))
 	assertParse(t, j, "hello", node("greet", "hello"))
 }
 
 func TestFixturePair(t *testing.T) {
-	j := makeParser(t, loadFixture(t, "pair.bnf"), nil)
+	j := makeParser(t, loadFixture(t, "pair.abnf"), nil)
 	assertParse(t, j, "ab", node("pair", "ab"))
 }
 
 func TestFixtureArith(t *testing.T) {
-	j := makeParser(t, loadFixture(t, "arith.bnf"), nil)
+	j := makeParser(t, loadFixture(t, "arith.abnf"), nil)
 	for _, in := range []string{"1", "1+2", "1+2*3", "(1+2)*3", "1+2-3"} {
 		assertAccept(t, j, in)
 	}
@@ -252,7 +252,7 @@ func TestFixtureArith(t *testing.T) {
 }
 
 func TestFixtureArithLeftrec(t *testing.T) {
-	j := makeParser(t, loadFixture(t, "arith-leftrec.bnf"), nil)
+	j := makeParser(t, loadFixture(t, "arith-leftrec.abnf"), nil)
 	for _, in := range []string{"1", "1+2", "1+2*3", "(1+2)*3", "1+2-3"} {
 		assertAccept(t, j, in)
 	}
@@ -262,8 +262,8 @@ func TestFixtureArithLeftrec(t *testing.T) {
 func TestFixtureArithLeftrecEquivalence(t *testing.T) {
 	// The leftrec form recognises the same language as the stratified
 	// form: src text is identical for accepted inputs.
-	a := makeParser(t, loadFixture(t, "arith.bnf"), nil)
-	b := makeParser(t, loadFixture(t, "arith-leftrec.bnf"), nil)
+	a := makeParser(t, loadFixture(t, "arith.abnf"), nil)
+	b := makeParser(t, loadFixture(t, "arith-leftrec.abnf"), nil)
 	for _, in := range []string{"1", "1+2", "1+2*3", "(1+2)*3"} {
 		ra, ea := a.Parse(in)
 		rb, eb := b.Parse(in)
@@ -278,7 +278,7 @@ func TestFixtureArithLeftrecEquivalence(t *testing.T) {
 }
 
 func TestFixtureJsonSubset(t *testing.T) {
-	j := makeParser(t, loadFixture(t, "json-subset.bnf"), nil)
+	j := makeParser(t, loadFixture(t, "json-subset.abnf"), nil)
 	assertParse(t, j, "1", node("value", "1"))
 	assertParse(t, j, "a", node("value", "a"))
 	for _, in := range []string{"{a:1}", "[1,2,3]", "{a:{b:2}}", "[a,b]"} {

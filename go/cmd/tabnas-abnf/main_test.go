@@ -10,7 +10,7 @@ import (
 func runCLI(t *testing.T, argv []string, stdin string) (out, errOut string, code int) {
 	t.Helper()
 	var so, se bytes.Buffer
-	code = run(append([]string{"tabnas-bnf"}, argv...), strings.NewReader(stdin), &so, &se)
+	code = run(append([]string{"tabnas-abnf"}, argv...), strings.NewReader(stdin), &so, &se)
 	return so.String(), se.String(), code
 }
 
@@ -103,7 +103,7 @@ func TestCLIHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(out, "tabnas-bnf") || !strings.Contains(out, "--compile") {
+	if !strings.Contains(out, "tabnas-abnf") || !strings.Contains(out, "--compile") {
 		t.Errorf("expected help text, got:\n%s", out)
 	}
 }

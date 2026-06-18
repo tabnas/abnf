@@ -1,4 +1,4 @@
-package abnf
+package tabnasabnf
 
 import (
 	"regexp"
@@ -14,13 +14,13 @@ import (
 func rfcGrammar(t *testing.T) string { return loadFixture(t, "rfc3986-uri.abnf") }
 
 func TestRfcCompiles(t *testing.T) {
-	if _, err := Bnf(rfcGrammar(t), &BnfConvertOptions{Start: "URI"}); err != nil {
+	if _, err := Abnf(rfcGrammar(t), &AbnfConvertOptions{Start: "URI"}); err != nil {
 		t.Fatalf("compile RFC 3986: %v", err)
 	}
 }
 
 func TestRfcEveryProductionSurvives(t *testing.T) {
-	spec, err := Bnf(rfcGrammar(t), &BnfConvertOptions{Start: "URI"})
+	spec, err := Abnf(rfcGrammar(t), &AbnfConvertOptions{Start: "URI"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestRfcEveryProductionSurvives(t *testing.T) {
 }
 
 func TestRfcAuthorityAmbiguityRewritten(t *testing.T) {
-	spec, err := Bnf(rfcGrammar(t), &BnfConvertOptions{Start: "URI"})
+	spec, err := Abnf(rfcGrammar(t), &AbnfConvertOptions{Start: "URI"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestRfcAuthorityAmbiguityRewritten(t *testing.T) {
 }
 
 func TestRfcURIAcceptance(t *testing.T) {
-	j := makeParser(t, rfcGrammar(t), &BnfConvertOptions{Start: "URI"})
+	j := makeParser(t, rfcGrammar(t), &AbnfConvertOptions{Start: "URI"})
 	accept := []string{
 		"urn:isbn:0451450523",
 		"mailto:alice@example.com",

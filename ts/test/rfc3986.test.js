@@ -20,7 +20,7 @@
 // is ambiguous on its `[ userinfo "@" ]` prefix, because `userinfo`
 // can match the same character set as `reg-name`. The converter
 // handles this via the probe + phase-retry dispatcher it emits for
-// every detected `[X D] Y` pattern (see src/bnf.ts and the
+// every detected `[X D] Y` pattern (see src/abnf.ts and the
 // dedicated coverage in test/probe.test.js). Both authority shapes
 // — with and without userinfo — now parse cleanly; this test drives
 // the end-to-end integration.
@@ -31,8 +31,8 @@ const Fs = require('node:fs')
 const Path = require('node:path')
 
 const { Tabnas } = require('@tabnas/parser')
-const { bnf: bnfPlugin } = require('..')
-const tn = new Tabnas({ plugins: [bnfPlugin] })
+const { abnf: abnfPlugin } = require('..')
+const tn = new Tabnas({ plugins: [abnfPlugin] })
 const J = (src, meta, ctx) => tn.parse(src, meta, ctx)
 
 const GRAMMAR = Fs.readFileSync(
@@ -51,13 +51,13 @@ describe('rfc3986', () => {
       // the ABNF-wide case-insensitive string default all have to
       // co-exist cleanly.
       const j = tn.make({ rewind: { history: 4096 } })
-      assert.doesNotThrow(() => j.bnf(GRAMMAR))
+      assert.doesNotThrow(() => j.abnf(GRAMMAR))
     })
 
 
     it('every RFC 3986 production survives into the emitted spec', () => {
       const j = tn.make({ rewind: { history: 4096 } })
-      const spec = j.bnf(GRAMMAR)
+      const spec = j.abnf(GRAMMAR)
       // Every name from the .abnf file should appear as a rule in
       // the spec (plus `__start__` and the generated helpers).
       const ruleNames = Object.keys(spec.rule)
@@ -87,7 +87,7 @@ describe('rfc3986', () => {
       // presence of `authority$pdN$probe` / `$with` / `$no` rules in
       // the spec confirms the rewrite fired.
       const j = tn.make({ rewind: { history: 4096 } })
-      const spec = j.bnf(GRAMMAR)
+      const spec = j.abnf(GRAMMAR)
       const names = Object.keys(spec.rule)
       assert.ok(names.some((n) => /^authority\$pd\d+\$probe$/.test(n)),
         'expected a probe helper for authority')
@@ -104,7 +104,7 @@ describe('rfc3986', () => {
 
     const parser = (() => {
       const j = tn.make({ rewind: { history: 4096 } })
-      j.bnf(GRAMMAR)
+      j.abnf(GRAMMAR)
       return j
     })()
 

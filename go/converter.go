@@ -1,9 +1,9 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
-// converter.go — BNF grammar AST -> tabnas GrammarSpec. The Go port of
-// the transformation pipeline in ts/src/converter.ts: parseBnf,
+// converter.go — ABNF grammar AST -> tabnas GrammarSpec. The Go port of
+// the transformation pipeline in ts/src/converter.ts: parseAbnf,
 // mergeIncrementals, core rules, eliminateLeftRecursion (Paull's),
 // rewriteProbeDispatches, desugar, FIRST sets, and emitGrammarSpec.
 
@@ -17,31 +17,31 @@ import (
 	tabnas "github.com/tabnas/parser/go"
 )
 
-// BnfConvertOptions controls conversion. Mirrors the TS type.
-type BnfConvertOptions struct {
+// AbnfConvertOptions controls conversion. Mirrors the TS type.
+type AbnfConvertOptions struct {
 	Start    string
 	Tag      string
 	Builtins bool
 	Marks    bool
 }
 
-// BnfParseError is raised when the BNF source itself can't be parsed.
-type BnfParseError struct {
+// AbnfParseError is raised when the ABNF source itself can't be parsed.
+type AbnfParseError struct {
 	Message string
 	Line    int
 	Column  int
 	Cause   error
 }
 
-func (e *BnfParseError) Error() string { return e.Message }
-func (e *BnfParseError) Unwrap() error { return e.Cause }
+func (e *AbnfParseError) Error() string { return e.Message }
+func (e *AbnfParseError) Unwrap() error { return e.Cause }
 
-// ---- parseBnf ------------------------------------------------------
+// ---- parseAbnf ------------------------------------------------------
 
-// parseBnf parses BNF source into a grammar AST via the tabnas-based
+// parseAbnf parses ABNF source into a grammar AST via the tabnas-based
 // parser, merging incrementals and splicing in referenced core rules.
-func parseBnf(src string) (*bnfGrammar, error) {
-	productions, err := parseBnfRaw(src)
+func parseAbnf(src string) (*abnfGrammar, error) {
+	productions, err := parseAbnfRaw(src)
 	if err != nil {
 		line, col := errLineCol(err)
 		loc := ""
@@ -49,20 +49,20 @@ func parseBnf(src string) (*bnfGrammar, error) {
 			loc = fmt.Sprintf(" at line %d, column %d", line, col)
 		}
 		raw := strings.SplitN(err.Error(), "\n", 2)[0]
-		return nil, &BnfParseError{
-			Message: fmt.Sprintf("bnf: parse error%s: %s", loc, raw),
+		return nil, &AbnfParseError{
+			Message: fmt.Sprintf("abnf: parse error%s: %s", loc, raw),
 			Line:    line, Column: col, Cause: err,
 		}
 	}
 	if len(productions) == 0 {
-		return nil, &BnfParseError{Message: "bnf: no productions found"}
+		return nil, &AbnfParseError{Message: "abnf: no productions found"}
 	}
 	merged, merr := mergeIncrementals(productions)
 	if merr != nil {
 		return nil, merr
 	}
 	withCore := withCoreRules(merged)
-	return &bnfGrammar{Productions: withCore}, nil
+	return &abnfGrammar{Productions: withCore}, nil
 }
 
 // errLineCol attempts to pull line/column from a tabnas parse error.
@@ -75,20 +75,20 @@ func errLineCol(err error) (int, int) {
 
 // ---- merge incrementals --------------------------------------------
 
-func mergeIncrementals(prods []*bnfProduction) ([]*bnfProduction, error) {
-	out := []*bnfProduction{}
-	byName := map[string]*bnfProduction{}
+func mergeIncrementals(prods []*abnfProduction) ([]*abnfProduction, error) {
+	out := []*abnfProduction{}
+	byName := map[string]*abnfProduction{}
 	for _, p := range prods {
 		if p.Incremental {
 			base := byName[p.Name]
 			if base == nil {
-				return nil, &BnfParseError{Message: fmt.Sprintf(
-					"bnf: '%s =/ …' has no earlier '%s = …' to extend", p.Name, p.Name)}
+				return nil, &AbnfParseError{Message: fmt.Sprintf(
+					"abnf: '%s =/ …' has no earlier '%s = …' to extend", p.Name, p.Name)}
 			}
 			base.Alts = append(base.Alts, p.Alts...)
 			continue
 		}
-		clean := &bnfProduction{Name: p.Name, Alts: p.Alts}
+		clean := &abnfProduction{Name: p.Name, Alts: p.Alts}
 		if p.NodeKind != "" {
 			clean.NodeKind = p.NodeKind
 		}
@@ -120,10 +120,10 @@ WSP    = SP / HTAB
 
 // coreRuleList returns the parsed core rules (order-preserving) with
 // nodeKind=core. Parsed on each call; the parser instance is cached.
-func coreRuleList() []*bnfProduction {
-	raw, err := parseBnfRaw(coreRulesABNF)
+func coreRuleList() []*abnfProduction {
+	raw, err := parseAbnfRaw(coreRulesABNF)
 	if err != nil {
-		panic("bnf: internal — core rules failed to parse: " + err.Error())
+		panic("abnf: internal — core rules failed to parse: " + err.Error())
 	}
 	for _, p := range raw {
 		p.NodeKind = "core"
@@ -131,13 +131,13 @@ func coreRuleList() []*bnfProduction {
 	return raw
 }
 
-func refsIn(alt bnfSequence, out map[string]bool) {
+func refsIn(alt abnfSequence, out map[string]bool) {
 	for _, el := range alt {
 		switch el.Kind {
 		case kindRef:
 			out[el.Name] = true
 		case kindOpt, kindStar, kindPlus, kindRep:
-			refsIn(bnfSequence{el.Inner}, out)
+			refsIn(abnfSequence{el.Inner}, out)
 		case kindGroup:
 			for _, a := range el.Alts {
 				refsIn(a, out)
@@ -148,9 +148,9 @@ func refsIn(alt bnfSequence, out map[string]bool) {
 
 // withCoreRules adds each RFC 5234 core rule that the user references
 // but doesn't define locally. Resolution is transitive.
-func withCoreRules(user []*bnfProduction) []*bnfProduction {
+func withCoreRules(user []*abnfProduction) []*abnfProduction {
 	core := coreRuleList()
-	coreByName := map[string]*bnfProduction{}
+	coreByName := map[string]*abnfProduction{}
 	coreOrder := []string{}
 	for _, p := range core {
 		coreByName[p.Name] = p
@@ -161,7 +161,7 @@ func withCoreRules(user []*bnfProduction) []*bnfProduction {
 		defined[p.Name] = true
 	}
 	needed := map[string]bool{}
-	scan := func(prods []*bnfProduction) {
+	scan := func(prods []*abnfProduction) {
 		for _, p := range prods {
 			for _, alt := range p.Alts {
 				refsIn(alt, needed)
@@ -169,7 +169,7 @@ func withCoreRules(user []*bnfProduction) []*bnfProduction {
 		}
 	}
 	scan(user)
-	out := []*bnfProduction{}
+	out := []*abnfProduction{}
 	added := true
 	for added {
 		added = false
@@ -180,29 +180,29 @@ func withCoreRules(user []*bnfProduction) []*bnfProduction {
 			prod := coreByName[name]
 			defined[name] = true
 			out = append(out, prod)
-			scan([]*bnfProduction{prod})
+			scan([]*abnfProduction{prod})
 			added = true
 		}
 	}
-	return append(append([]*bnfProduction{}, user...), out...)
+	return append(append([]*abnfProduction{}, user...), out...)
 }
 
 // ---- left-recursion elimination (Paull's) --------------------------
 
-func eliminateLeftRecursion(grammar *bnfGrammar) *bnfGrammar {
+func eliminateLeftRecursion(grammar *abnfGrammar) *abnfGrammar {
 	originalOrder := make([]string, len(grammar.Productions))
 	for i, p := range grammar.Productions {
 		originalOrder[i] = p.Name
 	}
 
 	// Copy productions (shallow-copy alts) before reordering.
-	copies := make([]*bnfProduction, len(grammar.Productions))
+	copies := make([]*abnfProduction, len(grammar.Productions))
 	for i, p := range grammar.Productions {
-		alts := make([]bnfSequence, len(p.Alts))
+		alts := make([]abnfSequence, len(p.Alts))
 		for j, a := range p.Alts {
-			alts[j] = append(bnfSequence{}, a...)
+			alts[j] = append(abnfSequence{}, a...)
 		}
-		copies[i] = &bnfProduction{Name: p.Name, Alts: alts, NodeKind: p.NodeKind}
+		copies[i] = &abnfProduction{Name: p.Name, Alts: alts, NodeKind: p.NodeKind}
 	}
 	prods := topoOrderForPaull(copies)
 
@@ -213,11 +213,11 @@ func eliminateLeftRecursion(grammar *bnfGrammar) *bnfGrammar {
 		prods[i] = eliminateDirectLeftRec(prods[i])
 	}
 
-	byName := map[string]*bnfProduction{}
+	byName := map[string]*abnfProduction{}
 	for _, p := range prods {
 		byName[p.Name] = p
 	}
-	ordered := []*bnfProduction{}
+	ordered := []*abnfProduction{}
 	for _, name := range originalOrder {
 		if p, ok := byName[name]; ok {
 			ordered = append(ordered, p)
@@ -233,17 +233,17 @@ func eliminateLeftRecursion(grammar *bnfGrammar) *bnfGrammar {
 	for _, name := range remaining {
 		ordered = append(ordered, byName[name])
 	}
-	return &bnfGrammar{Productions: ordered}
+	return &abnfGrammar{Productions: ordered}
 }
 
 // topoOrderForPaull orders over the leading-position reference graph.
-func topoOrderForPaull(prods []*bnfProduction) []*bnfProduction {
-	byName := map[string]*bnfProduction{}
+func topoOrderForPaull(prods []*abnfProduction) []*abnfProduction {
+	byName := map[string]*abnfProduction{}
 	for _, p := range prods {
 		byName[p.Name] = p
 	}
 	colour := map[string]int{} // 0 unseen, 1 in-progress, 2 done
-	order := []*bnfProduction{}
+	order := []*abnfProduction{}
 	var visit func(name string)
 	visit = func(name string) {
 		if colour[name] != 0 {
@@ -271,69 +271,69 @@ func topoOrderForPaull(prods []*bnfProduction) []*bnfProduction {
 	return order
 }
 
-func substituteLeadingRef(target, source *bnfProduction) *bnfProduction {
-	newAlts := []bnfSequence{}
+func substituteLeadingRef(target, source *abnfProduction) *abnfProduction {
+	newAlts := []abnfSequence{}
 	for _, alt := range target.Alts {
 		if len(alt) > 0 && alt[0].Kind == kindRef && alt[0].Name == source.Name {
-			tail := append(bnfSequence{}, alt[1:]...)
+			tail := append(abnfSequence{}, alt[1:]...)
 			for _, srcAlt := range source.Alts {
-				combined := append(append(bnfSequence{}, srcAlt...), tail...)
+				combined := append(append(abnfSequence{}, srcAlt...), tail...)
 				newAlts = append(newAlts, combined)
 			}
 		} else {
 			newAlts = append(newAlts, alt)
 		}
 	}
-	return &bnfProduction{Name: target.Name, Alts: newAlts, NodeKind: target.NodeKind}
+	return &abnfProduction{Name: target.Name, Alts: newAlts, NodeKind: target.NodeKind}
 }
 
-func eliminateDirectLeftRec(prod *bnfProduction) *bnfProduction {
-	recursive := []bnfSequence{}
-	seeds := []bnfSequence{}
+func eliminateDirectLeftRec(prod *abnfProduction) *abnfProduction {
+	recursive := []abnfSequence{}
+	seeds := []abnfSequence{}
 	for _, alt := range prod.Alts {
 		if len(alt) > 0 && alt[0].Kind == kindRef && alt[0].Name == prod.Name {
-			recursive = append(recursive, append(bnfSequence{}, alt[1:]...))
+			recursive = append(recursive, append(abnfSequence{}, alt[1:]...))
 		} else {
 			seeds = append(seeds, alt)
 		}
 	}
-	nonTrivial := []bnfSequence{}
+	nonTrivial := []abnfSequence{}
 	for _, t := range recursive {
 		if len(t) > 0 {
 			nonTrivial = append(nonTrivial, t)
 		}
 	}
 	if len(nonTrivial) == 0 {
-		return &bnfProduction{Name: prod.Name, Alts: seeds, NodeKind: prod.NodeKind}
+		return &abnfProduction{Name: prod.Name, Alts: seeds, NodeKind: prod.NodeKind}
 	}
 	if len(seeds) == 0 {
-		panic(fmt.Sprintf("bnf: rule '%s' is purely left-recursive "+
+		panic(fmt.Sprintf("abnf: rule '%s' is purely left-recursive "+
 			"(no seed alternative); cannot eliminate", prod.Name))
 	}
 
-	var seedElement *bnfElement
+	var seedElement *abnfElement
 	if len(seeds) == 1 && len(seeds[0]) == 1 {
 		seedElement = seeds[0][0]
 	} else {
-		seedElement = &bnfElement{Kind: kindGroup, Alts: seeds}
+		seedElement = &abnfElement{Kind: kindGroup, Alts: seeds}
 	}
-	var tailInner *bnfElement
+	var tailInner *abnfElement
 	if len(nonTrivial) == 1 && len(nonTrivial[0]) == 1 {
 		tailInner = nonTrivial[0][0]
 	} else {
-		tailInner = &bnfElement{Kind: kindGroup, Alts: nonTrivial}
+		tailInner = &abnfElement{Kind: kindGroup, Alts: nonTrivial}
 	}
-	return &bnfProduction{
+	return &abnfProduction{
 		Name: prod.Name,
-		Alts: []bnfSequence{{seedElement, {Kind: kindStar, Inner: tailInner}}},
+		Alts: []abnfSequence{{seedElement, {Kind: kindStar, Inner: tailInner}}},
 		NodeKind: prod.NodeKind,
 	}
 }
 
 // ---- desugar -------------------------------------------------------
 
-func desugar(grammar *bnfGrammar) *bnfGrammar {
-	extra := []*bnfProduction{}
+func desugar(grammar *abnfGrammar) *abnfGrammar {
+	extra := []*abnfProduction{}
 	used := map[string]bool{}
 	for _, p := range grammar.Productions {
 		used[p.Name] = true
@@ -352,26 +352,26 @@ func desugar(grammar *bnfGrammar) *bnfGrammar {
 		return name
 	}
 
-	var desugarElement func(el *bnfElement) *bnfElement
-	desugarAlt := func(alt bnfSequence) bnfSequence {
-		out := make(bnfSequence, len(alt))
+	var desugarElement func(el *abnfElement) *abnfElement
+	desugarAlt := func(alt abnfSequence) abnfSequence {
+		out := make(abnfSequence, len(alt))
 		for i, el := range alt {
 			out[i] = desugarElement(el)
 		}
 		return out
 	}
-	desugarElement = func(el *bnfElement) *bnfElement {
+	desugarElement = func(el *abnfElement) *abnfElement {
 		switch el.Kind {
 		case kindTerm, kindRef, kindRegex:
 			return el
 		case kindGroup:
-			innerAlts := make([]bnfSequence, len(el.Alts))
+			innerAlts := make([]abnfSequence, len(el.Alts))
 			for i, a := range el.Alts {
 				innerAlts[i] = desugarAlt(a)
 			}
 			name := freshName("group")
-			extra = append(extra, &bnfProduction{Name: name, Alts: innerAlts, NodeKind: "helper"})
-			return &bnfElement{Kind: kindRef, Name: name}
+			extra = append(extra, &abnfProduction{Name: name, Alts: innerAlts, NodeKind: "helper"})
+			return &abnfElement{Kind: kindRef, Name: name}
 		}
 
 		inner := desugarElement(el.Inner)
@@ -385,62 +385,62 @@ func desugar(grammar *bnfGrammar) *bnfGrammar {
 		switch el.Kind {
 		case kindOpt:
 			name := freshName("opt_" + hint)
-			extra = append(extra, &bnfProduction{
-				Name: name, Alts: []bnfSequence{{inner}, {}}, NodeKind: "helper"})
-			return &bnfElement{Kind: kindRef, Name: name}
+			extra = append(extra, &abnfProduction{
+				Name: name, Alts: []abnfSequence{{inner}, {}}, NodeKind: "helper"})
+			return &abnfElement{Kind: kindRef, Name: name}
 		case kindStar:
 			name := freshName("star_" + hint)
-			selfRef := &bnfElement{Kind: kindRef, Name: name}
-			extra = append(extra, &bnfProduction{
-				Name: name, Alts: []bnfSequence{{inner, selfRef}, {}}, NodeKind: "helper"})
-			return &bnfElement{Kind: kindRef, Name: name}
+			selfRef := &abnfElement{Kind: kindRef, Name: name}
+			extra = append(extra, &abnfProduction{
+				Name: name, Alts: []abnfSequence{{inner, selfRef}, {}}, NodeKind: "helper"})
+			return &abnfElement{Kind: kindRef, Name: name}
 		case kindPlus:
 			tailName := freshName("star_" + hint)
 			plusName := freshName("plus_" + hint)
-			tailRef := &bnfElement{Kind: kindRef, Name: tailName}
-			extra = append(extra, &bnfProduction{
-				Name: tailName, Alts: []bnfSequence{{inner, tailRef}, {}}, NodeKind: "helper"})
-			extra = append(extra, &bnfProduction{
-				Name: plusName, Alts: []bnfSequence{{inner, tailRef}}, NodeKind: "helper"})
-			return &bnfElement{Kind: kindRef, Name: plusName}
+			tailRef := &abnfElement{Kind: kindRef, Name: tailName}
+			extra = append(extra, &abnfProduction{
+				Name: tailName, Alts: []abnfSequence{{inner, tailRef}, {}}, NodeKind: "helper"})
+			extra = append(extra, &abnfProduction{
+				Name: plusName, Alts: []abnfSequence{{inner, tailRef}}, NodeKind: "helper"})
+			return &abnfElement{Kind: kindRef, Name: plusName}
 		}
 
 		// kindRep — bounded m*n.
 		min, max := el.Min, el.Max
 		repName := freshName("rep_" + hint)
-		repAlt := bnfSequence{}
+		repAlt := abnfSequence{}
 		for i := 0; i < min; i++ {
 			repAlt = append(repAlt, inner)
 		}
 		if max == maxInfinity {
 			tailStarName := freshName("star_" + hint)
-			tailStarRef := &bnfElement{Kind: kindRef, Name: tailStarName}
-			extra = append(extra, &bnfProduction{
-				Name: tailStarName, Alts: []bnfSequence{{inner, tailStarRef}, {}}, NodeKind: "helper"})
+			tailStarRef := &abnfElement{Kind: kindRef, Name: tailStarName}
+			extra = append(extra, &abnfProduction{
+				Name: tailStarName, Alts: []abnfSequence{{inner, tailStarRef}, {}}, NodeKind: "helper"})
 			repAlt = append(repAlt, tailStarRef)
 		} else {
-			var nested bnfSequence
+			var nested abnfSequence
 			for i := 0; i < max-min; i++ {
 				if len(nested) == 0 {
-					nested = bnfSequence{{Kind: kindOpt,
-						Inner: &bnfElement{Kind: kindGroup, Alts: []bnfSequence{{inner}}}}}
+					nested = abnfSequence{{Kind: kindOpt,
+						Inner: &abnfElement{Kind: kindGroup, Alts: []abnfSequence{{inner}}}}}
 				} else {
-					inside := append(bnfSequence{inner}, nested...)
-					nested = bnfSequence{{Kind: kindOpt,
-						Inner: &bnfElement{Kind: kindGroup, Alts: []bnfSequence{inside}}}}
+					inside := append(abnfSequence{inner}, nested...)
+					nested = abnfSequence{{Kind: kindOpt,
+						Inner: &abnfElement{Kind: kindGroup, Alts: []abnfSequence{inside}}}}
 				}
 			}
 			repAlt = append(repAlt, nested...)
 		}
-		extra = append(extra, &bnfProduction{
-			Name: repName, Alts: []bnfSequence{desugarAlt(repAlt)}, NodeKind: "helper"})
-		return &bnfElement{Kind: kindRef, Name: repName}
+		extra = append(extra, &abnfProduction{
+			Name: repName, Alts: []abnfSequence{desugarAlt(repAlt)}, NodeKind: "helper"})
+		return &abnfElement{Kind: kindRef, Name: repName}
 	}
 
-	rewritten := []*bnfProduction{}
+	rewritten := []*abnfProduction{}
 	for _, p := range grammar.Productions {
-		out := &bnfProduction{Name: p.Name, NodeKind: p.NodeKind}
-		alts := make([]bnfSequence, len(p.Alts))
+		out := &abnfProduction{Name: p.Name, NodeKind: p.NodeKind}
+		alts := make([]abnfSequence, len(p.Alts))
 		for i, a := range p.Alts {
 			alts[i] = desugarAlt(a)
 		}
@@ -453,12 +453,12 @@ func desugar(grammar *bnfGrammar) *bnfGrammar {
 		}
 		rewritten = append(rewritten, out)
 	}
-	return &bnfGrammar{Productions: append(rewritten, extra...)}
+	return &abnfGrammar{Productions: append(rewritten, extra...)}
 }
 
 // ---- numeric value -------------------------------------------------
 
-func parseNumericValue(src string) *bnfElement {
+func parseNumericValue(src string) *abnfElement {
 	base := strings.ToLower(string(src[1]))
 	radix := 16
 	if base == "d" {
@@ -473,12 +473,12 @@ func parseNumericValue(src string) *bnfElement {
 		lo, _ := strconv.ParseInt(parts[0], radix, 64)
 		hi, _ := strconv.ParseInt(parts[1], radix, 64)
 		if lo == hi {
-			return &bnfElement{Kind: kindTerm, Literal: string(rune(lo))}
+			return &abnfElement{Kind: kindTerm, Literal: string(rune(lo))}
 		}
 		toEsc := func(n int64) string {
 			return fmt.Sprintf("\\x{%04x}", n)
 		}
-		return &bnfElement{
+		return &abnfElement{
 			Kind:    kindRegex,
 			Pattern: "[" + toEsc(lo) + "-" + toEsc(hi) + "]",
 			Flags:   "",
@@ -491,21 +491,21 @@ func parseNumericValue(src string) *bnfElement {
 		v, _ := strconv.ParseInt(n, radix, 64)
 		sb.WriteRune(rune(v))
 	}
-	return &bnfElement{Kind: kindTerm, Literal: sb.String()}
+	return &abnfElement{Kind: kindTerm, Literal: sb.String()}
 }
 
 // ---- key / case-sensitivity helpers --------------------------------
 
 var letterRe = regexp.MustCompile(`[A-Za-z]`)
 
-func isEffectivelyCaseSensitive(el *bnfElement) bool {
+func isEffectivelyCaseSensitive(el *abnfElement) bool {
 	if el.hasCaseSens && el.CaseSensitive {
 		return true
 	}
 	return !letterRe.MatchString(el.Literal)
 }
 
-func termKey(el *bnfElement) string {
+func termKey(el *abnfElement) string {
 	prefix := "ci:"
 	if isEffectivelyCaseSensitive(el) {
 		prefix = "cs:"
@@ -513,7 +513,7 @@ func termKey(el *bnfElement) string {
 	return prefix + el.Literal
 }
 
-func regexKey(el *bnfElement) string {
+func regexKey(el *abnfElement) string {
 	return "/" + el.Pattern + "/" + el.Flags
 }
 

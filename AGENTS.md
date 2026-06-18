@@ -2,27 +2,24 @@
 
 ## What this project is
 
-`@tabnas/bnf` is a **grammar compiler**: it reads ABNF source and emits
+`@tabnas/abnf` is a **grammar compiler**: it reads ABNF source and emits
 a [`@tabnas/parser`](https://github.com/tabnas/parser) `GrammarSpec`,
 optionally installing it on a tabnas instance. Where most tabnas grammar
 packages hand-write one fixed grammar, this one is a *meta* plugin — the
 grammar it installs is whatever ABNF text you feed it at runtime.
 
 It is a **plugin** for the tabnas engine. Once installed it decorates the
-instance with a callable `bnf` member:
+instance with a callable `abnf` member:
 
-- `tn.bnf(src)` compiles `src` and installs the resulting grammar on `tn`.
-- `tn.bnf.toSpec(src)` compiles and returns the spec **without** installing.
-- Bare exports `bnfConvert(src, opts)` / `parseBnf` / `emitGrammarSpec`
+- `tn.abnf(src)` compiles `src` and installs the resulting grammar on `tn`.
+- `tn.abnf.toSpec(src)` compiles and returns the spec **without** installing.
+- Bare exports `abnfConvert(src, opts)` / `parseAbnf` / `emitGrammarSpec`
   let you convert without an instance.
 
 The compiler synthesises a `__start__` wrapper rule that pushes the real
-start production and consumes end-of-source (`#ZZ`); `bnfConvert` sets
+start production and consumes end-of-source (`#ZZ`); `abnfConvert` sets
 `spec.options.rule.start = '__start__'`. The start production defaults to
 the first one declared and can be overridden (`opts.start` / CLI `--start`).
-
-Note the repo/package name mismatch: the **repo is `abnf`** but the
-**package is `@tabnas/bnf`**.
 
 ## The dialect is ABNF, not classic BNF
 
@@ -49,27 +46,29 @@ ignore those; the parser only accepts the ABNF forms above.)
 
 | Path | What it is |
 |---|---|
-| [`ts/`](ts/) | **Canonical** (and only) implementation — the `@tabnas/bnf` package, plus the `tabnas-bnf` CLI. |
-| [`ts/src/bnf.ts`](ts/src/bnf.ts) | Plugin entry point. Wires `tn.bnf` / `tn.bnf.toSpec` and re-exports the converter. Thin. |
-| [`ts/src/converter.ts`](ts/src/converter.ts) | The whole compiler (~2.3k lines): ABNF parser (`parseBnf`), left-recursion rewriter (`eliminateLeftRecursion`), probe-dispatch analyser, and the `GrammarSpec` emitter (`emitGrammarSpec`). |
-| [`ts/src/bin/tabnas-bnf-cli.ts`](ts/src/bin/tabnas-bnf-cli.ts) | CLI implementation (`run(argv, console)`). |
-| [`ts/bin/tabnas-bnf`](ts/bin/tabnas-bnf) | Executable shim → `dist/bin/tabnas-bnf-cli`. The `bin` entry in `package.json`. |
+| [`ts/`](ts/) | **Canonical** implementation — the `@tabnas/abnf` package, plus the `tabnas-abnf` CLI. |
+| [`ts/src/abnf.ts`](ts/src/abnf.ts) | Plugin entry point. Wires `tn.abnf` / `tn.abnf.toSpec` and re-exports the converter. Thin. |
+| [`ts/src/converter.ts`](ts/src/converter.ts) | The whole compiler (~2.3k lines): ABNF parser (`parseAbnf`), left-recursion rewriter (`eliminateLeftRecursion`), probe-dispatch analyser, and the `GrammarSpec` emitter (`emitGrammarSpec`). |
+| [`ts/src/bin/tabnas-abnf-cli.ts`](ts/src/bin/tabnas-abnf-cli.ts) | CLI implementation (`run(argv, console)`). |
+| [`ts/bin/tabnas-abnf`](ts/bin/tabnas-abnf) | Executable shim → `dist/bin/tabnas-abnf-cli`. The `bin` entry in `package.json`. |
 | [`ts/test/`](ts/test/) | `node --test` suite (see below). |
-| [`ts/test/grammar/`](ts/test/grammar/) | `.bnf` / `.abnf` fixture grammars (`greet`, `pair`, `arith`, `arith-leftrec`, `json-subset`, `rfc3986-uri`). |
+| [`ts/test/grammar/`](ts/test/grammar/) | `.abnf` fixture grammars (`greet`, `pair`, `arith`, `arith-leftrec`, `json-subset`, `rfc3986-uri`). |
+| [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
 
-There is **no `go/` directory** — this package is TypeScript-only, so the
-usual "Go port tracks TS" contract does not apply here.
+The usual tabnas "Go port tracks TS" contract applies: the `go/` directory
+mirrors the TypeScript implementation (`Abnf`, `ParseAbnf`, `AbnfCompile`,
+matching the TS `abnfConvert` / `parseAbnf` / `abnfCompile`).
 
 ## How the compiler is itself a tabnas grammar
 
 The ABNF source is parsed by a tabnas instance whose grammar is the
-declarative `bnfRules` table inside `converter.ts` — i.e. the converter
+declarative `abnfRules` table inside `converter.ts` — i.e. the converter
 eats its own dog food. The emitter then walks that AST and produces the
 output `GrammarSpec`.
 
 Unlike the json/csv plugins (which layer on jsonic's grammar and prune
 unwanted rules with `tn.rule(name, null)`), the compiled output is a
-**complete grammar built from the ABNF source alone** — `bnfConvert`
+**complete grammar built from the ABNF source alone** — `abnfConvert`
 returns a freestanding spec, and the CLI's parse mode runs it on a bare
 `new Tabnas()` with no other plugin. (The install path does call
 `j.rule(name, null)` internally while wiring rules onto the instance.)
@@ -78,7 +77,7 @@ Non-obvious things an agent should know before touching `converter.ts`:
 
 - **Left recursion is rewritten automatically.** Direct left recursion
   `P = P a / b` becomes `P = b *(a)` (`eliminateLeftRecursion`). See the
-  `arith-leftrec.bnf` fixture, which must parse identically to `arith.bnf`.
+  `arith-leftrec.abnf` fixture, which must parse identically to `arith.abnf`.
 - **Optional-prefix ambiguity uses a probe + phase-retry pattern.** For
   shapes like `[X D] Y` where X and Y share a character vocabulary and D
   is a terminal disambiguator, the rewriter synthesises a *dispatcher*
@@ -122,7 +121,7 @@ cd ts && npm install && npm run build   # tsc --build src
 npm test                                # node --enable-source-maps --test test/**/*.test.js
 ```
 
-Top-level `Makefile` targets (TS-only — no Go targets):
+Top-level `Makefile` targets:
 
 ```bash
 make build        # cd ts && npm run build
@@ -134,7 +133,7 @@ make reset        # cd ts && npm run reset  (clean + install + build + test)
 
 The test suite (`ts/test/*.test.js`, run against the built `dist`):
 
-- `bnf.test.js` — the core converter/parser unit suite.
+- `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
 - `rfc3986.test.js` — end-to-end: compiles `test/grammar/rfc3986-uri.abnf`
   and parses URIs, exercising most of the supported ABNF surface.
@@ -147,16 +146,16 @@ The test suite (`ts/test/*.test.js`, run against the built `dist`):
   and **skips** when absent (or when `TABNAS_DEBUG_PATH` is unset and the
   dep is missing), so it is safe outside the package.
 
-## CLI (`tabnas-bnf`)
+## CLI (`tabnas-abnf`)
 
-`bin/tabnas-bnf` → `dist/bin/tabnas-bnf-cli`. By default it prints the
+`bin/tabnas-abnf` → `dist/bin/tabnas-abnf-cli`. By default it prints the
 compiled `GrammarSpec` as JSON. Flags (`run` in
-`src/bin/tabnas-bnf-cli.ts`): `-`/stdin, `--file`/`-f`, `--start`/`-s`,
-`--tag`/`-t` (group tag on every emitted alt, default `bnf`),
+`src/bin/tabnas-abnf-cli.ts`): `-`/stdin, `--file`/`-f`, `--start`/`-s`,
+`--tag`/`-t` (group tag on every emitted alt, default `abnf`),
 `--compact`/`-c`, `--parse`/`-P` and `--parse-file` (compile, install on a
 bare engine, parse the sample(s), print the tree(s), exit non-zero on any
 failure), and `--help`/`-h`. Bare non-flag args are treated as inline ABNF
-source. Example: `tabnas-bnf 'greet = "hi" / "hello"' --parse 'hi'`.
+source. Example: `tabnas-abnf 'greet = "hi" / "hello"' --parse 'hi'`.
 
 ## CI
 

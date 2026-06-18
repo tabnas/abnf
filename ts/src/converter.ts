@@ -1,17 +1,17 @@
 /* Copyright (c) 2025 Richard Rodger and other contributors, MIT License */
 
-/*  bnf.ts
- *  BNF -> tabnas grammar spec converter.
+/*  converter.ts
+ *  ABNF -> tabnas grammar spec converter.
  *
- *  Accepts a small BNF dialect: productions of the form
- *  `<name> ::= rhs`, where `rhs` is an alternation (`|`) of sequences
- *  of terminal literals (`"foo"`, `'foo'`) and nonterminal references
- *  (`<name>` or a bare `name`).
+ *  Accepts a small ABNF dialect: productions of the form
+ *  `name = rhs`, where `rhs` is an alternation (`/`) of sequences
+ *  of terminal literals (`"foo"`) and nonterminal references
+ *  (a bare `name`).
  *
- *  The BNF source is itself parsed by a tabnas instance whose grammar
- *  is defined below in `bnfRules`. That grammar is declarative — a
+ *  The ABNF source is itself parsed by a tabnas instance whose grammar
+ *  is defined below in `abnfRules`. That grammar is declarative — a
  *  table of `open`/`close` alt specs per rule, with small `bo`/`bc`
- *  state hooks for AST assembly. See `getBnfParser` for how those
+ *  state hooks for AST assembly. See `getAbnfParser` for how those
  *  rules are installed on a fresh tabnas instance.
  *
  *  The emitter turns each alternative into one or more tabnas rule
@@ -20,16 +20,16 @@
  *  two or more ref boundaries is chained through synthetic
  *  continuation rules named `<prodname>$stepN`.
  *
- *  Larger BNF features — repetition, optionality, grouping, left
+ *  Larger ABNF features — repetition, optionality, grouping, left
  *  recursion, precedence — are still out of scope; see
- *  doc/bnf-to-tabnas-feasibility.md for the full plan.
+ *  doc/abnf-to-tabnas-feasibility.md for the full plan.
  */
 
 import type { GrammarSpec, Rule } from '@tabnas/parser'
 
 
-// BNF converter options.
-export type BnfConvertOptions = {
+// ABNF converter options.
+export type AbnfConvertOptions = {
   start?: string
   tag?: string
   // Emit the probe/phase-retry dispatcher using engine `$`-builtin
@@ -45,7 +45,7 @@ export type BnfConvertOptions = {
 }
 
 
-type BnfElement =
+type AbnfElement =
   | {
       kind: 'term';
       literal: string;
@@ -58,17 +58,17 @@ type BnfElement =
     }
   | { kind: 'ref'; name: string }
   | { kind: 'regex'; pattern: string; flags: string }  // internal: for future %x
-  | { kind: 'opt'; inner: BnfElement }     // [ A ]
-  | { kind: 'star'; inner: BnfElement }    // *A
-  | { kind: 'plus'; inner: BnfElement }    // 1*A
-  | { kind: 'rep'; min: number; max: number; inner: BnfElement } // m*nA
-  | { kind: 'group'; alts: BnfSequence[] } // ( A / B )
+  | { kind: 'opt'; inner: AbnfElement }     // [ A ]
+  | { kind: 'star'; inner: AbnfElement }    // *A
+  | { kind: 'plus'; inner: AbnfElement }    // 1*A
+  | { kind: 'rep'; min: number; max: number; inner: AbnfElement } // m*nA
+  | { kind: 'group'; alts: AbnfSequence[] } // ( A / B )
 
-type BnfSequence = BnfElement[]
+type AbnfSequence = AbnfElement[]
 
-type BnfProduction = {
+type AbnfProduction = {
   name: string
-  alts: BnfSequence[]
+  alts: AbnfSequence[]
   // ABNF `name =/ alt` — flagged during parse; a post-parse merge
   // step folds each incremental production's alts into the earlier
   // production with the same name. The flag is gone by the time
@@ -81,9 +81,9 @@ type BnfProduction = {
   // Set on synthetic probe-helper productions (`*(vocab)` style,
   // failure-proof). The emitter emits a one-rule loop over the vocab
   // token set with an empty-alt fallback. Vocab is stored as a list
-  // of BnfElements (term / regex) — resolved to token names at emit
+  // of AbnfElements (term / regex) — resolved to token names at emit
   // time, after token allocation.
-  probeHelper?: { vocabElements: BnfElement[] }
+  probeHelper?: { vocabElements: AbnfElement[] }
   // How this rule contributes to the output AST:
   //   - 'user': emit a tagged node `{ rule, src, kids }`.
   //   - 'core': the RFC 5234 Appendix B.1 rules — flatten into the
@@ -104,19 +104,19 @@ type BnfProduction = {
 // push `noBranch`). `r:` retries the dispatcher so the committed
 // branch is taken on the next pass.
 //
-// The disambiguator is stored as a BnfElement (term or regex) rather
+// The disambiguator is stored as an AbnfElement (term or regex) rather
 // than a token name so the rewriter doesn't need token allocation to
 // have happened. `emitProbeDispatch` resolves it to a name at emit
 // time from the literals / regex maps.
 type ProbeDispatchSpec = {
   probeRule: string
-  disambiguator: BnfElement
+  disambiguator: AbnfElement
   withBranch: string
   noBranch: string
 }
 
-type BnfGrammar = {
-  productions: BnfProduction[]
+type AbnfGrammar = {
+  productions: AbnfProduction[]
   // Diagnostics from the probe-dispatch analyser: one entry per
   // ambiguous `[X D] Y` pattern detected, populated whether or not
   // the rewrite was actually applied.
@@ -132,7 +132,7 @@ type AmbiguityReport = {
 }
 
 
-// Declarative definition of the BNF grammar itself, expressed as
+// Declarative definition of the ABNF grammar itself, expressed as
 // tabnas rules. Each rule names its `open`/`close` alt list and, where
 // necessary, a `bo`/`bc` state hook for AST assembly.
 //
@@ -160,7 +160,7 @@ type AmbiguityReport = {
 //   #ZZ    end-of-source
 //
 // Grammar:
-//   bnf        = production*
+//   abnf        = production*
 //   production = IDENT ('=' / '=/') alts
 //   alts       = seq ('/' seq)*
 //   seq        = element*
@@ -169,7 +169,7 @@ type AmbiguityReport = {
 //   atom       = IDENT | STRING | ['%s' | '%i'] STRING | NUMVAL
 //              | '(' alts ')' | '[' alts ']'
 //   numval     = '%' ('x' / 'd' / 'b') DIGITS [ '-' DIGITS | ('.' DIGITS)* ]
-const bnfRules: Record<
+const abnfRules: Record<
   string,
   {
     bo?: (r: Rule) => void
@@ -179,7 +179,7 @@ const bnfRules: Record<
   }
 > = {
   // Top-level: accumulates productions into r.node.
-  bnf: {
+  abnf: {
     bo: (r) => { r.node = [] },
     open: [
       { s: '#ZZ', g: 'empty' },
@@ -479,23 +479,23 @@ const bnfRules: Record<
 }
 
 
-// Lazily built tabnas instance that parses BNF source. Deferred
+// Lazily built tabnas instance that parses ABNF source. Deferred
 // construction avoids a circular-import failure at module load time.
-let _bnfParser: ((src: string) => BnfProduction[]) | null = null
+let _abnfParser: ((src: string) => AbnfProduction[]) | null = null
 
-function getBnfParser(): (src: string) => BnfProduction[] {
-  if (_bnfParser) return _bnfParser
+function getAbnfParser(): (src: string) => AbnfProduction[] {
+  if (_abnfParser) return _abnfParser
 
   const { Tabnas } = require('@tabnas/parser')
 
-  // BNF defines its own grammar from scratch, so we don't load any
+  // ABNF defines its own grammar from scratch, so we don't load any
   // grammar plugin — just use the bare engine with default tokens.
   const j = new Tabnas({
-    rule: { start: 'bnf' },
+    rule: { start: 'abnf' },
     fixed: {
       token: {
         // Clear JSON-oriented defaults we're not using so `:`, `,`
-        // and `{` have no special meaning inside BNF source.
+        // and `{` have no special meaning inside ABNF source.
         '#OS': null,
         '#CS': null,
         '#CL': null,
@@ -563,8 +563,8 @@ function getBnfParser(): (src: string) => BnfProduction[] {
     j.rule(name, null)
   }
 
-  for (const name of Object.keys(bnfRules)) {
-    const spec = bnfRules[name]
+  for (const name of Object.keys(abnfRules)) {
+    const spec = abnfRules[name]
     j.rule(name, (rs: any) => {
       if (spec.bo) rs.bo(spec.bo)
       if (spec.bc) rs.bc(spec.bc)
@@ -573,15 +573,15 @@ function getBnfParser(): (src: string) => BnfProduction[] {
     })
   }
 
-  _bnfParser = (src: string) => j.parse(src) as BnfProduction[]
-  return _bnfParser
+  _abnfParser = (src: string) => j.parse(src) as AbnfProduction[]
+  return _abnfParser
 }
 
 
 // Rewrite a grammar so that the only element kinds remaining are
 // `term` and `ref`. Each `X?`, `X*`, `X+` occurrence is replaced by a
 // reference to a newly-generated helper production that expresses the
-// same language in plain BNF.
+// same language in plain ABNF.
 // Eliminate left recursion — both direct (P → P α) and indirect
 // (P → Q α, Q → P β) — via Paull's algorithm.
 //
@@ -597,7 +597,7 @@ function getBnfParser(): (src: string) => BnfProduction[] {
 // grammars will enlarge — caller is expected to keep the grammar
 // reasonably small (this is a first-step converter, not a full
 // toolchain).
-function eliminateLeftRecursion(grammar: BnfGrammar): BnfGrammar {
+function eliminateLeftRecursion(grammar: AbnfGrammar): AbnfGrammar {
   const originalOrder = grammar.productions.map((p) => p.name)
 
   // Order productions so that rules referenced at a leading position
@@ -635,7 +635,7 @@ function eliminateLeftRecursion(grammar: BnfGrammar): BnfGrammar {
   // ends up first (and the user sees their rule names in a
   // recognisable order when inspecting the spec).
   const byName = new Map(prods.map((p) => [p.name, p]))
-  const ordered: BnfProduction[] = []
+  const ordered: AbnfProduction[] = []
   for (const name of originalOrder) {
     const p = byName.get(name)
     if (p) { ordered.push(p); byName.delete(name) }
@@ -652,9 +652,9 @@ function eliminateLeftRecursion(grammar: BnfGrammar): BnfGrammar {
 // returns the names of productions that participate in at least one
 // cycle (self-loop or longer). Used to scope Paull's substitution to
 // only the rules that actually need it.
-function findLeadingRefCycleMembers(prods: BnfProduction[]): Set<string> {
+function findLeadingRefCycleMembers(prods: AbnfProduction[]): Set<string> {
   const byName = new Map(prods.map((p) => [p.name, p]))
-  const leadingRefs = (p: BnfProduction): string[] => {
+  const leadingRefs = (p: AbnfProduction): string[] => {
     const out: string[] = []
     for (const alt of p.alts) {
       if (alt.length === 0) continue
@@ -719,10 +719,10 @@ function findLeadingRefCycleMembers(prods: BnfProduction[]): Set<string> {
 // an edge A → B exists when A has at least one alternative whose
 // first element is a reference to B. Cycles are preserved as-is
 // (Paull's handles them via the substitution + direct-LR rewrite).
-function topoOrderForPaull(prods: BnfProduction[]): BnfProduction[] {
+function topoOrderForPaull(prods: AbnfProduction[]): AbnfProduction[] {
   const byName = new Map(prods.map((p) => [p.name, p]))
   const colour = new Map<string, number>() // 0 unseen, 1 in-progress, 2 done
-  const order: BnfProduction[] = []
+  const order: AbnfProduction[] = []
 
   function visit(name: string) {
     const c = colour.get(name) ?? 0
@@ -751,10 +751,10 @@ function topoOrderForPaull(prods: BnfProduction[]): BnfProduction[] {
 // `source`, replace that alt with |source.alts| copies — each one
 // with the leading source-ref expanded to one of source's alts.
 function substituteLeadingRef(
-  target: BnfProduction,
-  source: BnfProduction,
-): BnfProduction {
-  const newAlts: BnfSequence[] = []
+  target: AbnfProduction,
+  source: AbnfProduction,
+): AbnfProduction {
+  const newAlts: AbnfSequence[] = []
   for (const alt of target.alts) {
     if (
       alt.length > 0 &&
@@ -776,9 +776,9 @@ function substituteLeadingRef(
 // Rewrite a single production's direct left recursion to its
 // iterative equivalent. Equivalent to the previous version of
 // `eliminateLeftRecursion` but scoped to one production.
-function eliminateDirectLeftRec(prod: BnfProduction): BnfProduction {
-  const recursive: BnfSequence[] = []
-  const seeds: BnfSequence[] = []
+function eliminateDirectLeftRec(prod: AbnfProduction): AbnfProduction {
+  const recursive: AbnfSequence[] = []
+  const seeds: AbnfSequence[] = []
   for (const alt of prod.alts) {
     if (
       alt.length > 0 &&
@@ -804,16 +804,16 @@ function eliminateDirectLeftRec(prod: BnfProduction): BnfProduction {
   }
   if (seeds.length === 0) {
     throw new Error(
-      `bnf: rule '${prod.name}' is purely left-recursive ` +
+      `abnf: rule '${prod.name}' is purely left-recursive ` +
       `(no seed alternative); cannot eliminate`)
   }
 
-  const seedElement: BnfElement =
+  const seedElement: AbnfElement =
     seeds.length === 1 && seeds[0].length === 1
       ? seeds[0][0]
       : { kind: 'group', alts: seeds }
 
-  const tailInner: BnfElement =
+  const tailInner: AbnfElement =
     nonTrivialRecursive.length === 1 && nonTrivialRecursive[0].length === 1
       ? nonTrivialRecursive[0][0]
       : { kind: 'group', alts: nonTrivialRecursive }
@@ -826,8 +826,8 @@ function eliminateDirectLeftRec(prod: BnfProduction): BnfProduction {
 }
 
 
-function desugar(grammar: BnfGrammar): BnfGrammar {
-  const extra: BnfProduction[] = []
+function desugar(grammar: AbnfGrammar): AbnfGrammar {
+  const extra: AbnfProduction[] = []
   const used = new Set(grammar.productions.map((p) => p.name))
 
   function freshName(hint: string): string {
@@ -842,11 +842,11 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
     return name
   }
 
-  function desugarAlt(alt: BnfSequence): BnfSequence {
+  function desugarAlt(alt: AbnfSequence): AbnfSequence {
     return alt.map(desugarElement)
   }
 
-  function desugarElement(el: BnfElement): BnfElement {
+  function desugarElement(el: AbnfElement): AbnfElement {
     if (el.kind === 'term' || el.kind === 'ref' || el.kind === 'regex') {
       return el
     }
@@ -876,7 +876,7 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
     if (el.kind === 'star') {
       // H = inner H / (empty)
       const name = freshName('star_' + hint)
-      const selfRef: BnfElement = { kind: 'ref', name }
+      const selfRef: AbnfElement = { kind: 'ref', name }
       extra.push({ name, alts: [[inner, selfRef], []], nodeKind: 'helper' })
       return { kind: 'ref', name }
     }
@@ -885,7 +885,7 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
       // H = inner Tail   where   Tail = inner Tail / (empty)
       const tailName = freshName('star_' + hint)
       const plusName = freshName('plus_' + hint)
-      const tailRef: BnfElement = { kind: 'ref', name: tailName }
+      const tailRef: AbnfElement = { kind: 'ref', name: tailName }
       extra.push({
         name: tailName,
         alts: [[inner, tailRef], []],
@@ -910,13 +910,13 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
     // optionals for a finite range.
     const { min, max } = el
     const repName = freshName('rep_' + hint)
-    const repAlt: BnfSequence = []
+    const repAlt: AbnfSequence = []
     for (let i = 0; i < min; i++) repAlt.push(inner)
 
     if (max === Infinity) {
       // Tail: unbounded star of inner.
       const tailStarName = freshName('star_' + hint)
-      const tailStarRef: BnfElement = { kind: 'ref', name: tailStarName }
+      const tailStarRef: AbnfElement = { kind: 'ref', name: tailStarName }
       extra.push({
         name: tailStarName,
         alts: [[inner, tailStarRef], []],
@@ -925,7 +925,7 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
       repAlt.push(tailStarRef)
     } else {
       // Nest (max - min) optionals: [A [A [A ...]]].
-      let nested: BnfSequence = []
+      let nested: AbnfSequence = []
       for (let i = 0; i < max - min; i++) {
         // Wrap current `nested` into an optional and prepend `inner`.
         if (nested.length === 0) {
@@ -944,8 +944,8 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
     return { kind: 'ref', name: repName }
   }
 
-  const rewritten: BnfProduction[] = grammar.productions.map((p) => {
-    const out: BnfProduction = {
+  const rewritten: AbnfProduction[] = grammar.productions.map((p) => {
+    const out: AbnfProduction = {
       name: p.name,
       alts: p.alts.map(desugarAlt),
       nodeKind: p.nodeKind,
@@ -961,16 +961,16 @@ function desugar(grammar: BnfGrammar): BnfGrammar {
 }
 
 
-// Error raised when the BNF source itself can't be parsed.  Surfaces
+// Error raised when the ABNF source itself can't be parsed.  Surfaces
 // line and column from the underlying tabnas error so the caller can
 // report them directly. The original error is kept on `.cause`.
-class BnfParseError extends Error {
+class AbnfParseError extends Error {
   readonly line?: number
   readonly column?: number
   readonly cause?: unknown
   constructor(message: string, location?: { line?: number; column?: number }, cause?: unknown) {
     super(message)
-    this.name = 'BnfParseError'
+    this.name = 'AbnfParseError'
     this.line = location?.line
     this.column = location?.column
     this.cause = cause
@@ -978,10 +978,10 @@ class BnfParseError extends Error {
 }
 
 
-// Parse BNF source into a grammar AST via the tabnas-based parser.
-function parseBnf(src: string): BnfGrammar {
-  const parser = getBnfParser()
-  let productions: BnfProduction[]
+// Parse ABNF source into a grammar AST via the tabnas-based parser.
+function parseAbnf(src: string): AbnfGrammar {
+  const parser = getAbnfParser()
+  let productions: AbnfProduction[]
   try {
     productions = parser(src) ?? []
   } catch (e: any) {
@@ -993,14 +993,14 @@ function parseBnf(src: string): BnfGrammar {
       ? ` at line ${line}, column ${column}`
       : ''
     const raw = e?.message ? String(e.message).split('\n')[0] : String(e)
-    throw new BnfParseError(
-      `bnf: parse error${loc}: ${raw}`,
+    throw new AbnfParseError(
+      `abnf: parse error${loc}: ${raw}`,
       { line, column },
       e,
     )
   }
   if (!Array.isArray(productions) || productions.length === 0) {
-    throw new BnfParseError('bnf: no productions found')
+    throw new AbnfParseError('abnf: no productions found')
   }
   const merged = mergeIncrementals(productions)
   return { productions: withCoreRules(merged) }
@@ -1028,12 +1028,12 @@ VCHAR  = %x21-7E
 WSP    = SP / HTAB
 `
 
-let _coreRules: Map<string, BnfProduction> | null = null
+let _coreRules: Map<string, AbnfProduction> | null = null
 
-function getCoreRules(): Map<string, BnfProduction> {
+function getCoreRules(): Map<string, AbnfProduction> {
   if (_coreRules) return _coreRules
-  const parser = getBnfParser()
-  const raw = parser(CORE_RULES_ABNF) as BnfProduction[]
+  const parser = getAbnfParser()
+  const raw = parser(CORE_RULES_ABNF) as AbnfProduction[]
   // Core rules flatten to `src` in the output AST — they're
   // character-class bricks, not structural nodes users want to see
   // one-per-matched-character.
@@ -1043,7 +1043,7 @@ function getCoreRules(): Map<string, BnfProduction> {
 }
 
 
-function refsIn(alt: BnfSequence, out: Set<string>): void {
+function refsIn(alt: AbnfSequence, out: Set<string>): void {
   for (const el of alt) {
     if (el.kind === 'ref') out.add(el.name)
     else if (el.kind === 'opt' || el.kind === 'star' ||
@@ -1060,19 +1060,19 @@ function refsIn(alt: BnfSequence, out: Set<string>): void {
 // but doesn't define locally. Resolution is transitive: if the
 // user mentions HEXDIG, DIGIT is pulled in too. User definitions
 // always win — a local `DIGIT = …` is left untouched.
-function withCoreRules(user: BnfProduction[]): BnfProduction[] {
+function withCoreRules(user: AbnfProduction[]): AbnfProduction[] {
   const core = getCoreRules()
   const defined = new Set(user.map((p) => p.name))
   const needed = new Set<string>()
 
-  const scan = (prods: BnfProduction[]) => {
+  const scan = (prods: AbnfProduction[]) => {
     for (const p of prods) {
       for (const alt of p.alts) refsIn(alt, needed)
     }
   }
 
   scan(user)
-  const out: BnfProduction[] = []
+  const out: AbnfProduction[] = []
   // Transitively add core rules, in declaration order.
   let added = true
   while (added) {
@@ -1094,15 +1094,15 @@ function withCoreRules(user: BnfProduction[]): BnfProduction[] {
 // with the same name by appending its alternatives. Throws if an
 // incremental references a name that hasn't been defined yet — ABNF
 // requires the base production to appear first.
-function mergeIncrementals(prods: BnfProduction[]): BnfProduction[] {
-  const out: BnfProduction[] = []
-  const byName = new Map<string, BnfProduction>()
+function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
+  const out: AbnfProduction[] = []
+  const byName = new Map<string, AbnfProduction>()
   for (const p of prods) {
     if (p.incremental) {
       const base = byName.get(p.name)
       if (!base) {
-        throw new BnfParseError(
-          `bnf: '${p.name} =/ …' has no earlier '${p.name} = …' to extend`,
+        throw new AbnfParseError(
+          `abnf: '${p.name} =/ …' has no earlier '${p.name} = …' to extend`,
         )
       }
       base.alts.push(...p.alts)
@@ -1110,7 +1110,7 @@ function mergeIncrementals(prods: BnfProduction[]): BnfProduction[] {
     }
     // Strip the (absent) flag on a cleanly-written production so
     // downstream code never sees it.
-    const clean: BnfProduction = { name: p.name, alts: p.alts }
+    const clean: AbnfProduction = { name: p.name, alts: p.alts }
     if (p.nodeKind) clean.nodeKind = p.nodeKind
     out.push(clean)
     byName.set(p.name, clean)
@@ -1156,9 +1156,9 @@ function mergeIncrementals(prods: BnfProduction[]): BnfProduction[] {
 
 // Predicate: element is `[ X D ]` where X is one or more elements
 // and D is a terminal literal or a regex terminal.
-function isProbeableOpt(el: BnfElement): null | {
-  xSeq: BnfSequence
-  disambiguator: BnfElement
+function isProbeableOpt(el: AbnfElement): null | {
+  xSeq: AbnfSequence
+  disambiguator: AbnfElement
 } {
   if (el.kind !== 'opt') return null
   const inner = el.inner
@@ -1174,12 +1174,12 @@ function isProbeableOpt(el: BnfElement): null | {
 
 // Union of every terminal reachable by walking an element's subtree,
 // following refs transitively. Cycles are broken by the visited set.
-// Returns terminals as BnfElements so the caller isn't tied to the
+// Returns terminals as AbnfElements so the caller isn't tied to the
 // emitter's token-allocation step.
 function collectTerminalVocabElements(
-  el: BnfElement,
-  grammar: BnfGrammar,
-  out: Map<string, BnfElement>,
+  el: AbnfElement,
+  grammar: AbnfGrammar,
+  out: Map<string, AbnfElement>,
   visited: Set<string>,
 ): void {
   if (el.kind === 'term') {
@@ -1217,10 +1217,10 @@ function collectTerminalVocabElements(
 
 
 function collectSeqVocabElements(
-  seq: BnfSequence,
-  grammar: BnfGrammar,
-): Map<string, BnfElement> {
-  const out = new Map<string, BnfElement>()
+  seq: AbnfSequence,
+  grammar: AbnfGrammar,
+): Map<string, AbnfElement> {
+  const out = new Map<string, AbnfElement>()
   const visited = new Set<string>()
   for (const el of seq)
     collectTerminalVocabElements(el, grammar, out, visited)
@@ -1238,11 +1238,11 @@ function mapsOverlap<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
 // probe-dispatch pattern. The grammar at this point still has `opt`,
 // `group`, `star`, `plus`, `rep` sugar — intentionally, since that's
 // where the pattern is easy to recognise. Runs BEFORE token
-// allocation; probe metadata stores BnfElements, and the emitter
+// allocation; probe metadata stores AbnfElements, and the emitter
 // resolves them to token names at emit time.
-function rewriteProbeDispatches(grammar: BnfGrammar): BnfGrammar {
+function rewriteProbeDispatches(grammar: AbnfGrammar): AbnfGrammar {
   const reports: AmbiguityReport[] = grammar.ambiguities ?? []
-  const extra: BnfProduction[] = []
+  const extra: AbnfProduction[] = []
   const used = new Set<string>(grammar.productions.map((p) => p.name))
 
   function freshName(hint: string): string {
@@ -1253,14 +1253,14 @@ function rewriteProbeDispatches(grammar: BnfGrammar): BnfGrammar {
     return name
   }
 
-  const rewritten: BnfProduction[] = []
+  const rewritten: AbnfProduction[] = []
 
   for (const prod of grammar.productions) {
-    let newAlts: BnfSequence[] = []
+    let newAlts: AbnfSequence[] = []
     let touched = false
     for (let altIdx = 0; altIdx < prod.alts.length; altIdx++) {
       const alt = prod.alts[altIdx]
-      let resultAlt: BnfSequence = []
+      let resultAlt: AbnfSequence = []
       for (let i = 0; i < alt.length; i++) {
         const el = alt[i]
         const info = isProbeableOpt(el)
@@ -1283,7 +1283,7 @@ function rewriteProbeDispatches(grammar: BnfGrammar): BnfGrammar {
         // Joint vocab: union of everything the probe might need to
         // consume. Includes the disambiguator, which we then remove so
         // the probe stops on it and the peek works.
-        const vocab = new Map<string, BnfElement>([...xVocab, ...yVocab])
+        const vocab = new Map<string, AbnfElement>([...xVocab, ...yVocab])
         const d = info.disambiguator
         const dKey = d.kind === 'term' ? termKey(d)
           : d.kind === 'regex' ? regexKey(d)
@@ -1372,7 +1372,7 @@ function rewriteProbeDispatches(grammar: BnfGrammar): BnfGrammar {
 // vocab (or we're at #ZZ), the rule pops cleanly. This is the
 // failure-proof property the probe pattern relies on.
 function emitProbeHelper(
-  prod: BnfProduction,
+  prod: AbnfProduction,
   tag: string,
   ruleSpec: NonNullable<GrammarSpec['rule']>,
   literals: Map<string, string>,
@@ -1397,7 +1397,7 @@ function emitProbeHelper(
 // pattern; uses only standard tabnas primitives (r:, p:, c:, k:,
 // ctx.mark/rewind/t).
 function emitProbeDispatch(
-  prod: BnfProduction,
+  prod: AbnfProduction,
   tag: string,
   ruleSpec: NonNullable<GrammarSpec['rule']>,
   refs: RefRegistry,
@@ -1415,7 +1415,7 @@ function emitProbeDispatch(
         : undefined
   if (!disambiguatorToken) {
     throw new Error(
-      `bnf: probe-dispatch rule '${prod.name}' has unresolvable ` +
+      `abnf: probe-dispatch rule '${prod.name}' has unresolvable ` +
       `disambiguator (kind=${disambiguator.kind})`)
   }
 
@@ -1496,19 +1496,19 @@ function emitProbeDispatch(
 }
 
 
-// Convert a BNF grammar AST into a tabnas GrammarSpec.
+// Convert an ABNF grammar AST into a tabnas GrammarSpec.
 function emitGrammarSpec(
-  grammar: BnfGrammar,
-  opts?: BnfConvertOptions,
+  grammar: AbnfGrammar,
+  opts?: AbnfConvertOptions,
 ): GrammarSpec {
   const start = opts?.start ?? grammar.productions[0].name
-  const tag = opts?.tag ?? 'bnf'
+  const tag = opts?.tag ?? 'abnf'
 
   // Eliminate direct left recursion (P → P α | β) by rewriting to
   // the equivalent right-recursive form P → β (α)*, then detect
   // ambiguous `[X D] Y` optional-prefix patterns and rewrite them
   // into probe-dispatch helpers; finally flatten any EBNF sugar
-  // (`?`, `*`, `+`, grouping) into plain BNF.
+  // (`?`, `*`, `+`, grouping) into plain ABNF.
   grammar = eliminateLeftRecursion(grammar)
   grammar = rewriteProbeDispatches(grammar)
   grammar = desugar(grammar)
@@ -1555,7 +1555,7 @@ function emitGrammarSpec(
         }
       }
     }
-    // Probe-helper productions store their vocab as BnfElements —
+    // Probe-helper productions store their vocab as AbnfElements —
     // walk those too so the required tokens get allocated.
     if (prod.probeHelper) {
       for (const el of prod.probeHelper.vocabElements) {
@@ -1669,7 +1669,7 @@ type Segment = {
 // reference. A single-segment alt has at most one ref, located at the
 // very end; everything else has two or more segments.
 function segmentize(
-  alt: BnfSequence,
+  alt: AbnfSequence,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
 ): Segment[] {
@@ -1689,7 +1689,7 @@ function segmentize(
       // `opt`, `star`, `plus`, `group` must have been desugared
       // before reaching the emitter.
       throw new Error(
-        `bnf: internal — unexpected element kind '${el.kind}' in emitter`)
+        `abnf: internal — unexpected element kind '${el.kind}' in emitter`)
     }
   }
   if (current.terms.length > 0 || segs.length === 0) {
@@ -1704,7 +1704,7 @@ function regexKey(el: { pattern: string; flags: string }): string {
 }
 
 
-function isSingleSegment(alt: BnfSequence): boolean {
+function isSingleSegment(alt: AbnfSequence): boolean {
   let sawRef = false
   for (const el of alt) {
     if (el.kind === 'ref') {
@@ -1722,14 +1722,14 @@ function isSingleSegment(alt: BnfSequence): boolean {
 
 
 function validateRefs(
-  alt: BnfSequence,
+  alt: AbnfSequence,
   knownRules: Set<string>,
   ruleName: string,
 ) {
   for (const el of alt) {
     if (el.kind === 'ref' && !knownRules.has(el.name)) {
       throw new Error(
-        `bnf: rule '${ruleName}' references unknown rule '${el.name}'`)
+        `abnf: rule '${ruleName}' references unknown rule '${el.name}'`)
     }
   }
 }
@@ -1749,7 +1749,7 @@ class RefRegistry {
   // When set, the emitter stamps user-rule alts with a `m` mark.
   emitMarks = false
   register(fn: Function): `@${string}` {
-    const name = `@bnf_a${this.counter++}` as `@${string}`
+    const name = `@abnf_a${this.counter++}` as `@${string}`
     this.refs[name] = fn
     return name
   }
@@ -1787,7 +1787,7 @@ type AstNode = {
   kids: AstNode[]
 }
 
-function mkAstNode(ruleName: string, nodeKind: BnfProduction['nodeKind']): AstNode {
+function mkAstNode(ruleName: string, nodeKind: AbnfProduction['nodeKind']): AstNode {
   return nodeKind === 'user'
     ? { rule: ruleName, src: '', kids: [] }
     : { src: '', kids: [] }
@@ -1799,7 +1799,7 @@ function mkAstNode(ruleName: string, nodeKind: BnfProduction['nodeKind']): AstNo
 // rule name, or `_` for the empty alt. Used for `@<rule>:o|c:<mark>`
 // user-action references. See docs/design/alt-action-refs.md §3.
 function altDiscriminator(
-  alt: BnfSequence,
+  alt: AbnfSequence,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
 ): string {
@@ -1818,11 +1818,11 @@ function altDiscriminator(
 // Assign a unique mark per source alternative (same alt object → same
 // mark, so fan-out copies share it). Collisions get a `~N` suffix.
 function assignMarks(
-  alts: BnfSequence[],
+  alts: AbnfSequence[],
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
-): Map<BnfSequence, string> {
-  const marks = new Map<BnfSequence, string>()
+): Map<AbnfSequence, string> {
+  const marks = new Map<AbnfSequence, string>()
   const seen = new Map<string, number>()
   for (const alt of alts) {
     const base = altDiscriminator(alt, literals, regexTokens)
@@ -1840,7 +1840,7 @@ function segmentToAlt(
   refs: RefRegistry,
   initNode: boolean,
   ruleName: string,
-  nodeKind: BnfProduction['nodeKind'],
+  nodeKind: AbnfProduction['nodeKind'],
 ): any {
   const spec: any = { g: tag }
   if (seg.terms.length > 0) spec.s = seg.terms.join(' ')
@@ -1872,7 +1872,7 @@ function segmentToAlt(
 function captureChildFields(
   refs: RefRegistry,
   ruleName: string,
-  nodeKind: BnfProduction['nodeKind'],
+  nodeKind: AbnfProduction['nodeKind'],
 ): { a: any; k?: any } {
   return refs.capture({ rule: ruleName, kind: nodeKind }, (r: Rule) => {
     if (r.node == null) r.node = mkAstNode(ruleName, nodeKind)
@@ -1896,8 +1896,8 @@ function captureChildFields(
 
 
 function emitProduction(
-  prod: BnfProduction,
-  grammar: BnfGrammar,
+  prod: AbnfProduction,
+  grammar: AbnfGrammar,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   knownRules: Set<string>,
@@ -2056,7 +2056,7 @@ function emitProduction(
         alt, literals, regexTokens, firstSets, nullable)
       if (firstTokens === null) {
         throw new Error(
-          `bnf: rule '${prod.name}' alternative ${i} is nullable ` +
+          `abnf: rule '${prod.name}' alternative ${i} is nullable ` +
           `but is not the only empty alt; FIRST set is ambiguous`)
       }
       for (const tok of firstTokens) {
@@ -2109,13 +2109,13 @@ function emitProduction(
 // `r:` replacement.
 function emitChain(
   headName: string,
-  alt: BnfSequence,
+  alt: AbnfSequence,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   tag: string,
   ruleSpec: NonNullable<GrammarSpec['rule']>,
   refs: RefRegistry,
-  headKind: BnfProduction['nodeKind'] = 'helper',
+  headKind: AbnfProduction['nodeKind'] = 'helper',
 ) {
   const segs = segmentize(alt, literals, regexTokens)
   const chainName = (i: number) =>
@@ -2159,7 +2159,7 @@ function emitChain(
 // point. Terminals in FIRST sets are represented by their allocated
 // token names (e.g. `#X`).
 function computeFirstSets(
-  grammar: BnfGrammar,
+  grammar: AbnfGrammar,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
 ): { firstSets: Map<string, Set<string>>; nullable: Set<string> } {
@@ -2197,7 +2197,7 @@ function computeFirstSets(
             continue
           }
           // Desugar should have eliminated other kinds.
-          throw new Error(`bnf: internal — unexpected kind in FIRST: ${el.kind}`)
+          throw new Error(`abnf: internal — unexpected kind in FIRST: ${el.kind}`)
         }
         if (altNullable && !nullable.has(prod.name)) {
           nullable.add(prod.name)
@@ -2215,7 +2215,7 @@ function computeFirstSets(
 // Returns null if the alt is nullable — the caller must treat that
 // case separately (typically as a fallback empty alt).
 function firstOfAlt(
-  alt: BnfSequence,
+  alt: AbnfSequence,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   firstSets: Map<string, Set<string>>,
@@ -2237,7 +2237,7 @@ function firstOfAlt(
       // else keep walking into the next element
       continue
     }
-    throw new Error(`bnf: internal — unexpected kind in firstOfAlt: ${el.kind}`)
+    throw new Error(`abnf: internal — unexpected kind in firstOfAlt: ${el.kind}`)
   }
   // Alt is nullable — no non-empty prefix.
   return null
@@ -2253,7 +2253,7 @@ function firstOfAlt(
 // single-token FIRST-set lookahead instead.
 function ruleLiteralPrefix(
   name: string,
-  grammar: BnfGrammar,
+  grammar: AbnfGrammar,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   visited: Set<string>,
@@ -2278,8 +2278,8 @@ function ruleLiteralPrefix(
 
 
 function altLiteralPrefix(
-  alt: BnfSequence,
-  grammar: BnfGrammar,
+  alt: AbnfSequence,
+  grammar: AbnfGrammar,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   visited: Set<string>,
@@ -2318,8 +2318,8 @@ type PrefixPath = { tokens: string[]; done: boolean }
 // with tokens from elements the outer alt happens to list after the
 // cycled ref.
 function altPrefixesRaw(
-  alt: BnfSequence,
-  grammar: BnfGrammar,
+  alt: AbnfSequence,
+  grammar: AbnfGrammar,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   maxK: number,
@@ -2379,8 +2379,8 @@ function altPrefixesRaw(
 
 
 function altPrefixes(
-  alt: BnfSequence,
-  grammar: BnfGrammar,
+  alt: AbnfSequence,
+  grammar: AbnfGrammar,
   literals: Map<string, string>,
   regexTokens: Map<string, string>,
   maxK: number,
@@ -2424,7 +2424,7 @@ function escapeRegExp(s: string): string {
 
 
 // Decode an ABNF numeric value (`%xNN`, `%dNN`, `%bNN`, or one of
-// the range/concatenation forms) into a `BnfElement`.
+// the range/concatenation forms) into a `AbnfElement`.
 //
 //   %x61            => single-char term "a"
 //   %x66.6f.6f      => concatenated term "foo"
@@ -2433,7 +2433,7 @@ function escapeRegExp(s: string): string {
 // Hex is case-insensitive; decimal and binary accept only digits
 // in their respective ranges. Range endpoints must be the same
 // base as the prefix (RFC 5234 doesn't allow mixing).
-function parseNumericValue(src: string): BnfElement {
+function parseNumericValue(src: string): AbnfElement {
   const base = src[1].toLowerCase()
   const radix = base === 'x' ? 16 : base === 'd' ? 10 : 2
   const body = src.slice(2)
@@ -2478,18 +2478,18 @@ function allocTokenName(literal: string, used: Set<string>): string {
 }
 
 
-// Public entry point: take BNF source and return a tabnas GrammarSpec.
-function bnf(src: string, opts?: BnfConvertOptions): GrammarSpec {
-  const grammar = parseBnf(src)
+// Public entry point: take ABNF source and return a tabnas GrammarSpec.
+function abnf(src: string, opts?: AbnfConvertOptions): GrammarSpec {
+  const grammar = parseAbnf(src)
   return emitGrammarSpec(grammar, opts)
 }
 
 
 export {
-  bnf,
-  parseBnf,
+  abnf,
+  parseAbnf,
   emitGrammarSpec,
   eliminateLeftRecursion,
-  bnfRules,
-  BnfParseError,
+  abnfRules,
+  AbnfParseError,
 }

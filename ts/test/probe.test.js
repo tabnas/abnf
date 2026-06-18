@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Richard Rodger and other contributors, MIT License */
 'use strict'
 
-// Tests for the probe + phase-retry pattern the BNF converter uses to
+// Tests for the probe + phase-retry pattern the ABNF converter uses to
 // resolve `[X D] Y` optional-prefix ambiguities — the canonical shape
 // where X and Y share a character vocabulary and D is a terminal
 // disambiguator. The rewriter emits a dispatcher that:
@@ -18,8 +18,8 @@ const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
 const { Tabnas } = require('@tabnas/parser')
-const { bnf: bnfPlugin } = require('..')
-const tn = new Tabnas({ plugins: [bnfPlugin] })
+const { abnf: abnfPlugin } = require('..')
+const tn = new Tabnas({ plugins: [abnfPlugin] })
 const J = (src, meta, ctx) => tn.parse(src, meta, ctx)
 
 
@@ -41,7 +41,7 @@ Y   = *( ALPHA )
 
     const makeParser = () => {
       const j = tn.make({ rewind: { history: 4096 } })
-      j.bnf(GRAMMAR)
+      j.abnf(GRAMMAR)
       return j
     }
 
@@ -78,7 +78,7 @@ Y   = *( ALPHA )
 
     it('synthesises probe/with/no/dispatch helper rules', () => {
       const j = tn.make({ rewind: { history: 4096 } })
-      const spec = j.bnf(`
+      const spec = j.abnf(`
 top = [ X "@" ] Y
 X   = *( ALPHA )
 Y   = *( ALPHA )
@@ -103,7 +103,7 @@ Y   = *( ALPHA )
       // The optional's body ends with a terminal that can't be in
       // the tail's vocabulary, so FIRST-set dispatch suffices.
       const j = tn.make()
-      const spec = j.bnf(`
+      const spec = j.abnf(`
 top = [ X "!" ] Y
 X   = *( ALPHA )
 Y   = *DIGIT
@@ -123,7 +123,7 @@ Y   = *DIGIT
       // helper included @ in its vocab, it would eat the @ and the
       // peek would never see it — breaking the with-branch path.
       const j = tn.make({ rewind: { history: 4096 } })
-      const spec = j.bnf(`
+      const spec = j.abnf(`
 top = [ X "@" ] Y
 X   = *( ALPHA / "@" )
 Y   = *( ALPHA )
@@ -175,7 +175,7 @@ B    = "-" "-"
 C    = *( ALPHA )
 `
       const j = tn.make({ rewind: { history: 4096 } })
-      j.bnf(GRAMMAR)
+      j.abnf(GRAMMAR)
       assert.doesNotThrow(() => j.parse('abc--def'))
     })
 
@@ -190,7 +190,7 @@ Z = "1"
 Y = "2"
 `
       const j = tn.make({ rewind: { history: 4096 } })
-      j.bnf(GRAMMAR)
+      j.abnf(GRAMMAR)
       assert.doesNotThrow(() => j.parse('abc2'))
     })
 
@@ -213,7 +213,7 @@ unreserved = ALPHA / "-" / "."
 
     const makeParser = () => {
       const j = tn.make({ rewind: { history: 4096 } })
-      j.bnf(AUTHORITY)
+      j.abnf(AUTHORITY)
       return j
     }
 

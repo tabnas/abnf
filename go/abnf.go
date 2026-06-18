@@ -1,34 +1,36 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-// Package abnf is a BNF/ABNF -> tabnas GrammarSpec compiler for the
+// Package tabnasabnf is an ABNF -> tabnas GrammarSpec compiler for the
 // tabnas parsing engine (github.com/tabnas/parser/go). It is a faithful
-// Go port of the @tabnas/bnf TypeScript package.
+// Go port of the @tabnas/abnf TypeScript package.
 //
-// Given a small BNF/ABNF dialect it produces a function-free (when
+// Given a small ABNF dialect it produces a function-free (when
 // requested) GrammarSpec that, installed on a tabnas engine, parses
 // inputs in that grammar and builds a {rule, src, kids} AST. It also
 // emits "pure-data" jsonic (recognition / pure specs) and supports
 // user actions.
 //
 // The package mirrors the TS sources:
-//   - converter.ts -> converter.go (AST, parseBnf, bnfRules, desugar,
+//   - converter.ts -> converter.go (AST, parseAbnf, abnfRules, desugar,
 //     core rules, left-recursion elimination, probe-dispatch rewriter,
-//     FIRST sets, emitGrammarSpec, token allocation, Bnf entry).
-//   - compile.ts -> compile.go (BnfCompile, ToRecognitionSpec,
+//     FIRST sets, emitGrammarSpec, token allocation, Abnf entry) and
+//     parser_abnf.go (the ABNF-for-ABNF parser grammar).
+//   - compile.ts -> compile.go (AbnfCompile, ToRecognitionSpec,
 //     ToPureSpec, ToJsonic, AttachActions, MarkListing).
-//   - bnf.ts -> plugin.go (the tn.bnf plugin facade).
-package abnf
+//   - abnf.ts -> facade.go (Abnf, ParseAbnf, EmitGrammarSpec,
+//     EliminateLeftRecursion, Install — the public facade).
+package tabnasabnf
 
 // Version is the current version of the module.
 const Version = "0.1.0"
 
-// ---- BNF AST -------------------------------------------------------
+// ---- ABNF AST -------------------------------------------------------
 //
-// The parsed BNF grammar is a list of productions, each an alternation
-// of sequences of elements. Element kinds mirror the TS BnfElement
+// The parsed ABNF grammar is a list of productions, each an alternation
+// of sequences of elements. Element kinds mirror the TS AbnfElement
 // union; Go uses a single struct tagged by Kind plus optional fields.
 
-// elemKind is the discriminator for a bnfElement.
+// elemKind is the discriminator for a abnfElement.
 type elemKind string
 
 const (
@@ -42,9 +44,9 @@ const (
 	kindGroup elemKind = "group"
 )
 
-// bnfElement is one element of a BNF sequence (a term, ref, regex, or
-// EBNF sugar). Mirrors the TS BnfElement union.
-type bnfElement struct {
+// abnfElement is one element of an ABNF sequence (a term, ref, regex, or
+// EBNF sugar). Mirrors the TS AbnfElement union.
+type abnfElement struct {
 	Kind elemKind
 
 	// term
@@ -60,31 +62,31 @@ type bnfElement struct {
 	Name string
 
 	// opt / star / plus / rep
-	Inner *bnfElement
+	Inner *abnfElement
 	Min   int
 	Max   int // maxInfinity for unbounded
 
 	// group
-	Alts []bnfSequence
+	Alts []abnfSequence
 }
 
 // maxInfinity stands in for the TS `Infinity` upper bound on repetition.
 const maxInfinity = 1 << 30
 
-type bnfSequence []*bnfElement
+type abnfSequence []*abnfElement
 
 // probeDispatchSpec configures a synthesised dispatcher production for
 // an ambiguous `[X D] Y` subsequence.
 type probeDispatchSpec struct {
 	ProbeRule     string
-	Disambiguator *bnfElement
+	Disambiguator *abnfElement
 	WithBranch    string
 	NoBranch      string
 }
 
 // probeHelperSpec carries the vocabulary for a synthesised probe helper.
 type probeHelperSpec struct {
-	VocabElements []*bnfElement
+	VocabElements []*abnfElement
 }
 
 // nodeKind controls how a production contributes to the output AST:
@@ -94,24 +96,24 @@ type probeHelperSpec struct {
 //
 // Empty is treated as "user".
 
-type bnfProduction struct {
+type abnfProduction struct {
 	Name        string
-	Alts        []bnfSequence
+	Alts        []abnfSequence
 	Incremental bool
 	ProbeDisp   *probeDispatchSpec
 	ProbeHelper *probeHelperSpec
 	NodeKind    string // "", "user", "core", "helper"
 }
 
-func (p *bnfProduction) kind() string {
+func (p *abnfProduction) kind() string {
 	if p.NodeKind == "" {
 		return "user"
 	}
 	return p.NodeKind
 }
 
-type bnfGrammar struct {
-	Productions []*bnfProduction
+type abnfGrammar struct {
+	Productions []*abnfProduction
 	Ambiguities []ambiguityReport
 }
 

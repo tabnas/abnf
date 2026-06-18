@@ -8,18 +8,18 @@ const Path = require('node:path')
 
 const { Tabnas } = require('@tabnas/parser')
 const {
-  bnf: bnfPlugin,
-  bnfConvert: bnf,
-  parseBnf,
+  abnf: abnfPlugin,
+  abnfConvert: abnf,
+  parseAbnf,
   eliminateLeftRecursion,
-  BnfParseError,
+  AbnfParseError,
 } = require('..')
-// No grammar plugin: BNF supplies its own grammar via j.bnf(...).
+// No grammar plugin: ABNF supplies its own grammar via j.abnf(...).
 // json's restrictive lex options would block unquoted text and the
-// BNF inputs.
-const tn = new Tabnas({ plugins: [bnfPlugin] })
+// ABNF inputs.
+const tn = new Tabnas({ plugins: [abnfPlugin] })
 const J = (src, meta, ctx) => tn.parse(src, meta, ctx)
-const BnfCli = require('../dist/bin/tabnas-bnf-cli')
+const AbnfCli = require('../dist/bin/tabnas-abnf-cli')
 
 
 const FIXTURES = Path.join(__dirname, 'grammar')
@@ -45,20 +45,20 @@ function stripActions(alt) {
 }
 
 
-describe('bnf', () => {
+describe('abnf', () => {
 
   describe('converter', () => {
 
     it('emits spec for alternation of terminals', () => {
-      const spec = bnf(loadFixture('greet.bnf'))
+      const spec = abnf(loadFixture('greet.abnf'))
       // A synthetic `__start__` wrapper ensures end-of-source is
       // always consumed; it pushes the user's start rule.
       assert.equal(spec.options.rule.start, '__start__')
       assert.deepEqual(stripActions(spec.rule.__start__.open), [
-        { p: 'greet', g: 'bnf' },
+        { p: 'greet', g: 'abnf' },
       ])
       assert.deepEqual(stripActions(spec.rule.__start__.close), [
-        { s: '#ZZ', g: 'bnf' },
+        { s: '#ZZ', g: 'abnf' },
       ])
       // Case-insensitive ABNF strings emit as match.token regexes
       // (with the `i` flag), not fixed tokens.
@@ -66,58 +66,58 @@ describe('bnf', () => {
       assert.ok(spec.options.match.token['#HI'] instanceof RegExp)
       assert.ok(spec.options.match.token['#HELLO'] instanceof RegExp)
       assert.deepEqual(stripActions(spec.rule.greet.open), [
-        { s: '#HI', g: 'bnf' },
-        { s: '#HELLO', g: 'bnf' },
+        { s: '#HI', g: 'abnf' },
+        { s: '#HELLO', g: 'abnf' },
       ])
       assert.equal(spec.rule.greet.close, undefined)
     })
 
 
     it('emits spec for two-terminal sequence', () => {
-      const spec = bnf(loadFixture('pair.bnf'))
+      const spec = abnf(loadFixture('pair.abnf'))
       assert.deepEqual(stripActions(spec.rule.__start__.open), [
-        { p: 'pair', g: 'bnf' },
+        { p: 'pair', g: 'abnf' },
       ])
       assert.deepEqual(stripActions(spec.rule.pair.open), [
-        { s: '#A #B', g: 'bnf' },
+        { s: '#A #B', g: 'abnf' },
       ])
     })
 
 
     it('honours override of start rule', () => {
-      const spec = bnf('a = "x"\nb = "y"', { start: 'b' })
+      const spec = abnf('a = "x"\nb = "y"', { start: 'b' })
       assert.deepEqual(stripActions(spec.rule.__start__.open), [
-        { p: 'b', g: 'bnf' },
+        { p: 'b', g: 'abnf' },
       ])
     })
 
 
     it('emits a single N-token alt for long terminal sequences', () => {
-      const spec = bnf('long = "a" "b" "c" "d"')
+      const spec = abnf('long = "a" "b" "c" "d"')
       assert.deepEqual(stripActions(spec.rule.long.open), [
-        { s: '#A #B #C #D', g: 'bnf' },
+        { s: '#A #B #C #D', g: 'abnf' },
       ])
     })
 
 
     it('chains aux rules for multi-segment alternatives', () => {
-      const spec = bnf('chain = "a" inner "b" inner "c"\n' +
+      const spec = abnf('chain = "a" inner "b" inner "c"\n' +
         'inner = "x"')
       // Root rule consumes 'a' then pushes inner; close replaces with
       // the first continuation rule.
       assert.deepEqual(stripActions(spec.rule.chain.open), [
-        { s: '#A', p: 'inner', g: 'bnf' },
+        { s: '#A', p: 'inner', g: 'abnf' },
       ])
       assert.deepEqual(stripActions(spec.rule.chain.close), [
-        { r: 'chain$step1', g: 'bnf' },
+        { r: 'chain$step1', g: 'abnf' },
       ])
       // First continuation handles 'b' + inner.
       assert.deepEqual(stripActions(spec.rule['chain$step1'].open), [
-        { s: '#B', p: 'inner', g: 'bnf' },
+        { s: '#B', p: 'inner', g: 'abnf' },
       ])
       // Last continuation handles the trailing 'c' and has no close.
       assert.deepEqual(stripActions(spec.rule['chain$step2'].open), [
-        { s: '#C', g: 'bnf' },
+        { s: '#C', g: 'abnf' },
       ])
       assert.equal(spec.rule['chain$step2'].close, undefined)
     })
@@ -125,37 +125,37 @@ describe('bnf', () => {
 
     it('rejects unknown rule reference', () => {
       assert.throws(
-        () => bnf('x = missing'),
+        () => abnf('x = missing'),
         /unknown rule 'missing'/,
       )
     })
 
 
     it('rejects source with no productions', () => {
-      assert.throws(() => bnf('; just a comment\n'), /no productions/)
+      assert.throws(() => abnf('; just a comment\n'), /no productions/)
     })
 
 
-    it('surfaces line/column on malformed BNF', () => {
+    it('surfaces line/column on malformed ABNF', () => {
       try {
-        parseBnf('a = "x" )')
-        assert.fail('expected BnfParseError')
+        parseAbnf('a = "x" )')
+        assert.fail('expected AbnfParseError')
       } catch (e) {
-        assert.ok(e instanceof BnfParseError,
-          `expected BnfParseError, got ${e?.constructor?.name}`)
+        assert.ok(e instanceof AbnfParseError,
+          `expected AbnfParseError, got ${e?.constructor?.name}`)
         assert.equal(e.line, 1)
         assert.ok(typeof e.column === 'number' && e.column > 0)
-        assert.match(e.message, /bnf: parse error at line 1, column \d+/)
+        assert.match(e.message, /abnf: parse error at line 1, column \d+/)
       }
     })
 
   })
 
 
-  describe('parseBnf (tabnas-based)', () => {
+  describe('parseAbnf (tabnas-based)', () => {
 
     it('parses a single terminal', () => {
-      const g = parseBnf('g = "x"')
+      const g = parseAbnf('g = "x"')
       assert.deepEqual(g, {
         productions: [
           { name: 'g', alts: [[{ kind: 'term', literal: 'x' }]] },
@@ -165,7 +165,7 @@ describe('bnf', () => {
 
 
     it('parses alternation', () => {
-      const g = parseBnf('g = "a" / "b"')
+      const g = parseAbnf('g = "a" / "b"')
       assert.deepEqual(g.productions[0].alts, [
         [{ kind: 'term', literal: 'a' }],
         [{ kind: 'term', literal: 'b' }],
@@ -174,7 +174,7 @@ describe('bnf', () => {
 
 
     it('parses sequences and references (angle and bare)', () => {
-      const g = parseBnf('a = foo bar\nfoo = "x"\nbar = "y"')
+      const g = parseAbnf('a = foo bar\nfoo = "x"\nbar = "y"')
       assert.deepEqual(g.productions[0].alts, [
         [
           { kind: 'ref', name: 'foo' },
@@ -186,7 +186,7 @@ describe('bnf', () => {
 
 
     it('preserves empty alternatives', () => {
-      const g = parseBnf('x = / "y"')
+      const g = parseAbnf('x = / "y"')
       assert.deepEqual(g.productions[0].alts, [
         [],
         [{ kind: 'term', literal: 'y' }],
@@ -195,7 +195,7 @@ describe('bnf', () => {
 
 
     it('ignores semicolon comments', () => {
-      const g = parseBnf('; top comment\ngreet = "hi" ; trailing\n')
+      const g = parseAbnf('; top comment\ngreet = "hi" ; trailing\n')
       assert.deepEqual(g.productions[0].alts, [
         [{ kind: 'term', literal: 'hi' }],
       ])
@@ -203,7 +203,7 @@ describe('bnf', () => {
 
 
     it('parses multiple productions on one line', () => {
-      const g = parseBnf('a = "x" b = "y"')
+      const g = parseAbnf('a = "x" b = "y"')
       assert.equal(g.productions.length, 2)
       assert.equal(g.productions[0].name, 'a')
       assert.equal(g.productions[1].name, 'b')
@@ -211,7 +211,7 @@ describe('bnf', () => {
 
 
     it('parses EBNF postfix operators', () => {
-      const g = parseBnf('g = [ "a" ] *"b" 1*"c"')
+      const g = parseAbnf('g = [ "a" ] *"b" 1*"c"')
       assert.deepEqual(g.productions[0].alts[0], [
         // Optional is desugared as opt(group([[term-a]])).
         {
@@ -230,7 +230,7 @@ describe('bnf', () => {
 
     it('optional: accepts presence or absence', () => {
       const j = tn.make()
-      j.bnf('g = "hi" [ "there" ]')
+      j.abnf('g = "hi" [ "there" ]')
       assert.doesNotThrow(() => j.parse('hi'))
       assert.doesNotThrow(() => j.parse('hi there'))
       assert.throws(() => j.parse('hi nope'), /unexpected/)
@@ -239,7 +239,7 @@ describe('bnf', () => {
 
     it('star: zero or more', () => {
       const j = tn.make()
-      j.bnf('g = *"x" "end"')
+      j.abnf('g = *"x" "end"')
       assert.doesNotThrow(() => j.parse('end'))
       assert.doesNotThrow(() => j.parse('x end'))
       assert.doesNotThrow(() => j.parse('x x x end'))
@@ -249,7 +249,7 @@ describe('bnf', () => {
 
     it('plus: one or more', () => {
       const j = tn.make()
-      j.bnf('g = 1*"x" "end"')
+      j.abnf('g = 1*"x" "end"')
       assert.doesNotThrow(() => j.parse('x end'))
       assert.doesNotThrow(() => j.parse('x x x end'))
       assert.throws(() => j.parse('end'), /unexpected/)
@@ -259,7 +259,7 @@ describe('bnf', () => {
     it('bounded repetition m*n', () => {
       // ABNF 2*4"x" matches 2, 3, or 4 occurrences.
       const j = tn.make()
-      j.bnf('g = 2*4"x" "end"')
+      j.abnf('g = 2*4"x" "end"')
       assert.throws(() => j.parse('end'), /unexpected/)        // 0
       assert.throws(() => j.parse('x end'), /unexpected/)      // 1
       assert.doesNotThrow(() => j.parse('x x end'))            // 2
@@ -271,7 +271,7 @@ describe('bnf', () => {
 
     it('exact repetition n', () => {
       const j = tn.make()
-      j.bnf('g = 3"x" "end"')
+      j.abnf('g = 3"x" "end"')
       assert.throws(() => j.parse('x x end'), /unexpected/)
       assert.doesNotThrow(() => j.parse('x x x end'))
       assert.throws(() => j.parse('x x x x end'), /unexpected/)
@@ -280,7 +280,7 @@ describe('bnf', () => {
 
     it('upper-bounded repetition *n', () => {
       const j = tn.make()
-      j.bnf('g = *2"x" "end"')
+      j.abnf('g = *2"x" "end"')
       assert.doesNotThrow(() => j.parse('end'))
       assert.doesNotThrow(() => j.parse('x end'))
       assert.doesNotThrow(() => j.parse('x x end'))
@@ -295,7 +295,7 @@ describe('bnf', () => {
     it('single hex value matches as the corresponding char', () => {
       // %x61 = 'a'
       const j = tn.make()
-      j.bnf('g = %x61')
+      j.abnf('g = %x61')
       assert.doesNotThrow(() => j.parse('a'))
       assert.throws(() => j.parse('b'), /unexpected/)
     })
@@ -304,11 +304,11 @@ describe('bnf', () => {
     it('decimal and binary bases match the same char', () => {
       // %d97 = %x61 = %b1100001 = 'a'
       const dec = tn.make()
-      dec.bnf('g = %d97')
+      dec.abnf('g = %d97')
       assert.doesNotThrow(() => dec.parse('a'))
 
       const bin = tn.make()
-      bin.bnf('g = %b1100001')
+      bin.abnf('g = %b1100001')
       assert.doesNotThrow(() => bin.parse('a'))
     })
 
@@ -316,7 +316,7 @@ describe('bnf', () => {
     it('concatenated code points build a multi-char literal', () => {
       // %x66.6f.6f = 'foo'
       const j = tn.make()
-      j.bnf('g = %x66.6f.6f')
+      j.abnf('g = %x66.6f.6f')
       assert.doesNotThrow(() => j.parse('foo'))
       assert.throws(() => j.parse('bar'), /unexpected/)
     })
@@ -324,7 +324,7 @@ describe('bnf', () => {
 
     it('ranges match any single char in the range', () => {
       const j = tn.make()
-      j.bnf('g = %x30-39')
+      j.abnf('g = %x30-39')
       assert.doesNotThrow(() => j.parse('0'))
       assert.doesNotThrow(() => j.parse('5'))
       assert.doesNotThrow(() => j.parse('9'))
@@ -335,7 +335,7 @@ describe('bnf', () => {
     it('ranges compose with ABNF repetition', () => {
       // 1*DIGIT where DIGIT = %x30-39.
       const j = tn.make()
-      j.bnf('digits = 1*DIGIT\nDIGIT = %x30-39')
+      j.abnf('digits = 1*DIGIT\nDIGIT = %x30-39')
       assert.doesNotThrow(() => j.parse('1'))
       assert.doesNotThrow(() => j.parse('12345'))
       assert.throws(() => j.parse('abc'), /unexpected/)
@@ -348,7 +348,7 @@ describe('bnf', () => {
 
     it('bare "foo" matches in any case (ABNF default)', () => {
       const j = tn.make()
-      j.bnf('g = "GET"')
+      j.abnf('g = "GET"')
       assert.doesNotThrow(() => j.parse('GET'))
       assert.doesNotThrow(() => j.parse('get'))
       assert.doesNotThrow(() => j.parse('Get'))
@@ -358,7 +358,7 @@ describe('bnf', () => {
 
     it('%s"foo" forces a case-sensitive match', () => {
       const j = tn.make()
-      j.bnf('g = %s"GET"')
+      j.abnf('g = %s"GET"')
       assert.doesNotThrow(() => j.parse('GET'))
       assert.throws(() => j.parse('get'), /unexpected/)
       assert.throws(() => j.parse('Get'), /unexpected/)
@@ -367,7 +367,7 @@ describe('bnf', () => {
 
     it('%i"foo" is the explicit form of the default', () => {
       const j = tn.make()
-      j.bnf('g = %i"GET"')
+      j.abnf('g = %i"GET"')
       assert.doesNotThrow(() => j.parse('GET'))
       assert.doesNotThrow(() => j.parse('get'))
     })
@@ -375,7 +375,7 @@ describe('bnf', () => {
 
     it('literal with no letters is case-independent regardless', () => {
       const j = tn.make()
-      j.bnf('g = "+"')
+      j.abnf('g = "+"')
       assert.doesNotThrow(() => j.parse('+'))
     })
 
@@ -384,7 +384,7 @@ describe('bnf', () => {
       // %s"foo" (sensitive) only matches "foo" exactly; "foo"
       // (insensitive) accepts any case. Both should coexist.
       const j = tn.make()
-      j.bnf('g = %s"foo" / "BAR"')
+      j.abnf('g = %s"foo" / "BAR"')
       assert.doesNotThrow(() => j.parse('foo'))
       assert.throws(() => j.parse('FOO'), /unexpected/)  // sensitive
       assert.doesNotThrow(() => j.parse('bar'))         // insensitive
@@ -398,7 +398,7 @@ describe('bnf', () => {
 
     it('name =/ alt folds into the earlier production', () => {
       const j = tn.make()
-      j.bnf('command = "get"\ncommand =/ "post"\ncommand =/ "delete"')
+      j.abnf('command = "get"\ncommand =/ "post"\ncommand =/ "delete"')
       assert.doesNotThrow(() => j.parse('get'))
       assert.doesNotThrow(() => j.parse('post'))
       assert.doesNotThrow(() => j.parse('delete'))
@@ -408,7 +408,7 @@ describe('bnf', () => {
 
     it('a single =/ appends one alternative', () => {
       const j = tn.make()
-      j.bnf('g = "a"\ng =/ "b"')
+      j.abnf('g = "a"\ng =/ "b"')
       assert.doesNotThrow(() => j.parse('a'))
       assert.doesNotThrow(() => j.parse('b'))
     })
@@ -417,7 +417,7 @@ describe('bnf', () => {
     it('multi-alt increments merge cleanly', () => {
       // An increment can itself introduce several alternatives.
       const j = tn.make()
-      j.bnf('g = "a"\ng =/ "b" / "c"')
+      j.abnf('g = "a"\ng =/ "b" / "c"')
       assert.doesNotThrow(() => j.parse('a'))
       assert.doesNotThrow(() => j.parse('b'))
       assert.doesNotThrow(() => j.parse('c'))
@@ -426,7 +426,7 @@ describe('bnf', () => {
 
     it('=/ without an earlier base rule is rejected', () => {
       assert.throws(
-        () => bnf('g =/ "a"'),
+        () => abnf('g =/ "a"'),
         /has no earlier .* to extend/,
       )
     })
@@ -442,7 +442,7 @@ describe('bnf', () => {
       // implicitly: newlines are whitespace, production boundaries
       // are detected by the `name =` pattern rather than by end of
       // line, so a wrapped rule parses as one production.
-      const g = parseBnf([
+      const g = parseAbnf([
         'command = "get"',
         '        / "post"',
         '        / "delete"',
@@ -455,7 +455,7 @@ describe('bnf', () => {
 
     it('a sequence can wrap across multiple lines', () => {
       const j = tn.make()
-      j.bnf([
+      j.abnf([
         'req = "GET"',
         '      "path"',
         '      "end"',
@@ -466,7 +466,7 @@ describe('bnf', () => {
 
     it('wrapped rules sit alongside normal rules without interaction', () => {
       const j = tn.make()
-      j.bnf([
+      j.abnf([
         'verb = "GET"',
         '     / "POST"',
         'path = "/"',
@@ -474,7 +474,7 @@ describe('bnf', () => {
       ].join('\n'))
       // verb rule accepts both methods
       const jverb = tn.make()
-      jverb.bnf('verb = "GET" / "POST"')
+      jverb.abnf('verb = "GET" / "POST"')
       assert.doesNotThrow(() => jverb.parse('GET'))
       assert.doesNotThrow(() => jverb.parse('POST'))
     })
@@ -486,7 +486,7 @@ describe('bnf', () => {
 
     it('DIGIT is auto-included when referenced', () => {
       const j = tn.make()
-      j.bnf('number = 1*DIGIT')
+      j.abnf('number = 1*DIGIT')
       assert.doesNotThrow(() => j.parse('12345'))
       assert.throws(() => j.parse('abc'), /unexpected/)
     })
@@ -494,7 +494,7 @@ describe('bnf', () => {
 
     it('ALPHA matches upper and lower letters', () => {
       const j = tn.make()
-      j.bnf('word = 1*ALPHA')
+      j.abnf('word = 1*ALPHA')
       assert.doesNotThrow(() => j.parse('hello'))
       assert.doesNotThrow(() => j.parse('WORLD'))
       assert.doesNotThrow(() => j.parse('MixedCase'))
@@ -504,7 +504,7 @@ describe('bnf', () => {
 
     it('HEXDIG transitively pulls in DIGIT', () => {
       const j = tn.make()
-      j.bnf('hex = 1*HEXDIG')
+      j.abnf('hex = 1*HEXDIG')
       assert.doesNotThrow(() => j.parse('DEADBEEF'))
       assert.doesNotThrow(() => j.parse('12AB'))
       assert.throws(() => j.parse('xyz'), /unexpected/)
@@ -513,7 +513,7 @@ describe('bnf', () => {
 
     it('BIT matches 0 or 1', () => {
       const j = tn.make()
-      j.bnf('bits = 1*BIT')
+      j.abnf('bits = 1*BIT')
       assert.doesNotThrow(() => j.parse('0101'))
       assert.throws(() => j.parse('012'), /unexpected/)
     })
@@ -523,22 +523,22 @@ describe('bnf', () => {
       // Locally redefining DIGIT as "only odd digits" wins over
       // the core definition.
       const j = tn.make()
-      j.bnf('number = 1*DIGIT\nDIGIT = "1" / "3" / "5" / "7" / "9"')
+      j.abnf('number = 1*DIGIT\nDIGIT = "1" / "3" / "5" / "7" / "9"')
       assert.doesNotThrow(() => j.parse('135'))
       assert.throws(() => j.parse('246'), /unexpected/)
     })
 
 
     it('a grammar that references nothing from the core library has no core rules added', () => {
-      const { parseBnf } = require('..')
-      const g = parseBnf('g = "a" / "b"')
+      const { parseAbnf } = require('..')
+      const g = parseAbnf('g = "a" / "b"')
       assert.deepEqual(g.productions.map((p) => p.name), ['g'])
     })
 
 
     it('grouping selects among alternatives', () => {
       const j = tn.make()
-      j.bnf('g = ("a" / "b") "c"')
+      j.abnf('g = ("a" / "b") "c"')
       assert.doesNotThrow(() => j.parse('a c'))
       assert.doesNotThrow(() => j.parse('b c'))
       assert.throws(() => j.parse('c'), /unexpected/)
@@ -548,7 +548,7 @@ describe('bnf', () => {
 
     it('group with plus: one or more sub-sequences', () => {
       const j = tn.make()
-      j.bnf('g = 1*("a" "b") "end"')
+      j.abnf('g = 1*("a" "b") "end"')
       assert.doesNotThrow(() => j.parse('a b end'))
       assert.doesNotThrow(() => j.parse('a b a b a b end'))
       assert.throws(() => j.parse('end'), /unexpected/)
@@ -557,7 +557,7 @@ describe('bnf', () => {
 
     it('group of alternatives with star', () => {
       const j = tn.make()
-      j.bnf('g = *("a" / "b") "end"')
+      j.abnf('g = *("a" / "b") "end"')
       assert.doesNotThrow(() => j.parse('end'))
       assert.doesNotThrow(() => j.parse('a end'))
       assert.doesNotThrow(() => j.parse('a b a end'))
@@ -575,9 +575,9 @@ describe('bnf', () => {
 
   describe('fixture round-trips', () => {
 
-    it('arith.bnf accepts precedence-free arithmetic', () => {
+    it('arith.abnf accepts precedence-free arithmetic', () => {
       const j = tn.make()
-      j.bnf(loadFixture('arith.bnf'))
+      j.abnf(loadFixture('arith.abnf'))
       assert.doesNotThrow(() => j.parse('1'))
       assert.doesNotThrow(() => j.parse('1 + 2'))
       assert.doesNotThrow(() => j.parse('1 + 2 * 3'))
@@ -588,12 +588,12 @@ describe('bnf', () => {
     })
 
 
-    it('json-subset.bnf accepts nested structures', () => {
+    it('json-subset.abnf accepts nested structures', () => {
       // The fixture uses simple single-letter terminals in place of
       // quoted strings until ABNF %x ranges arrive — exercise it
       // with matching inputs.
       const j = tn.make()
-      j.bnf(loadFixture('json-subset.bnf'))
+      j.abnf(loadFixture('json-subset.abnf'))
       assert.doesNotThrow(() => j.parse('1'))
       assert.doesNotThrow(() => j.parse('a'))
       assert.doesNotThrow(() => j.parse('{ a : 1 }'))
@@ -603,10 +603,10 @@ describe('bnf', () => {
     })
 
 
-    it('arith-leftrec.bnf parses the same language as arith.bnf', () => {
+    it('arith-leftrec.abnf parses the same language as arith.abnf', () => {
       // Same language, but written in the natural left-recursive form.
       const j = tn.make()
-      j.bnf(loadFixture('arith-leftrec.bnf'))
+      j.abnf(loadFixture('arith-leftrec.abnf'))
       assert.doesNotThrow(() => j.parse('1'))
       assert.doesNotThrow(() => j.parse('1 + 2 * 3'))
       assert.doesNotThrow(() => j.parse('( 1 + 2 ) * 3'))
@@ -620,7 +620,7 @@ describe('bnf', () => {
   describe('left-recursion elimination', () => {
 
     it('rewrites P -> P alpha | beta into P -> beta (alpha)*', () => {
-      const g = parseBnf('e = e "+" t / t\nt = "1"')
+      const g = parseAbnf('e = e "+" t / t\nt = "1"')
       const r = eliminateLeftRecursion(g)
       const expr = r.productions.find((p) => p.name === 'e')
       assert.equal(expr.alts.length, 1)
@@ -635,7 +635,7 @@ describe('bnf', () => {
 
 
     it('handles multiple recursive and seed alternatives', () => {
-      const g = parseBnf(
+      const g = parseAbnf(
         'e = e "+" t / e "-" t / t / "(" e ")"\n' +
         't = "1"')
       const r = eliminateLeftRecursion(g)
@@ -654,7 +654,7 @@ describe('bnf', () => {
 
     it('rejects purely left-recursive productions (no seed)', () => {
       assert.throws(
-        () => bnf('a = a "x"'),
+        () => abnf('a = a "x"'),
         /purely left-recursive/,
       )
     })
@@ -665,7 +665,7 @@ describe('bnf', () => {
       // P with no progress), so the pass drops it. The remaining alt
       // defines a's actual language.
       const j = tn.make()
-      j.bnf('a = a / "x"')
+      j.abnf('a = a / "x"')
       assert.doesNotThrow(() => j.parse('x'))
       assert.throws(() => j.parse('y'), /unexpected/)
     })
@@ -673,9 +673,9 @@ describe('bnf', () => {
 
     it('left-recursive grammar produces the same parses as the rewritten one', () => {
       const j1 = tn.make()
-      j1.bnf(loadFixture('arith.bnf'))
+      j1.abnf(loadFixture('arith.abnf'))
       const j2 = tn.make()
-      j2.bnf(loadFixture('arith-leftrec.bnf'))
+      j2.abnf(loadFixture('arith-leftrec.abnf'))
       // The two grammars accept the same set of strings (we only
       // assert that both either accept or both reject — the trees
       // differ in shape because the helpers are constructed
@@ -711,7 +711,7 @@ describe('bnf', () => {
 
     it('two-rule cycle: accepts shortest seed derivation', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_2)
+      j.abnf(INDIRECT_2)
       // p = q x ; q = z  → "z x"
       assert.doesNotThrow(() => j.parse('z x'))
     })
@@ -719,7 +719,7 @@ describe('bnf', () => {
 
     it('two-rule cycle: accepts one-step unfold', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_2)
+      j.abnf(INDIRECT_2)
       // q = p y = (z x) y  ⇒  p = q x = z x y x
       assert.doesNotThrow(() => j.parse('z x y x'))
     })
@@ -727,7 +727,7 @@ describe('bnf', () => {
 
     it('two-rule cycle: accepts two-step unfold', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_2)
+      j.abnf(INDIRECT_2)
       // p = z x y x y x (iterate once more)
       assert.doesNotThrow(() => j.parse('z x y x y x'))
     })
@@ -735,14 +735,14 @@ describe('bnf', () => {
 
     it('two-rule cycle: rejects input missing required trailing x', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_2)
+      j.abnf(INDIRECT_2)
       assert.throws(() => j.parse('z'), /unexpected/)
     })
 
 
     it('two-rule cycle: rejects input starting on the wrong seed', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_2)
+      j.abnf(INDIRECT_2)
       // "y x" has no legal derivation — must be preceded by q's seed.
       assert.throws(() => j.parse('y x'), /unexpected/)
     })
@@ -753,14 +753,14 @@ describe('bnf', () => {
       // terminate the parse attempt even when no legal derivation
       // exists for the input.
       const j = tn.make()
-      j.bnf(INDIRECT_2)
+      j.abnf(INDIRECT_2)
       assert.throws(() => j.parse('w'), /unexpected/)
     })
 
 
     it('three-rule cycle: accepts shortest seed derivation', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_3)
+      j.abnf(INDIRECT_3)
       // c = x ; b = x 2 ; a = x 2 1
       assert.doesNotThrow(() => j.parse('x 2 1'))
     })
@@ -768,7 +768,7 @@ describe('bnf', () => {
 
     it('three-rule cycle: accepts one-step unfold', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_3)
+      j.abnf(INDIRECT_3)
       // c = a 3 = (x 2 1) 3 ; b = x 2 1 3 2 ; a = x 2 1 3 2 1
       assert.doesNotThrow(() => j.parse('x 2 1 3 2 1'))
     })
@@ -776,7 +776,7 @@ describe('bnf', () => {
 
     it('three-rule cycle: rejects premature stop', { timeout: 2000 }, () => {
       const j = tn.make()
-      j.bnf(INDIRECT_3)
+      j.abnf(INDIRECT_3)
       assert.throws(() => j.parse('x 2'), /unexpected/)
     })
 
@@ -788,7 +788,7 @@ describe('bnf', () => {
       // into a, then drops the resulting `[a]` trivial alt.
       const src = 'a = b a / "x"\nb = "y" /'
       const j = tn.make()
-      j.bnf(src)
+      j.abnf(src)
       assert.doesNotThrow(() => j.parse('x'))
       assert.doesNotThrow(() => j.parse('y x'))
       assert.doesNotThrow(() => j.parse('y y y x'))
@@ -803,7 +803,7 @@ describe('bnf', () => {
       // to collapse in a single topo pass.
       const src = 'a = b a / "x"\nb = c\nc = "y" /'
       const j = tn.make()
-      j.bnf(src)
+      j.abnf(src)
       assert.doesNotThrow(() => j.parse('x'))
       assert.doesNotThrow(() => j.parse('y x'))
       assert.doesNotThrow(() => j.parse('y y x'))
@@ -817,7 +817,7 @@ describe('bnf', () => {
         'a = b "x" / "init"\n' +
         'b = a "y" / "z"'
       const j = tn.make()
-      j.bnf(src)
+      j.abnf(src)
       assert.doesNotThrow(() => j.parse('init'))    // a's direct seed
       assert.doesNotThrow(() => j.parse('z x'))     // through b's seed
       assert.doesNotThrow(() => j.parse('init y x')) // a-seed, then b-y, then a-x
@@ -827,11 +827,11 @@ describe('bnf', () => {
   })
 
 
-  describe('tabnas.bnf()', () => {
+  describe('tabnas.abnf()', () => {
 
     it('installs grammar and parses matching input', () => {
       const j = tn.make()
-      j.bnf(loadFixture('greet.bnf'))
+      j.abnf(loadFixture('greet.abnf'))
       // Parser accepts both alternates without throwing.
       assert.doesNotThrow(() => j.parse('hi'))
       assert.doesNotThrow(() => j.parse('hello'))
@@ -840,36 +840,36 @@ describe('bnf', () => {
 
     it('rejects input outside the grammar', () => {
       const j = tn.make()
-      j.bnf(loadFixture('greet.bnf'))
+      j.abnf(loadFixture('greet.abnf'))
       assert.throws(() => j.parse('bye'), /unexpected/)
     })
 
 
     it('parses a two-terminal sequence', () => {
       const j = tn.make()
-      j.bnf(loadFixture('pair.bnf'))
+      j.abnf(loadFixture('pair.abnf'))
       assert.doesNotThrow(() => j.parse('a b'))
     })
 
 
     it('returns the emitted spec', () => {
       const j = tn.make()
-      const spec = j.bnf('g = "x"')
+      const spec = j.abnf('g = "x"')
       assert.equal(spec.options.rule.start, '__start__')
       // Case-insensitive literal emits as a match.token regex.
       assert.ok(spec.options.match.token['#X'] instanceof RegExp)
     })
 
 
-    it('bnf.toSpec builds the spec without installing', () => {
+    it('abnf.toSpec builds the spec without installing', () => {
       const j = tn.make()
-      const spec = j.bnf.toSpec('g = "x"')
+      const spec = j.abnf.toSpec('g = "x"')
       assert.equal(spec.options.rule.start, '__start__')
       // toSpec returns the spec without touching j's rules, so the
       // start rule isn't `__start__` yet.
       assert.notEqual(j.internal().config.rule.start, '__start__')
       // A separate install call still works afterwards.
-      j.bnf('g = "x"')
+      j.abnf('g = "x"')
       assert.deepEqual(j.parse('x'), { rule: 'g', src: 'x', kids: [] })
     })
 
@@ -879,7 +879,7 @@ describe('bnf', () => {
       // node. Leaf rules (only terminals / char classes) have empty
       // kids and carry the matched text as `src`.
       const j = tn.make()
-      j.bnf('g = "hi" / "hello"')
+      j.abnf('g = "hi" / "hello"')
       assert.deepEqual(j.parse('hi'), { rule: 'g', src: 'hi', kids: [] })
       assert.deepEqual(j.parse('hello'), { rule: 'g', src: 'hello', kids: [] })
 
@@ -889,7 +889,7 @@ describe('bnf', () => {
       // because `q` is NOT at the leading position of p's alt —
       // it's preceded by the `"a"` terminal.
       const j2 = tn.make()
-      j2.bnf('p = "a" q\nq = "b"')
+      j2.abnf('p = "a" q\nq = "b"')
       assert.deepEqual(j2.parse('a b'), {
         rule: 'p',
         src: 'ab',
@@ -900,7 +900,7 @@ describe('bnf', () => {
 
     it('ergonomic AST for composite rules (pair = name "=" value)', () => {
       const j = tn.make()
-      j.bnf(`
+      j.abnf(`
 x = "x" name "=" value
 name = 1*ALPHA
 value = 1*DIGIT
@@ -924,7 +924,7 @@ value = 1*DIGIT
       // inlines LEADING refs; a `[` term at the alt's head blocks
       // the inlining).
       const j = tn.make()
-      j.bnf(`
+      j.abnf(`
 list = "[" item *("," item) "]"
 item = 1*ALPHA
 `)
@@ -946,8 +946,8 @@ item = 1*ALPHA
 
     it('converts a fixture file', async () => {
       const cn = makeConsole()
-      await BnfCli.run(
-        [0, 0, '-f', Path.join(FIXTURES, 'greet.bnf')],
+      await AbnfCli.run(
+        [0, 0, '-f', Path.join(FIXTURES, 'greet.abnf')],
         cn,
       )
       const out = JSON.parse(cn.d.log[0][0])
@@ -961,9 +961,9 @@ item = 1*ALPHA
     })
 
 
-    it('accepts inline bnf source', async () => {
+    it('accepts inline abnf source', async () => {
       const cn = makeConsole()
-      await BnfCli.run([0, 0, 'g = "x"'], cn)
+      await AbnfCli.run([0, 0, 'g = "x"'], cn)
       const out = JSON.parse(cn.d.log[0][0])
       assert.equal(out.rule.__start__.open[0].p, 'g')
     })
@@ -971,7 +971,7 @@ item = 1*ALPHA
 
     it('honours --start', async () => {
       const cn = makeConsole()
-      await BnfCli.run(
+      await AbnfCli.run(
         [0, 0, '--start', 'b', 'a = "x" b = "y"'],
         cn,
       )
@@ -983,7 +983,7 @@ item = 1*ALPHA
     it('reads from stdin when invoked with -', async () => {
       const cn = makeConsole()
       cn.test$ = 'g = "x"'
-      await BnfCli.run([0, 0, '-'], cn)
+      await AbnfCli.run([0, 0, '-'], cn)
       const out = JSON.parse(cn.d.log[0][0])
       assert.equal(out.rule.__start__.open[0].p, 'g')
     })
@@ -991,7 +991,7 @@ item = 1*ALPHA
 
     it('prints help with -h', async () => {
       const cn = makeConsole()
-      await BnfCli.run([0, 0, '-h'], cn)
+      await AbnfCli.run([0, 0, '-h'], cn)
       assert.match(cn.d.log[0][0], /Usage:/)
     })
 
@@ -999,7 +999,7 @@ item = 1*ALPHA
     it('--parse validates a sample and prints the tree', async () => {
       const cn = makeConsole()
       const prevExitCode = process.exitCode
-      await BnfCli.run(
+      await AbnfCli.run(
         [0, 0, 'g = "hi" / "hello"', '--parse', 'hi'],
         cn,
       )
@@ -1014,7 +1014,7 @@ item = 1*ALPHA
     it('--parse flags mismatched samples as failures', async () => {
       const cn = makeConsole()
       const prevExitCode = process.exitCode
-      await BnfCli.run(
+      await AbnfCli.run(
         [0, 0, 'g = "hi"', '--parse', 'bye'],
         cn,
       )

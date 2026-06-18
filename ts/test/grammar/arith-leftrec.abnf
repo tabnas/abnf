@@ -1,4 +1,4 @@
-; Same arithmetic language as arith.bnf, in the natural
+; Same arithmetic language as arith.abnf, in the natural
 ; left-recursive form. The converter rewrites direct left recursion
 ; automatically (P = P a / b  =>  P = b *(a)).
 expr   = expr "+" term / expr "-" term / term

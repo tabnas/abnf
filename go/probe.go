@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
 // probe.go — the probe-dispatch analyser + rewriter, the Go port of the
 // `[X D] Y` ambiguity handling in converter.ts. For an optional group
@@ -12,7 +12,7 @@ import "strconv"
 
 // isProbeableOpt: element is `[ X D ]` where X is one or more elements
 // and D is a terminal literal or a regex terminal. Returns (xSeq, D).
-func isProbeableOpt(el *bnfElement) (bnfSequence, *bnfElement, bool) {
+func isProbeableOpt(el *abnfElement) (abnfSequence, *abnfElement, bool) {
 	if el.Kind != kindOpt {
 		return nil, nil, false
 	}
@@ -28,12 +28,12 @@ func isProbeableOpt(el *bnfElement) (bnfSequence, *bnfElement, bool) {
 	if last.Kind != kindTerm && last.Kind != kindRegex {
 		return nil, nil, false
 	}
-	xSeq := append(bnfSequence{}, seq[:len(seq)-1]...)
+	xSeq := append(abnfSequence{}, seq[:len(seq)-1]...)
 	return xSeq, last, true
 }
 
-func collectTerminalVocabElements(el *bnfElement, grammar *bnfGrammar,
-	out map[string]*bnfElement, visited map[string]bool) {
+func collectTerminalVocabElements(el *abnfElement, grammar *abnfGrammar,
+	out map[string]*abnfElement, visited map[string]bool) {
 	switch el.Kind {
 	case kindTerm:
 		k := termKey(el)
@@ -70,8 +70,8 @@ func collectTerminalVocabElements(el *bnfElement, grammar *bnfGrammar,
 	}
 }
 
-func collectSeqVocabElements(seq bnfSequence, grammar *bnfGrammar) map[string]*bnfElement {
-	out := map[string]*bnfElement{}
+func collectSeqVocabElements(seq abnfSequence, grammar *abnfGrammar) map[string]*abnfElement {
+	out := map[string]*abnfElement{}
 	visited := map[string]bool{}
 	for _, el := range seq {
 		collectTerminalVocabElements(el, grammar, out, visited)
@@ -79,7 +79,7 @@ func collectSeqVocabElements(seq bnfSequence, grammar *bnfGrammar) map[string]*b
 	return out
 }
 
-func mapsOverlap(a, b map[string]*bnfElement) bool {
+func mapsOverlap(a, b map[string]*abnfElement) bool {
 	for k := range a {
 		if _, ok := b[k]; ok {
 			return true
@@ -90,12 +90,12 @@ func mapsOverlap(a, b map[string]*bnfElement) bool {
 
 // rewriteProbeDispatches rewrites every ambiguous `[X D] Y` subsequence
 // into a probe-dispatch pattern. Runs before token allocation.
-func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
+func rewriteProbeDispatches(grammar *abnfGrammar) *abnfGrammar {
 	reports := grammar.Ambiguities
 	if reports == nil {
 		reports = []ambiguityReport{}
 	}
-	extra := []*bnfProduction{}
+	extra := []*abnfProduction{}
 	used := map[string]bool{}
 	for _, p := range grammar.Productions {
 		used[p.Name] = true
@@ -111,13 +111,13 @@ func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
 		return name
 	}
 
-	rewritten := []*bnfProduction{}
+	rewritten := []*abnfProduction{}
 
 	for _, prod := range grammar.Productions {
-		newAlts := []bnfSequence{}
+		newAlts := []abnfSequence{}
 		touched := false
 		for altIdx, alt := range prod.Alts {
-			resultAlt := bnfSequence{}
+			resultAlt := abnfSequence{}
 			for i := 0; i < len(alt); i++ {
 				el := alt[i]
 				xSeq, disamb, ok := isProbeableOpt(el)
@@ -125,7 +125,7 @@ func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
 					resultAlt = append(resultAlt, el)
 					continue
 				}
-				ySeq := append(bnfSequence{}, alt[i+1:]...)
+				ySeq := append(abnfSequence{}, alt[i+1:]...)
 				if len(ySeq) == 0 {
 					resultAlt = append(resultAlt, el)
 					continue
@@ -138,9 +138,9 @@ func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
 				}
 
 				// Joint vocab minus the disambiguator.
-				vocab := map[string]*bnfElement{}
+				vocab := map[string]*abnfElement{}
 				vocabOrder := []string{}
-				addVocab := func(m map[string]*bnfElement, order *[]string) {
+				addVocab := func(m map[string]*abnfElement, order *[]string) {
 					for _, k := range orderedVocabKeys(m) {
 						if _, exists := vocab[k]; !exists {
 							vocab[k] = m[k]
@@ -166,28 +166,28 @@ func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
 				noName := freshName(dispatchName + "$no")
 
 				// Vocab elements in insertion order, minus disambiguator.
-				vocabElems := []*bnfElement{}
+				vocabElems := []*abnfElement{}
 				for _, k := range vocabOrder {
 					if v, ok := vocab[k]; ok {
 						vocabElems = append(vocabElems, v)
 					}
 				}
 
-				extra = append(extra, &bnfProduction{
+				extra = append(extra, &abnfProduction{
 					Name:        probeName,
-					Alts:        []bnfSequence{},
+					Alts:        []abnfSequence{},
 					ProbeHelper: &probeHelperSpec{VocabElements: vocabElems},
 					NodeKind:    "helper",
 				})
-				withAlt := append(append(bnfSequence{}, xSeq...), disamb)
+				withAlt := append(append(abnfSequence{}, xSeq...), disamb)
 				withAlt = append(withAlt, ySeq...)
-				extra = append(extra, &bnfProduction{
-					Name: withName, Alts: []bnfSequence{withAlt}, NodeKind: "helper"})
-				extra = append(extra, &bnfProduction{
-					Name: noName, Alts: []bnfSequence{ySeq}, NodeKind: "helper"})
-				extra = append(extra, &bnfProduction{
+				extra = append(extra, &abnfProduction{
+					Name: withName, Alts: []abnfSequence{withAlt}, NodeKind: "helper"})
+				extra = append(extra, &abnfProduction{
+					Name: noName, Alts: []abnfSequence{ySeq}, NodeKind: "helper"})
+				extra = append(extra, &abnfProduction{
 					Name: dispatchName,
-					Alts: []bnfSequence{
+					Alts: []abnfSequence{
 						{{Kind: kindRef, Name: withName}},
 						{{Kind: kindRef, Name: noName}},
 					},
@@ -205,21 +205,21 @@ func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
 					Reason: "optional prefix shares vocabulary with tail", Resolved: true,
 				})
 
-				resultAlt = append(resultAlt, &bnfElement{Kind: kindRef, Name: dispatchName})
+				resultAlt = append(resultAlt, &abnfElement{Kind: kindRef, Name: dispatchName})
 				i = len(alt)
 				touched = true
 			}
 			newAlts = append(newAlts, resultAlt)
 		}
 		if touched {
-			rewritten = append(rewritten, &bnfProduction{
+			rewritten = append(rewritten, &abnfProduction{
 				Name: prod.Name, Alts: newAlts, NodeKind: prod.NodeKind})
 		} else {
 			rewritten = append(rewritten, prod)
 		}
 	}
 
-	return &bnfGrammar{
+	return &abnfGrammar{
 		Productions: append(rewritten, extra...),
 		Ambiguities: reports,
 	}
@@ -228,7 +228,7 @@ func rewriteProbeDispatches(grammar *bnfGrammar) *bnfGrammar {
 // orderedVocabKeys returns the keys of a vocab map. To mirror the TS
 // Map insertion order (which derives from grammar walk order) we sort
 // for determinism; vocab membership, not order, drives correctness.
-func orderedVocabKeys(m map[string]*bnfElement) []string {
+func orderedVocabKeys(m map[string]*abnfElement) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

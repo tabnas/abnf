@@ -1,10 +1,10 @@
 // Copyright (c) 2025-2026 Richard Rodger and other contributors, MIT License
 
-// Command tabnas-bnf converts a BNF/ABNF grammar into a tabnas grammar
+// Command tabnas-abnf converts an ABNF grammar into a tabnas grammar
 // spec (JSON), a pure-data recognition/AST grammar (jsonic text), lists
 // the per-alt action marks, or parses sample inputs against the grammar.
 //
-// It is the Go port of ts/src/bin/tabnas-bnf-cli.ts.
+// It is the Go port of ts/src/bin/tabnas-abnf-cli.ts.
 package main
 
 import (
@@ -109,11 +109,11 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		src += string(b)
 	}
 
-	convOpts := &abnf.BnfConvertOptions{Start: args.start, Tag: args.tag}
+	convOpts := &abnf.AbnfConvertOptions{Start: args.start, Tag: args.tag}
 
 	// Marks mode.
 	if args.marks {
-		spec, err := abnf.Bnf(src, &abnf.BnfConvertOptions{
+		spec, err := abnf.Abnf(src, &abnf.AbnfConvertOptions{
 			Start: args.start, Tag: args.tag, Marks: true,
 		})
 		if err != nil {
@@ -130,11 +130,11 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if indent == 0 {
 			indent = 2
 		}
-		out, err := abnf.BnfCompile(src, &abnf.BnfCompileOptions{
+		out, err := abnf.AbnfCompile(src, &abnf.AbnfCompileOptions{
 			Start: args.start, Tag: args.tag, Indent: indent, Recognition: boolp(!args.full),
 		})
 		if err != nil {
-			if _, ok := err.(*abnf.BnfCompileError); ok {
+			if _, ok := err.(*abnf.AbnfCompileError); ok {
 				fmt.Fprintln(stderr, err.Error())
 				return 1
 			}
@@ -145,7 +145,7 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	spec, err := abnf.Bnf(src, convOpts)
+	spec, err := abnf.Abnf(src, convOpts)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -246,20 +246,20 @@ func firstLine(s string) string {
 
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `
-tabnas-bnf: convert a BNF grammar into a tabnas grammar spec.
+tabnas-abnf: convert an ABNF grammar into a tabnas grammar spec.
 
-Usage: tabnas-bnf <args> [<bnf-source>]*
+Usage: tabnas-abnf <args> [<abnf-source>]*
 
 Arguments:
-  -                      Read BNF source from stdin.
-  --file <path>          Read BNF source from <path> (repeatable).
+  -                      Read ABNF source from stdin.
+  --file <path>          Read ABNF source from <path> (repeatable).
   -f <path>
 
   --start <name>         Set the start rule (defaults to the first
   -s <name>                production).
 
   --tag <name>           Group tag applied to every emitted alt.
-  -t <name>                Defaults to `+"`bnf`"+`.
+  -t <name>                Defaults to `+"`abnf`"+`.
 
   --compact              Emit single-line JSON (default indent is 2).
   -c
@@ -291,9 +291,9 @@ Grammar dialect:
   double-quoted literals. For example: `+"`greet = \"hi\" / \"hello\"`"+`.
 
 Examples:
-  > tabnas-bnf 'greet = "hi" / "hello"'
-  > tabnas-bnf -f grammar.bnf
-  > echo 'g = "a"' | tabnas-bnf -
-  > tabnas-bnf -f grammar.bnf --parse 'hi'
+  > tabnas-abnf 'greet = "hi" / "hello"'
+  > tabnas-abnf -f grammar.abnf
+  > echo 'g = "a"' | tabnas-abnf -
+  > tabnas-abnf -f grammar.abnf --parse 'hi'
 `)
 }

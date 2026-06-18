@@ -1,4 +1,4 @@
-package abnf
+package tabnasabnf
 
 import (
 	"strings"
@@ -98,21 +98,21 @@ func TestActionsRulePhaseHook(t *testing.T) {
 
 func TestActionsRejectBadRefs(t *testing.T) {
 	for _, bad := range []string{"@op:o:NOPE", "@nope:o:INC", "@op:zz"} {
-		spec, err := Bnf(`op = "inc" / "dec"`, &BnfConvertOptions{Marks: true})
+		spec, err := Abnf(`op = "inc" / "dec"`, &AbnfConvertOptions{Marks: true})
 		if err != nil {
 			t.Fatal(err)
 		}
 		err = AttachActions(spec, ActionsMap{bad: {func(r *tabnas.Rule, _ *tabnas.Context) {}}})
 		if err == nil {
 			t.Errorf("should reject %q", bad)
-		} else if _, ok := err.(*BnfActionError); !ok {
-			t.Errorf("%q: expected *BnfActionError, got %T", bad, err)
+		} else if _, ok := err.(*AbnfActionError); !ok {
+			t.Errorf("%q: expected *AbnfActionError, got %T", bad, err)
 		}
 	}
 }
 
 func TestMarkListing(t *testing.T) {
-	spec, err := Bnf(`op = "inc" / "dec"`, &BnfConvertOptions{Marks: true})
+	spec, err := Abnf(`op = "inc" / "dec"`, &AbnfConvertOptions{Marks: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestMarkListing(t *testing.T) {
 
 func TestMarksOptIn(t *testing.T) {
 	// Default conversion carries no marks (m$ slot).
-	spec, err := Bnf(`op = "inc" / "dec"`, nil)
+	spec, err := Abnf(`op = "inc" / "dec"`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestMarksOptIn(t *testing.T) {
 
 func TestActionsBuiltinsModeComposition(t *testing.T) {
 	// builtins-mode spec: user action runs after the @node$ tree builtin.
-	spec, err := Bnf(`op = "inc" / "dec"`, &BnfConvertOptions{Builtins: true, Marks: true})
+	spec, err := Abnf(`op = "inc" / "dec"`, &AbnfConvertOptions{Builtins: true, Marks: true})
 	if err != nil {
 		t.Fatal(err)
 	}

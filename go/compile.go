@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Richard Rodger and other contributors, MIT License
 
-package abnf
+package tabnasabnf
 
 // compile.go — compilation mode: turn ABNF source into a *pure-data*
 // tabnas grammar and serialise it as jsonic text. The Go port of
@@ -22,14 +22,14 @@ import (
 	tabnas "github.com/tabnas/parser/go"
 )
 
-// BnfCompileError is raised when a grammar can't be compiled to a
+// AbnfCompileError is raised when a grammar can't be compiled to a
 // pure-data spec.
-type BnfCompileError struct {
+type AbnfCompileError struct {
 	Message string
 	Rules   []string
 }
 
-func (e *BnfCompileError) Error() string { return e.Message }
+func (e *AbnfCompileError) Error() string { return e.Message }
 
 // Ref fields whose string value is an AST-building action dropped by
 // recognition mode.
@@ -39,8 +39,8 @@ var refFields = map[string]bool{"a": true, "bo": true, "bc": true}
 var treeBuiltins = map[string]bool{"@node$": true, "@capture$": true, "@bubble$": true}
 var treeConfigKeys = []string{"node$", "capture$"}
 
-// BnfCompileOptions controls compilation. Mirrors BnfCompileOptions.
-type BnfCompileOptions struct {
+// AbnfCompileOptions controls compilation. Mirrors AbnfCompileOptions.
+type AbnfCompileOptions struct {
 	Start       string
 	Tag         string
 	Strict      bool
@@ -259,8 +259,8 @@ func toRecognitionData(spec *tabnas.GrammarSpec) (map[string]any, error) {
 		return nil, err
 	}
 	if len(offenders) > 0 {
-		return nil, &BnfCompileError{
-			Message: "bnf: grammar needs control functions (probe / unbounded " +
+		return nil, &AbnfCompileError{
+			Message: "abnf: grammar needs control functions (probe / unbounded " +
 				"lookahead) and cannot be emitted as a pure recognition grammar; " +
 				"recompile with `builtins: true`. Offending rule(s): " +
 				strings.Join(offenders, ", "),
@@ -284,8 +284,8 @@ func toPureData(spec *tabnas.GrammarSpec) (map[string]any, error) {
 		if len(keys) > 3 {
 			keys = keys[:3]
 		}
-		return nil, &BnfCompileError{
-			Message: "bnf: spec still contains closures; convert with `builtins: true` " +
+		return nil, &AbnfCompileError{
+			Message: "abnf: spec still contains closures; convert with `builtins: true` " +
 				"for pure-data output. Stray ref(s): " + strings.Join(keys, ", "),
 		}
 	}
@@ -294,8 +294,8 @@ func toPureData(spec *tabnas.GrammarSpec) (map[string]any, error) {
 		return nil, err
 	}
 	if len(offenders) > 0 {
-		return nil, &BnfCompileError{
-			Message: "bnf: spec still contains closures; convert with `builtins: true` " +
+		return nil, &AbnfCompileError{
+			Message: "abnf: spec still contains closures; convert with `builtins: true` " +
 				"for pure-data output.",
 			Rules: offenders,
 		}
@@ -539,12 +539,12 @@ func goHexToJsUnicode(s string) string {
 	})
 }
 
-// BnfCompile compiles ABNF source into pure-data jsonic text.
-func BnfCompile(src string, opts *BnfCompileOptions) (string, error) {
+// AbnfCompile compiles ABNF source into pure-data jsonic text.
+func AbnfCompile(src string, opts *AbnfCompileOptions) (string, error) {
 	if opts == nil {
-		opts = &BnfCompileOptions{}
+		opts = &AbnfCompileOptions{}
 	}
-	spec, err := Bnf(src, &BnfConvertOptions{
+	spec, err := Abnf(src, &AbnfConvertOptions{
 		Start: opts.Start, Tag: opts.Tag, Builtins: true, Marks: true,
 	})
 	if err != nil {
