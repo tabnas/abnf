@@ -3,14 +3,15 @@
 Go port of [`@tabnas/abnf`](../ts) — an ABNF grammar compiler for the
 [`tabnas`](https://github.com/tabnas/parser) parsing engine.
 
-Takes ABNF source and emits a tabnas `GrammarSpec` that, installed
-on an engine, parses inputs in that grammar and builds a `{rule, src,
-kids}` AST. Also emits "pure-data" jsonic (recognition / full-AST specs),
-supports user actions, and ships a CLI (`tabnas-abnf`).
+Takes ABNF source — the RFC 5234 dialect (`=` and `/`, not `::=`) — and
+emits a tabnas `GrammarSpec` that, installed on an engine, parses inputs
+in that grammar and builds a `{rule, src, kids}` AST. Also emits
+"pure-data" jsonic (recognition / full-AST specs), supports user
+actions, and ships a CLI (`tabnas-abnf`).
 
 The Go package tracks the canonical TypeScript implementation in `../ts`;
-both compile the SAME `.abnf` fixtures (in `../ts/test/grammar/`)
-and produce the same parse output.
+both compile the same `.abnf` fixtures (in `../ts/test/grammar/`) and
+produce the same parse output.
 
 ## Install
 
@@ -35,31 +36,20 @@ func main() {
 	j := tabnas.Make()
 	j.Grammar(spec)
 	out, _ := j.Parse("hi")
-	fmt.Println(out) // map[rule:greet src:hi kids:[]]
+	fmt.Println(out) // map[kids:[] rule:greet src:hi]
 }
 ```
 
-Convert + install in one step (optionally attaching user actions):
+## Documentation
 
-```go
-j := tabnas.Make()
-abnf.Install(j, `greet = "hi"`, nil, nil)
-```
+Four-quadrant [Diátaxis](https://diataxis.fr) docs:
 
-Compile to a function-free, pure-data grammar (jsonic text):
-
-```go
-text, _ := abnf.AbnfCompile(`greet = "hi" / "hello"`, nil)
-```
-
-## Exports
-
-- `Abnf(src, *AbnfConvertOptions) (*GrammarSpec, error)` — convert source.
-- `ParseAbnf`, `EmitGrammarSpec`, `EliminateLeftRecursion` — pipeline stages.
-- `Install(j, src, opts, actions)` — convert + install on an engine.
-- `AbnfCompile`, `ToJsonic`, `AttachActions`, `AttachActionSlots`,
-  `MarkListing` — compilation / action / serialisation surface.
-- Errors: `AbnfParseError`, `AbnfCompileError`, `AbnfActionError`.
+- [tutorial.md](doc/tutorial.md) — learning-oriented: zero to a working
+  parser, step by step.
+- [guide.md](doc/guide.md) — task-oriented recipes for real problems.
+- [reference.md](doc/reference.md) — the exact exported API and CLI flags.
+- [concepts.md](doc/concepts.md) — how it works, plus differences from
+  the TS version.
 
 ## CLI
 
