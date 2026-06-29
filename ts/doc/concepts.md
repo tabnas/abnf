@@ -44,6 +44,44 @@ forces case-sensitivity (a fixed token); `%i"GET"` is the explicit form
 of the default. A literal with no ASCII letters (`"+"`) is
 case-independent regardless and emits as a fixed token.
 
+## Built-in lexer tokens: `TX`, `NR`, `ST`, `VL`
+
+ABNF is scannerless — a rule like `ident = ALPHA *( ALPHA / DIGIT )`
+matches one character at a time. That is fine for a language with no
+whitespace (URIs), but it fights the engine's lexer for a
+whitespace-significant language. The tabnas lexer already tokenises whole
+words and **ignores** whitespace and comments between tokens, so a
+char-by-char rule would greedily merge two space-separated identifiers
+(`int32 name` → `int32name`): the space the grammar relied on as a
+boundary was skipped by the lexer before the rule ever saw it.
+
+The fix is to reference the lexer's whole-word tokens directly. Four bare
+uppercase names are reserved for this and compile to a single token
+terminal (`s: '#…'`) rather than a rule reference:
+
+| Name | Token  | Matches (default lexer)        |
+|------|--------|--------------------------------|
+| `TX` | `#TX`  | bareword / identifier          |
+| `NR` | `#NR`  | number (int, float, hex, …)    |
+| `ST` | `#ST`  | quoted string                  |
+| `VL` | `#VL`  | `true` / `false` / `null`      |
+
+```abnf
+field = [ label ] type ident "=" fieldNumber ";"
+type  = ident *( "." ident )
+ident = TX
+fieldNumber = NR
+```
+
+A token terminal is a *terminal*, so it never participates in
+left-recursion inlining and `int32 name` parses as two `#TX` tokens. Wrap
+a token in a named rule (`ident = TX`) when you want it to surface as its
+own `{rule, src, kids}` node. A user (or RFC 5234 core) rule of the same
+name always wins — define `TX = …` and `TX` is your rule again. This is
+the same convention abnf's own meta-grammar uses (`#TX` for rule names,
+`#ST` for string literals); it keeps lexical atoms in the simple lexer and
+structure in the grammar.
+
 ## The meta-grammar: ABNF is parsed by tabnas itself
 
 The ABNF source is parsed by a tabnas instance whose grammar (the
