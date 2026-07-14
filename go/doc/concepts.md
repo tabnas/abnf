@@ -128,11 +128,13 @@ because of Go's type system and idioms:
   function or an array. Action functions take `(*tabnas.Rule,
   *tabnas.Context)` (no third `alt` argument).
 
-- **Compile-stage helpers are unexported.** TS exports
-  `toRecognitionSpec` and `toPureSpec` directly; the Go port keeps the
-  equivalents (`toRecognitionData` / `toPureData`) internal and exposes
-  the higher-level `AbnfCompile`, plus `SpecToData` / `SpecToJSON` /
-  `ToJsonic` for serialisation. Use `AbnfCompile` for pure-data output.
+- **Compile-stage helpers operate on data trees.** TS
+  `toRecognitionSpec` / `toPureSpec` return a `GrammarSpec` object; the
+  Go equivalents `ToRecognitionSpec` / `ToPureSpec` return the generic
+  pure-data tree (`map[string]any`) and an error instead of throwing.
+  The higher-level `AbnfCompile` (plus `SpecToData` / `SpecToJSON` /
+  `ToJsonic` for serialisation) remains the one-call path to pure-data
+  jsonic output.
 
 - **`ToJsonic` signature.** Positional `(value, strict bool, indent int)`
   rather than an options object, and it operates on the generic data

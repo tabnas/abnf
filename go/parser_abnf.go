@@ -227,8 +227,14 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 	}
 }
 
-// abnfRuleSpec returns the rule map for the ABNF parser grammar.
-func abnfRuleSpec() map[string]*tabnas.GrammarRuleSpec {
+// AbnfRules returns the rule map for the ABNF parser grammar — the
+// grammar that parses ABNF source itself. It is the Go counterpart of
+// the TS `abnfRules` export (ts/src/converter.ts). Where the TS table
+// holds bo/bc/a closures inline, the Go table refers to actions by
+// `@`-name; the closures live in the internal Ref map installed by the
+// package's ABNF parser (see getAbnfParser). Each call builds a fresh
+// map, so callers may modify the result freely.
+func AbnfRules() map[string]*tabnas.GrammarRuleSpec {
 	// Element-starter alternatives shared by seq.open / seq.close.
 	seqElemAlts := func() []*tabnas.GrammarAltSpec {
 		return []*tabnas.GrammarAltSpec{
@@ -471,7 +477,7 @@ func getAbnfParser() (*tabnas.Tabnas, error) {
 		ref := abnfParseRef()
 		if err := j.Grammar(&tabnas.GrammarSpec{
 			Ref:  ref,
-			Rule: abnfRuleSpec(),
+			Rule: AbnfRules(),
 		}); err != nil {
 			abnfParserErr = err
 			return

@@ -197,10 +197,136 @@ func TestToPureRejectsClosureSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := toPureData(spec); err == nil {
-		t.Errorf("toPureData should reject a closure spec")
+	if _, err := ToPureSpec(spec); err == nil {
+		t.Errorf("ToPureSpec should reject a closure spec")
 	} else if _, ok := err.(*AbnfCompileError); !ok {
 		t.Errorf("expected *AbnfCompileError, got %T", err)
+	}
+}
+
+func TestToRecognitionSpecBuiltins(t *testing.T) {
+	spec, err := Abnf(`greet = "hi" / "hello"`, &AbnfConvertOptions{Builtins: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := ToRecognitionSpec(spec)
+	if err != nil {
+		t.Fatalf("ToRecognitionSpec: %v", err)
+	}
+	if v, ok := out["v"].(int); !ok || v != tabnas.BUILTIN_SCHEMA_VERSION {
+		t.Errorf("out[v] = %v, want %d", out["v"], tabnas.BUILTIN_SCHEMA_VERSION)
+	}
+	text := ToJsonic(out, true, 2)
+	for _, b := range []string{"@node$", "@capture$", "@bubble$"} {
+		if strings.Contains(text, b) {
+			t.Errorf("recognition spec retained tree builtin %q:\n%s", b, text)
+		}
+	}
+	for _, ok := range []string{"hi", "hello"} {
+		if !recognisesJsonic(t, text, ok) {
+			t.Errorf("should accept %q", ok)
+		}
+	}
+	if recognisesJsonic(t, text, "nope") {
+		t.Errorf("should reject %q", "nope")
+	}
+}
+
+func TestToRecognitionSpecDropsClosureHooks(t *testing.T) {
+	// Closure-mode (no builtins) spec: the AST hooks are `a:"@abnf_aN"`
+	// refs into spec.Ref. Like the TS toRecognitionSpec, those are
+	// droppable — recognition still succeeds without them.
+	spec, err := Abnf(`greet = "hi" / "hello"`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Ref) == 0 {
+		t.Fatal("sanity: closure-mode spec should have refs")
+	}
+	out, err := ToRecognitionSpec(spec)
+	if err != nil {
+		t.Fatalf("ToRecognitionSpec: %v", err)
+	}
+	text := ToJsonic(out, true, 2)
+	if strings.Contains(text, "@abnf_a") {
+		t.Errorf("recognition spec leaked a closure ref:\n%s", text)
+	}
+	if !recognisesJsonic(t, text, "hi") {
+		t.Errorf("should accept %q", "hi")
+	}
+	if recognisesJsonic(t, text, "nope") {
+		t.Errorf("should reject %q", "nope")
+	}
+}
+
+func TestToRecognitionSpecRejectsClosureProbe(t *testing.T) {
+	// A probe dispatcher converted WITHOUT builtins keeps its control
+	// logic (phase guards / decide) as closures — not representable as
+	// pure recognition data.
+	spec, err := Abnf("R = [ A \"@\" ] A\nA = 1*ALPHA", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ToRecognitionSpec(spec)
+	if err == nil {
+		t.Fatal("ToRecognitionSpec should refuse a closure-mode probe spec")
+	}
+	ce, ok := err.(*AbnfCompileError)
+	if !ok {
+		t.Fatalf("expected *AbnfCompileError, got %T (%v)", err, err)
+	}
+	if len(ce.Rules) == 0 {
+		t.Errorf("error should list offending rules")
+	}
+	if !strings.Contains(ce.Message, "probe") && !strings.Contains(ce.Message, "lookahead") {
+		t.Errorf("message should mention probe/lookahead: %q", ce.Message)
+	}
+}
+
+func TestToPureSpecBuiltins(t *testing.T) {
+	spec, err := Abnf(`pair = "a" "b"`, &AbnfConvertOptions{Builtins: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := ToPureSpec(spec)
+	if err != nil {
+		t.Fatalf("ToPureSpec: %v", err)
+	}
+	if v, ok := out["v"].(int); !ok || v != tabnas.BUILTIN_SCHEMA_VERSION {
+		t.Errorf("out[v] = %v, want %d", out["v"], tabnas.BUILTIN_SCHEMA_VERSION)
+	}
+	text := ToJsonic(out, true, 2)
+	if !strings.Contains(text, "@node$") {
+		t.Errorf("pure spec should retain the tree builtins:\n%s", text)
+	}
+	j := loadJsonicSpec(t, text)
+	tree, err := j.Parse("ab")
+	if err != nil {
+		t.Fatalf("pure spec parse: %v", err)
+	}
+	tm, _ := tree.(map[string]any)
+	if tm == nil || tm["rule"] != "pair" || tm["src"] != "ab" {
+		t.Errorf("pure spec should build the AST, got %#v", tree)
+	}
+}
+
+func TestAbnfRulesExported(t *testing.T) {
+	rules := AbnfRules()
+	for _, name := range []string{"abnf", "prod", "alts", "seq", "elem", "atom"} {
+		rs := rules[name]
+		if rs == nil {
+			t.Fatalf("AbnfRules missing rule %q", name)
+		}
+		open, ok := rs.Open.([]*tabnas.GrammarAltSpec)
+		if !ok || len(open) == 0 {
+			t.Errorf("rule %q has no open alts (%T)", name, rs.Open)
+		}
+	}
+	// Each call builds a fresh map: mutating one result must not leak
+	// into the next.
+	rules["abnf"] = nil
+	if AbnfRules()["abnf"] == nil {
+		t.Errorf("AbnfRules should return a fresh map per call")
 	}
 }
 

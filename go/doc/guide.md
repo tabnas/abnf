@@ -183,7 +183,7 @@ text, _ := abnf.AbnfCompile(`greet = "hi"`, &abnf.AbnfCompileOptions{
 
 `AbnfCompile` always converts internally with `Builtins: true`, so even
 a probe-dispatch grammar (optional-prefix ambiguity) compiles to pure
-data. Calling `toRecognitionData` on a closure-mode probe spec returns
+data. Calling `ToRecognitionSpec` on a closure-mode probe spec returns
 an `*AbnfCompileError`.
 
 ## Validate against samples from the shell

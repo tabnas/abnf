@@ -7,8 +7,8 @@ package tabnasabnf
 // ts/src/compile.ts.
 //
 // A GrammarSpec emitted with builtins:true carries only string refs
-// (`@…$` builtins) — no closures. toRecognitionSpec drops the
-// tree-building builtins (recognition is structural); toPureSpec keeps
+// (`@…$` builtins) — no closures. ToRecognitionSpec drops the
+// tree-building builtins (recognition is structural); ToPureSpec keeps
 // them (still pure data). Both refuse a spec that still needs control
 // closures.
 
@@ -235,28 +235,71 @@ func copyAnyMap(m map[string]any) map[string]any {
 	return out
 }
 
-// controlRefRules finds rules whose alts carry a control ref (a `c:`
-// string ref that is NOT a tree/AST builtin) — those can't be expressed
-// purely structurally without the probe builtins. In builtins mode the
-// probe phase guards are `@probePhase0$` etc., which ARE valid pure-data
-// control refs (engine builtins) and so are NOT offenders. Closure-mode
-// probe specs have non-string C fields, caught as offenders in altToData.
-//
-// The TS controlRefRules flags refs found in non-REF_FIELDS positions
-// that point into spec.ref (closures). Since our pure-data spec has an
-// empty ref map, only closure-mode specs (with typed func fields) offend,
-// and those are already collected during specToData.
-
-// ToRecognitionSpec strips a converted spec to a function-free
-// recognition grammar (drops AST building). Returns the serialisable
-// data tree. Errors if control closures remain.
-func toRecognitionData(spec *tabnas.GrammarSpec) (map[string]any, error) {
-	if len(spec.Ref) > 0 {
-		// Closures present -> not pure data. Identify offenders below.
+// controlRefRules finds rules that reference the ref map (closures in
+// spec.Ref) from a field *other than* the droppable AST hooks (a/bo/bc)
+// — i.e. control functions (probe `c:` guards and dispatch actions).
+// Their presence means the grammar can't be represented purely
+// structurally. In builtins mode the probe phase guards are
+// `@probePhase0$` etc. — engine builtins, NOT refs into spec.Ref — and
+// so are not offenders. Mirrors the TS controlRefRules (compile.ts).
+func controlRefRules(rules map[string]any, isRef func(string) bool) []string {
+	offenders := map[string]bool{}
+	var scan func(v any, rule string)
+	scan = func(v any, rule string) {
+		switch x := v.(type) {
+		case []any:
+			for _, e := range x {
+				scan(e, rule)
+			}
+		case map[string]any:
+			for k, val := range x {
+				if s, ok := val.(string); ok && !refFields[k] && isRef(s) {
+					offenders[rule] = true
+				} else {
+					scan(val, rule)
+				}
+			}
+		}
 	}
+	for name, rd := range rules {
+		scan(rd, name)
+	}
+	out := make([]string, 0, len(offenders))
+	for r := range offenders {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ToRecognitionSpec strips a converted spec down to a function-free
+// recognition grammar: AST-building hooks (`a`/`bo`/`bc` refs into
+// spec.Ref and the tree `$`-builtins, plus their `k.node$`/`k.capture$`
+// config) are dropped, and the result carries `v` set to the engine's
+// BUILTIN_SCHEMA_VERSION. It is the Go counterpart of the TS
+// `toRecognitionSpec` export (ts/src/compile.ts); where TS returns a
+// GrammarSpec object, Go returns the generic pure-data tree
+// (map[string]any / []any / scalars — see SpecToData / ToJsonic).
+//
+// Grammars whose control logic is still closures (a probe dispatcher
+// converted without `Builtins: true`) cannot be emitted as pure
+// recognition data: those return a *AbnfCompileError listing the
+// offending rules, matching the TS function's throw.
+func ToRecognitionSpec(spec *tabnas.GrammarSpec) (map[string]any, error) {
+	isRef := func(s string) bool {
+		if spec.Ref == nil {
+			return false
+		}
+		_, ok := spec.Ref[s]
+		return ok
+	}
+
 	data, offenders, err := specToData(spec)
 	if err != nil {
 		return nil, err
+	}
+	if rules, ok := data["rule"].(map[string]any); ok {
+		offenders = mergeSortedRules(offenders, controlRefRules(rules, isRef))
 	}
 	if len(offenders) > 0 {
 		return nil, &AbnfCompileError{
@@ -267,14 +310,44 @@ func toRecognitionData(spec *tabnas.GrammarSpec) (map[string]any, error) {
 			Rules: offenders,
 		}
 	}
-	out := cloneRecognition(data)
+
+	isDropped := func(s string) bool { return isRef(s) || treeBuiltins[s] }
+	out := cloneRecognition(data, isDropped)
 	out["v"] = tabnas.BUILTIN_SCHEMA_VERSION
 	return out, nil
 }
 
-// toPureData keeps the AST-building builtins. Requires builtins-mode
-// conversion (no closures).
-func toPureData(spec *tabnas.GrammarSpec) (map[string]any, error) {
+// mergeSortedRules unions two sorted offender lists, deduplicated.
+func mergeSortedRules(a, b []string) []string {
+	if len(b) == 0 {
+		return a
+	}
+	seen := map[string]bool{}
+	for _, r := range a {
+		seen[r] = true
+	}
+	for _, r := range b {
+		seen[r] = true
+	}
+	out := make([]string, 0, len(seen))
+	for r := range seen {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ToPureSpec reduces a spec to a pure-data, function-free grammar that
+// *keeps* the AST-building `$`-builtins (so the reloaded grammar still
+// builds the full {rule, src, kids} tree), with `v` set to the engine's
+// BUILTIN_SCHEMA_VERSION. It is the Go counterpart of the TS
+// `toPureSpec` export (ts/src/compile.ts); where TS returns a
+// GrammarSpec object, Go returns the generic pure-data tree
+// (map[string]any / []any / scalars — see SpecToData / ToJsonic).
+//
+// Requires a `Builtins: true` conversion: if any closures remain in
+// spec.Ref it returns a *AbnfCompileError, matching the TS throw.
+func ToPureSpec(spec *tabnas.GrammarSpec) (map[string]any, error) {
 	if len(spec.Ref) > 0 {
 		keys := make([]string, 0, len(spec.Ref))
 		for k := range spec.Ref {
@@ -334,36 +407,37 @@ func cloneData(v any) any {
 func mapOrSelf(m map[string]any) map[string]any { return m }
 
 // cloneRecognition drops AST-building hooks: a/bo/bc fields pointing at
-// a tree builtin, and the now-orphaned k.node$/k.capture$ config.
-func cloneRecognition(v any) map[string]any {
-	res := cloneRecognitionVal(v)
+// a dropped action (a spec.Ref closure or a tree builtin), and the
+// now-orphaned k.node$/k.capture$ config.
+func cloneRecognition(v any, isDropped func(string) bool) map[string]any {
+	res := cloneRecognitionVal(v, isDropped)
 	if m, ok := res.(map[string]any); ok {
 		return m
 	}
 	return map[string]any{}
 }
 
-func cloneRecognitionVal(v any) any {
+func cloneRecognitionVal(v any, isDropped func(string) bool) any {
 	switch x := v.(type) {
 	case regexHolder:
 		return x
 	case []any:
 		out := make([]any, len(x))
 		for i, e := range x {
-			out[i] = cloneRecognitionVal(e)
+			out[i] = cloneRecognitionVal(e, isDropped)
 		}
 		return out
 	case map[string]any:
 		o := map[string]any{}
 		for k, val := range x {
 			if refFields[k] {
-				if s, ok := val.(string); ok && isDroppedRecognition(s) {
+				if s, ok := val.(string); ok && isDropped(s) {
 					continue
 				}
 			}
 			if k == "k" {
 				if km, ok := val.(map[string]any); ok {
-					kc := cloneRecognitionVal(km).(map[string]any)
+					kc := cloneRecognitionVal(km, isDropped).(map[string]any)
 					for _, tk := range treeConfigKeys {
 						delete(kc, tk)
 					}
@@ -374,16 +448,12 @@ func cloneRecognitionVal(v any) any {
 					continue
 				}
 			}
-			o[k] = cloneRecognitionVal(val)
+			o[k] = cloneRecognitionVal(val, isDropped)
 		}
 		return o
 	default:
 		return v
 	}
-}
-
-func isDroppedRecognition(s string) bool {
-	return treeBuiltins[s]
 }
 
 // ---- jsonic serialisation ------------------------------------------
@@ -556,9 +626,9 @@ func AbnfCompile(src string, opts *AbnfCompileOptions) (string, error) {
 	}
 	var data map[string]any
 	if !recognition {
-		data, err = toPureData(spec)
+		data, err = ToPureSpec(spec)
 	} else {
-		data, err = toRecognitionData(spec)
+		data, err = ToRecognitionSpec(spec)
 	}
 	if err != nil {
 		return "", err
