@@ -81,10 +81,10 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			if r.Child != nil && r.Child != tabnas.NoRule && r.Child.Node != nil {
 				if altsPtr, ok := r.Child.Node.(*[]abnfSequence); ok {
 					prod := &abnfProduction{
-						Name: asStr(r.U["name"]),
+						Name: asStr(r.EnsureU()["name"]),
 						Alts: *altsPtr,
 					}
-					if b, _ := r.U["incremental"].(bool); b {
+					if b, _ := r.EnsureU()["incremental"].(bool); b {
 						prod.Incremental = true
 					}
 					if listPtr, ok := r.Node.(*productionList); ok {
@@ -94,12 +94,12 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			}
 		}),
 		"@prod-name": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.U["name"] = tokString(r.O[0], r, ctx)
-			r.U["incremental"] = false
+			r.EnsureU()["name"] = tokString(r.O[0], r, ctx)
+			r.EnsureU()["incremental"] = false
 		}),
 		"@prod-name-inc": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.U["name"] = tokString(r.O[0], r, ctx)
-			r.U["incremental"] = true
+			r.EnsureU()["name"] = tokString(r.O[0], r, ctx)
+			r.EnsureU()["incremental"] = true
 		}),
 
 		// --- alts ---
@@ -123,29 +123,29 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 
 		// --- elem ---
 		"@elem-bo": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.U["min"] = 1
-			r.U["max"] = 1
+			r.EnsureU()["min"] = 1
+			r.EnsureU()["max"] = 1
 		}),
 		"@elem-rep-bounded": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.U["min"] = atoi(r.O[0].Src)
-			r.U["max"] = atoi(r.O[2].Src)
+			r.EnsureU()["min"] = atoi(r.O[0].Src)
+			r.EnsureU()["max"] = atoi(r.O[2].Src)
 		}),
 		"@elem-rep-atleast": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.U["min"] = atoi(r.O[0].Src)
-			r.U["max"] = maxInfinity
+			r.EnsureU()["min"] = atoi(r.O[0].Src)
+			r.EnsureU()["max"] = maxInfinity
 		}),
 		"@elem-rep-atmost": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.U["min"] = 0
-			r.U["max"] = atoi(r.O[1].Src)
+			r.EnsureU()["min"] = 0
+			r.EnsureU()["max"] = atoi(r.O[1].Src)
 		}),
 		"@elem-rep-star": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.U["min"] = 0
-			r.U["max"] = maxInfinity
+			r.EnsureU()["min"] = 0
+			r.EnsureU()["max"] = maxInfinity
 		}),
 		"@elem-rep-exact": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			n := atoi(r.O[0].Src)
-			r.U["min"] = n
-			r.U["max"] = n
+			r.EnsureU()["min"] = n
+			r.EnsureU()["max"] = n
 		}),
 		"@elem-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			var item *abnfElement
@@ -157,8 +157,8 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			if item == nil {
 				return
 			}
-			min := asInt(r.U["min"])
-			max := asInt(r.U["max"])
+			min := asInt(r.EnsureU()["min"])
+			max := asInt(r.EnsureU()["max"])
 			var wrapped *abnfElement
 			switch {
 			case min == 1 && max == 1:
@@ -202,20 +202,20 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			r.Node = &abnfElement{Kind: kindRef, Name: tokString(r.O[0], r, ctx)}
 		}),
 		"@atom-lp": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.U["groupKind"] = "group"
+			r.EnsureU()["groupKind"] = "group"
 		}),
 		"@atom-ob": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.U["groupKind"] = "opt"
+			r.EnsureU()["groupKind"] = "opt"
 		}),
 		"@atom-group-c": tabnas.AltCond(func(r *tabnas.Rule, _ *tabnas.Context) bool {
-			return r.U["groupKind"] == "group"
+			return r.EnsureU()["groupKind"] == "group"
 		}),
 		"@atom-group-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			alts := childAlts(r)
 			r.Node = &abnfElement{Kind: kindGroup, Alts: alts}
 		}),
 		"@atom-opt-c": tabnas.AltCond(func(r *tabnas.Rule, _ *tabnas.Context) bool {
-			return r.U["groupKind"] == "opt"
+			return r.EnsureU()["groupKind"] == "opt"
 		}),
 		"@atom-opt-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			alts := childAlts(r)

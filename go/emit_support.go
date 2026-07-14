@@ -309,8 +309,9 @@ func emitProbeDispatch(prod *abnfProduction, tag string, ruleSpec map[string]*ta
 
 	// Closure mode.
 	initMark := refs.registerAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-		r.K["pd_phase"] = 0
-		r.K["pd_mark"] = ctx.Mark()
+		k := r.EnsureK()
+		k["pd_phase"] = 0
+		k["pd_mark"] = ctx.Mark()
 	})
 	decide := refs.registerAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 		var peek *tabnas.Token
@@ -320,10 +321,11 @@ func emitProbeDispatch(prod *abnfProduction, tag string, ruleSpec map[string]*ta
 		mark, _ := r.K["pd_mark"].(int)
 		_ = ctx.Rewind(mark)
 		matched := peek != nil && peek.Name == disambiguatorToken
+		k := r.EnsureK()
 		if matched {
-			r.K["pd_phase"] = 1
+			k["pd_phase"] = 1
 		} else {
-			r.K["pd_phase"] = 2
+			k["pd_phase"] = 2
 		}
 	})
 	phase0 := refs.registerCond(func(r *tabnas.Rule, _ *tabnas.Context) bool {
