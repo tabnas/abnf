@@ -1,5 +1,12 @@
 # @tabnas/abnf
 
+<!-- tabnas-badges -->
+[![npm](https://tabnas.github.io/status/badges/abnf-npm.svg)](https://www.npmjs.com/package/@tabnas/abnf)
+[![CI](https://github.com/tabnas/abnf/actions/workflows/ci.yml/badge.svg)](https://github.com/tabnas/abnf/actions/workflows/ci.yml)
+[![go](https://tabnas.github.io/status/badges/abnf-go.svg)](https://pkg.go.dev/github.com/tabnas/abnf/go)
+[![tabnas standard](https://tabnas.github.io/status/badges/abnf-standard.svg)](https://tabnas.github.io/status/)
+<!-- /tabnas-badges -->
+
 ABNF grammar compiler for the
 [tabnas](https://github.com/rjrodger/tabnas) parser. Takes ABNF source
 — the RFC 5234 dialect (`=` and `/`, not `::=`) — and emits a tabnas
