@@ -1,6 +1,6 @@
 {
   "name": "@tabnas/abnf",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "main": "dist/abnf.js",
   "type": "commonjs",
   "types": "dist/abnf.d.ts",
@@ -16,7 +16,8 @@
   "author": "Richard Rodger (http://richardrodger.com)",
   "repository": {
     "type": "git",
-    "url": "git://github.com/tabnas/abnf.git"
+    "url": "git://github.com/tabnas/abnf.git",
+    "directory": "ts"
   },
   "scripts": {
     "test": "node --enable-source-maps --test test/**/*.test.js",
