@@ -1,6 +1,6 @@
 {
   "name": "@tabnas/abnf",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "main": "dist/abnf.js",
   "type": "commonjs",
   "types": "dist/abnf.d.ts",

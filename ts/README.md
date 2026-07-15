@@ -27,6 +27,35 @@ tn.abnf(`greet = "hi" / "hello"`)
 tn.parse('hi') // => ({ rule: 'greet', src: 'hi', kids: [] })
 ```
 
+## Left recursion
+
+Left-recursive rules are accepted directly. A left-recursion pass
+(Paull's algorithm) rewrites direct (`P = P a / b`) and indirect
+recursion into `P = b *(a)`, which the push-down engine runs without
+re-entering a rule at the same position:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  expr = expr PL term / term
+  term = NR
+  PL   = "+"
+`)
+
+tn.parse('1+2+3').kids.map((k) => k.rule) // => ['PL', 'term', 'PL', 'term']
+```
+
+Because it is a rewrite, the tree is **flat** (no nested `expr`; the
+leading operand folds into the rule, so associativity is applied in an
+action, not read off the AST), and `@ref` alt actions on the rewritten
+branches are look-up-only — attach actions to the sub-rules instead. A
+**purely** left-recursive rule (no non-recursive branch) is an error.
+See [concepts.md](doc/concepts.md) and the root
+[README](../README.md#left-recursion) for the full details and caveats.
+
 ## Documentation
 
 Four-quadrant [Diátaxis](https://diataxis.fr) docs:
