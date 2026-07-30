@@ -56,7 +56,9 @@ func loadSpecTSV(t *testing.T, name string) []specRow {
 		if lineNo == 1 {
 			continue // header
 		}
-		line := scanner.Text()
+		// Strip the CR of a CRLF line: the TS loader splits on /\r?\n/ and
+		// drops it, so keeping it here would feed the runtimes different bytes.
+		line := strings.TrimSuffix(scanner.Text(), "\r")
 		if line == "" {
 			continue
 		}
