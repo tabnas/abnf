@@ -15,13 +15,136 @@ grammar and builds a `{rule, src, kids}` AST. It can also emit
 "pure-data" jsonic and supports user actions. Ships the `tabnas-abnf`
 CLI.
 
+**Why you would want this.** The tabnas engine ships no grammar of its
+own — you bring one, normally as a hand-written table of `open`/`close`
+rule alternatives. That table is precise but verbose, and it is not the
+notation the specification you are implementing is written in. RFC
+specifications, from URIs to media types to protocol headers, publish
+their grammars in ABNF. This package lets you paste that ABNF in and get
+a working parser, instead of transcribing it by hand.
+
+```bash
+npm install @tabnas/parser @tabnas/abnf
+```
+
+## A first grammar
+
+A grammar is a set of **productions**, `name = definition`. Alternatives
+are separated by `/`, and terminals are quoted strings.
+
 ```js
 const { Tabnas } = require('@tabnas/parser')
 const { abnf } = require('@tabnas/abnf')
 
 const tn = new Tabnas({ plugins: [abnf] })
 tn.abnf(`greet = "hi" / "hello"`)
+
 tn.parse('hi') // => ({ rule: 'greet', src: 'hi', kids: [] })
+```
+
+Every rule that matches produces one AST node with three fields:
+
+- **`rule`** — the production's name, so you can navigate the tree by the
+  names you wrote.
+- **`src`** — the source text the rule matched.
+- **`kids`** — child nodes, one per sub-rule the production referenced.
+
+`greet` matches a single terminal, so it has no children.
+
+## Sequences and sub-rules
+
+Write elements one after another to match them in order, and reference
+another production by its bare name to nest it:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  greeting = "hello" name
+  name     = 1*ALPHA
+`)
+
+const out = tn.parse('hello world')
+out.kids.map((k) => k.rule) // => ['name']
+out.kids[0].src             // => 'world'
+```
+
+`1*ALPHA` is "one or more letters". `ALPHA` is one of the RFC 5234
+Appendix B.1 **core rules** (`ALPHA`, `DIGIT`, `HEXDIG`, `CRLF`, `WSP`,
+…), which are spliced in automatically whenever a grammar references one
+without defining it.
+
+Note that `out.src` is `'helloworld'`, not `'hello world'`: the lexer
+skips whitespace between tokens, so `src` is the concatenation of what
+was matched, not a slice of the original input.
+
+## Repetition, optionals, and groups
+
+The usual ABNF operators all work — `*x` (zero or more), `1*x` (one or
+more), `m*nx` (bounded), `[ x ]` (optional), and `( … )` for grouping:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`csv = NR *( "," NR )`)
+
+tn.parse('1,2,3').src // => '1,2,3'
+tn.parse('7').src     // => '7'
+```
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`flag = "log" [ "=" TX ]`)
+
+tn.parse('log=debug').src // => 'log=debug'
+tn.parse('log').src       // => 'log'
+```
+
+## Terminals: literals, built-in tokens, and prose
+
+There are three ways to say "a terminal goes here".
+
+**A quoted literal** is matched verbatim — case-insensitively, per RFC
+5234, unless you write `%s"…"`. A production whose *whole* body is a
+single literal is a lexical definition rather than a rule, so it compiles
+to a named lexer token instead of a rule (`PL = "+"` becomes `#PL`).
+
+**A built-in lexer token** — `TX` (bareword), `NR` (number), `ST`
+(quoted string), `VL` (`true`/`false`/`null`) — matches whole tokens the
+engine's lexer already produces. Prefer these over deriving text
+character by character: because whitespace between tokens is skipped,
+a char-level `1*ALPHA` would happily run two space-separated words
+together, while `TX` will not.
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  pair = "{" key ":" val "}"
+  key  = TX
+  val  = NR / ST
+`)
+
+tn.parse('{a:1}').kids.map((k) => k.rule)     // => ['key', 'val']
+tn.parse('{a:"x"}').kids[1].src               // => '"x"'
+```
+
+**Prose** (`<free text>`) is RFC 5234's escape hatch for describing a
+terminal in English. It defines nothing, so it is accepted in exactly one
+place: as the whole body of a production naming a built-in token, where
+it documents what the lexer already provides.
+
+```
+NR = <number>     ; informational — compiles to nothing
 ```
 
 ## The same grammar, two ways
@@ -175,10 +298,12 @@ This repository contains two implementations. `ts/` is canonical; `go/`
 tracks it. Both compile the same `.abnf` fixtures (in
 `ts/test/grammar/`) and produce the same parse trees.
 
-> **Note:** prose-val (`NR = <number>`), lifting single-literal
-> productions to named tokens, and preserving pure aliases (`val = add`)
-> currently exist in `ts/` only. Until `go/` catches up, grammars using
-> those features compile differently across the two implementations.
+That claim is enforced, not asserted: [`test/spec/*.tsv`](test/spec/)
+holds cross-runtime conformance fixtures pinning, for each grammar, the
+tokens allocated, the rule names emitted, the AST a sample input parses
+to, and the exact message for each rejected grammar. `ts/test/parity.test.js`
+and `go/parity_test.go` run the *same* files, so neither runtime can drift
+without going red. See [`test/AGENTS.md`](test/AGENTS.md).
 
 | Path | Description |
 |---|---|

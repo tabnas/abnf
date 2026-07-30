@@ -212,9 +212,37 @@ func eliminateLeftRecursion(grammar *abnfGrammar) *abnfGrammar {
 	}
 	prods := topoOrderForPaull(copies)
 
+	// Substitution normally runs for every production, even a cycle-free one.
+	// That is pragmatic rather than theoretical: the multi-token altPrefixes
+	// used to populate tcol (so the lexer's regex matchers fire with the right
+	// tin in nested contexts) are read off the fully inlined shape, and a rule
+	// choosing between several alternatives needs that lookahead to dispatch.
+	// Scoping substitution to the cyclic SCCs in general therefore has to wait
+	// for tcol to be computed from the un-substituted grammar.
+	//
+	// One case is safe to exempt today, and it is the one that visibly mangles
+	// a grammar: a *pure alias*, a production whose single alternative is a
+	// single rule reference (`val = add`). Inlining it rewrites `val = add`
+	// into `val = NR [ PL add ]` — the alias name is dissolved, so the rule
+	// vanishes from the emitted AST and the grammar no longer renders back to
+	// the ABNF it was written in. Because such a production has exactly one
+	// alternative, it has nothing to dispatch between: it unconditionally
+	// pushes its target, needs no lookahead, and so cannot depend on the
+	// inlined prefixes. Aliases caught up in a leading-reference cycle are
+	// still inlined — that is where Paull's substitution is doing real work
+	// (`P = Q`, `Q = P a / b`).
+	cyclic := findLeadingRefCycleMembers(prods)
+	isExemptAlias := func(p *abnfProduction) bool {
+		return len(p.Alts) == 1 && len(p.Alts[0]) == 1 &&
+			p.Alts[0][0].Kind == kindRef &&
+			!cyclic[p.Name] && !cyclic[p.Alts[0][0].Name]
+	}
+
 	for i := 0; i < len(prods); i++ {
-		for j := 0; j < i; j++ {
-			prods[i] = substituteLeadingRef(prods[i], prods[j])
+		if !isExemptAlias(prods[i]) {
+			for j := 0; j < i; j++ {
+				prods[i] = substituteLeadingRef(prods[i], prods[j])
+			}
 		}
 		prods[i] = eliminateDirectLeftRec(prods[i])
 	}
@@ -240,6 +268,98 @@ func eliminateLeftRecursion(grammar *abnfGrammar) *abnfGrammar {
 		ordered = append(ordered, byName[name])
 	}
 	return &abnfGrammar{Productions: ordered}
+}
+
+// findLeadingRefCycleMembers is a Tarjan-flavoured SCC scan over the
+// leading-reference graph: it returns the names of productions that
+// participate in at least one cycle (self-loop or longer). Used to scope
+// Paull's substitution to only the rules that actually need it. Go port of the
+// TS findLeadingRefCycleMembers.
+func findLeadingRefCycleMembers(prods []*abnfProduction) map[string]bool {
+	byName := map[string]*abnfProduction{}
+	for _, p := range prods {
+		byName[p.Name] = p
+	}
+	leadingRefs := func(p *abnfProduction) []string {
+		out := []string{}
+		for _, alt := range p.Alts {
+			if len(alt) == 0 {
+				continue
+			}
+			if first := alt[0]; first.Kind == kindRef {
+				if _, ok := byName[first.Name]; ok {
+					out = append(out, first.Name)
+				}
+			}
+		}
+		return out
+	}
+
+	index := 0
+	stack := []string{}
+	onStack := map[string]bool{}
+	indices := map[string]int{}
+	lowlinks := map[string]int{}
+	cyclic := map[string]bool{}
+
+	var strongConnect func(name string)
+	strongConnect = func(name string) {
+		indices[name] = index
+		lowlinks[name] = index
+		index++
+		stack = append(stack, name)
+		onStack[name] = true
+
+		if prod := byName[name]; prod != nil {
+			for _, target := range leadingRefs(prod) {
+				if _, seen := indices[target]; !seen {
+					strongConnect(target)
+					if lowlinks[target] < lowlinks[name] {
+						lowlinks[name] = lowlinks[target]
+					}
+				} else if onStack[target] {
+					if indices[target] < lowlinks[name] {
+						lowlinks[name] = indices[target]
+					}
+				}
+			}
+		}
+
+		if lowlinks[name] == indices[name] {
+			// Pop the SCC. More than one member, or one member with a
+			// self-loop, means a cycle.
+			scc := []string{}
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				delete(onStack, w)
+				scc = append(scc, w)
+				if w == name {
+					break
+				}
+			}
+			isCycle := len(scc) > 1
+			if len(scc) == 1 {
+				for _, t := range leadingRefs(byName[scc[0]]) {
+					if t == scc[0] {
+						isCycle = true
+					}
+				}
+			}
+			if isCycle {
+				for _, n := range scc {
+					cyclic[n] = true
+				}
+			}
+		}
+	}
+
+	for _, p := range prods {
+		if _, seen := indices[p.Name]; !seen {
+			strongConnect(p.Name)
+		}
+	}
+	return cyclic
 }
 
 // topoOrderForPaull orders over the leading-position reference graph.
@@ -330,8 +450,8 @@ func eliminateDirectLeftRec(prod *abnfProduction) *abnfProduction {
 		tailInner = &abnfElement{Kind: kindGroup, Alts: nonTrivial}
 	}
 	return &abnfProduction{
-		Name: prod.Name,
-		Alts: []abnfSequence{{seedElement, {Kind: kindStar, Inner: tailInner}}},
+		Name:     prod.Name,
+		Alts:     []abnfSequence{{seedElement, {Kind: kindStar, Inner: tailInner}}},
 		NodeKind: prod.NodeKind,
 	}
 }
@@ -370,6 +490,10 @@ func desugar(grammar *abnfGrammar) *abnfGrammar {
 		switch el.Kind {
 		case kindTerm, kindRef, kindRegex, kindToken:
 			return el
+		case kindProse:
+			// Unreachable: resolveProseTerminals drops every prose element
+			// (or errors) before desugaring runs.
+			panic(fmt.Sprintf("abnf: internal: unresolved prose terminal '<%s>'", el.Text))
 		case kindGroup:
 			innerAlts := make([]abnfSequence, len(el.Alts))
 			for i, a := range el.Alts {
@@ -381,11 +505,20 @@ func desugar(grammar *abnfGrammar) *abnfGrammar {
 		}
 
 		inner := desugarElement(el.Inner)
+		// Name the generated helper after what it repeats. A literal lifted
+		// from a named production (`PL = "+"`) carries that name, and a
+		// builtin token carries its own, so `*PL` still yields
+		// `_genN_star_PL` rather than an anonymous `_genN_star_term`.
 		hint := "x"
 		if inner.Kind == kindRef {
 			hint = inner.Name
 		} else if inner.Kind == kindTerm {
 			hint = "term"
+			if inner.TokenName != "" {
+				hint = inner.TokenName
+			}
+		} else if inner.Kind == kindToken {
+			hint = strings.TrimPrefix(inner.Name, "#")
 		}
 
 		switch el.Kind {
@@ -526,7 +659,16 @@ func regexKey(el *abnfElement) string {
 var nonIdentRe = regexp.MustCompile(`[^A-Za-z0-9]`)
 var trimUnderscore = regexp.MustCompile(`^_+|_+$`)
 
-func allocTokenName(literal string, used map[string]bool) string {
+func allocTokenName(literal string, used map[string]bool, preferred string) string {
+	// A literal lifted from a named production (`PL = "+"`) keeps that name,
+	// so the emitted grammar reads `PL` rather than `T`.
+	if preferred != "" {
+		want := "#" + preferred
+		if !used[want] {
+			used[want] = true
+			return want
+		}
+	}
 	base := nonIdentRe.ReplaceAllString(literal, "_")
 	base = strings.ToUpper(base)
 	base = trimUnderscore.ReplaceAllString(base, "")
@@ -564,6 +706,244 @@ var builtinTokens = map[string]string{
 	"NR": "#NR",
 	"ST": "#ST",
 	"VL": "#VL",
+}
+
+// builtinTokenOrder is builtinTokens in declaration order. Go map iteration is
+// randomised, so anything user-visible that lists these names — currently the
+// prose-val error message — must use this to stay byte-identical to the TS
+// implementation.
+var builtinTokenOrder = []string{"TX", "NR", "ST", "VL"}
+
+// reservedTokenNames are the token names the engine itself owns: the standard
+// lexer tokens plus the fixed tokens the default config installs. A lifted
+// literal must never claim one of these — binding `#TX` to a literal would
+// displace the lexer's text matcher rather than add a token — so a production
+// so named stays an ordinary rule. Go port of the TS RESERVED_TOKEN_NAMES.
+var reservedTokenNames = map[string]bool{
+	"BD": true, "ZZ": true, "UK": true, "AA": true, "SP": true, "LN": true,
+	"CM": true, "NR": true, "ST": true, "TX": true, "VL": true,
+	"OB": true, "CB": true, "OS": true, "CS": true, "CL": true, "CA": true,
+}
+
+// resolveProseTerminals resolves RFC 5234 prose-val terminals (`<free text>`).
+//
+// Prose is informational by definition — RFC 5234 §4 calls it a "last resort"
+// escape hatch for describing a terminal in English when no formal notation
+// will do. There is nothing to compile, so the converter accepts it in exactly
+// one position: as the *entire* body of a production naming a builtin lexer
+// token.
+//
+//	NR = <number>
+//
+// That line documents, in the grammar text, that `NR` is the engine's number
+// token. The lexer already supplies it, so the production is dropped here and
+// every `NR` reference falls through to normalizeBuiltinTokens, which binds it
+// to `#NR`. This is what lets a grammar state its terminals explicitly and
+// still round-trip.
+//
+// Prose anywhere else has no definition behind it, so it is an error rather
+// than a silently-ignored rule. Go port of the TS resolveProseTerminals.
+func resolveProseTerminals(grammar *abnfGrammar) error {
+	kept := []*abnfProduction{}
+
+	var findStray func(el *abnfElement) *abnfElement
+	findStray = func(el *abnfElement) *abnfElement {
+		switch el.Kind {
+		case kindProse:
+			return el
+		case kindOpt, kindStar, kindPlus, kindRep:
+			return findStray(el.Inner)
+		case kindGroup:
+			for _, alt := range el.Alts {
+				for _, inner := range alt {
+					if hit := findStray(inner); hit != nil {
+						return hit
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	for _, prod := range grammar.Productions {
+		if len(prod.Alts) == 1 && len(prod.Alts[0]) == 1 &&
+			prod.Alts[0][0].Kind == kindProse {
+			if _, ok := builtinTokens[prod.Name]; ok {
+				continue // informational — the lexer defines it
+			}
+			// builtinTokenOrder, not a sorted map walk: the message must
+			// match the TS one byte for byte (ts/test/grammar/parity.json).
+			names := builtinTokenOrder
+			return &AbnfParseError{Message: fmt.Sprintf(
+				"abnf: rule '%s' is defined only by prose ('<%s>'), which describes "+
+					"a terminal but does not define one. Prose is allowed only for "+
+					"built-in lexer tokens (%s).",
+				prod.Name, prod.Alts[0][0].Text, strings.Join(names, ", "))}
+		}
+
+		// Any surviving prose is embedded in a larger expression, where it
+		// cannot be given a meaning. Nested groups and repetitions are
+		// searched too, so `x = ( <foo> / "a" )` reports the same clear
+		// error as a top-level `x = "a" <foo>`.
+		for _, alt := range prod.Alts {
+			for _, el := range alt {
+				if stray := findStray(el); stray != nil {
+					return &AbnfParseError{Message: fmt.Sprintf(
+						"abnf: rule '%s' uses prose ('<%s>') inside an expression; "+
+							"prose may only stand alone as the whole definition of a "+
+							"built-in lexer token.", prod.Name, stray.Text)}
+				}
+			}
+		}
+		kept = append(kept, prod)
+	}
+
+	if len(kept) == 0 {
+		return &AbnfParseError{Message: "abnf: grammar defines no rules — " +
+			"only informational prose terminals."}
+	}
+
+	grammar.Productions = kept
+	return nil
+}
+
+// liftLiteralTokens lifts single-literal productions into *named lexer
+// tokens*.
+//
+// A production whose whole body is one string literal is a lexical
+// definition, not a syntactic rule:
+//
+//	PL = "+"
+//
+// Compiled as a rule it would produce a token named after the literal text —
+// and since `+` has no word characters to name it after, that degrades to
+// `#T` / `#T1` / … — plus a one-token `PL` rule wrapping it, so a grammar
+// rendered back to ABNF reads `PL = T` with a separate `T = "+"`. Lifting
+// instead binds the literal to `#PL` directly and drops the rule, which is
+// exactly how the same grammar is written by hand against the engine
+// (`Fixed: {Token: {"#PL": "+"}}`).
+//
+// The start rule is never lifted: it has to stay a rule for the grammar to
+// have an entry point. Multi-alternative productions (`sign = "+" / "-"`) are
+// real choices and are left alone, as are names the engine already owns (see
+// reservedTokenNames) and the RFC 5234 core rules.
+//
+// Returns every lifted definition, referenced or not: the production is gone
+// from the grammar, so an unreferenced one would otherwise leave no element
+// behind for the emitter to allocate a token from, and the user's declaration
+// would vanish silently. Go port of the TS liftLiteralTokens.
+func liftLiteralTokens(grammar *abnfGrammar, start string) []*abnfElement {
+	type liftedLit struct {
+		literal       string
+		caseSensitive bool
+		hasCaseSens   bool
+	}
+	lifted := map[string]liftedLit{}
+	order := []string{}
+
+	for _, prod := range grammar.Productions {
+		if prod.Name == start || reservedTokenNames[prod.Name] ||
+			prod.NodeKind == "core" {
+			continue
+		}
+		if len(prod.Alts) != 1 || len(prod.Alts[0]) != 1 {
+			continue
+		}
+		el := prod.Alts[0][0]
+		if el.Kind != kindTerm {
+			continue
+		}
+		// `path-empty = ""` (RFC 3986) matches the empty string — a rule that
+		// derives epsilon, not a token the lexer could ever emit.
+		if el.Literal == "" {
+			continue
+		}
+		lifted[prod.Name] = liftedLit{el.Literal, el.CaseSensitive, el.hasCaseSens}
+		order = append(order, prod.Name)
+	}
+
+	// The engine keys its fixed tokens by literal (fixed.token is inverted to
+	// src -> tin), so one literal is one token — two names for the same
+	// literal cannot both become tokens. When `A = "+"` and `B = "+"` both
+	// claim `+`, lifting either would silently drop the other, so neither is
+	// lifted and both stay ordinary rules.
+	byLiteral := map[string][]string{}
+	for _, name := range order {
+		lit := lifted[name]
+		key := termKey(&abnfElement{Kind: kindTerm, Literal: lit.literal,
+			CaseSensitive: lit.caseSensitive, hasCaseSens: lit.hasCaseSens})
+		byLiteral[key] = append(byLiteral[key], name)
+	}
+	for _, names := range byLiteral {
+		if len(names) > 1 {
+			for _, n := range names {
+				delete(lifted, n)
+			}
+		}
+	}
+	if len(lifted) == 0 {
+		return nil
+	}
+
+	mk := func(name string, lit liftedLit) *abnfElement {
+		return &abnfElement{Kind: kindTerm, Literal: lit.literal,
+			CaseSensitive: lit.caseSensitive, hasCaseSens: lit.hasCaseSens,
+			TokenName: name}
+	}
+
+	var walk func(el *abnfElement) *abnfElement
+	walk = func(el *abnfElement) *abnfElement {
+		switch el.Kind {
+		case kindRef:
+			if lit, ok := lifted[el.Name]; ok {
+				return mk(el.Name, lit)
+			}
+			return el
+		case kindOpt, kindStar, kindPlus, kindRep:
+			cp := *el
+			cp.Inner = walk(el.Inner)
+			return &cp
+		case kindGroup:
+			alts := make([]abnfSequence, len(el.Alts))
+			for i, a := range el.Alts {
+				na := make(abnfSequence, len(a))
+				for j, e := range a {
+					na[j] = walk(e)
+				}
+				alts[i] = na
+			}
+			return &abnfElement{Kind: kindGroup, Alts: alts}
+		}
+		return el
+	}
+
+	out := []*abnfProduction{}
+	for _, p := range grammar.Productions {
+		if _, ok := lifted[p.Name]; ok {
+			continue
+		}
+		alts := make([]abnfSequence, len(p.Alts))
+		for i, a := range p.Alts {
+			na := make(abnfSequence, len(a))
+			for j, e := range a {
+				na[j] = walk(e)
+			}
+			alts[i] = na
+		}
+		cp := *p
+		cp.Alts = alts
+		out = append(out, &cp)
+	}
+	grammar.Productions = out
+
+	// Stable order (declaration order) so token allocation is deterministic.
+	liftedEls := []*abnfElement{}
+	for _, name := range order {
+		if lit, ok := lifted[name]; ok {
+			liftedEls = append(liftedEls, mk(name, lit))
+		}
+	}
+	return liftedEls
 }
 
 // normalizeBuiltinTokens rewrites every bareword reference whose name is a

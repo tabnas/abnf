@@ -1,0 +1,15 @@
+grammar	input	expected
+val = add\nadd = NR [ PL add ]\nNR = <number>\nPL = "+"	1+2+3	{"rule":"val","src":"1+2+3","kids":[{"rule":"add","src":"1+2+3","kids":[{"rule":"add","src":"2+3","kids":[{"rule":"add","src":"3","kids":[]}]}]}]}
+val = add\nadd = NR [ PL add ]\nPL = "+"	1+2+3	{"rule":"val","src":"1+2+3","kids":[{"rule":"add","src":"1+2+3","kids":[{"rule":"add","src":"2+3","kids":[{"rule":"add","src":"3","kids":[]}]}]}]}
+NR = <number>\nadd = NR [ PL add ]\nPL = "+"	1+2	{"rule":"add","src":"1+2","kids":[{"rule":"add","src":"2","kids":[]}]}
+add = NR [ PL add ]\nPL = "+"	1+2	{"rule":"add","src":"1+2","kids":[{"rule":"add","src":"2","kids":[]}]}
+top = "x"\nPL = "+"	x	{"rule":"top","src":"x","kids":[]}
+top = A B\nA = "+"\nB = "+"	++	{"rule":"top","src":"++","kids":[{"rule":"B","src":"+","kids":[]}]}
+greet = "hi"	hi	{"rule":"greet","src":"hi","kids":[]}
+greet = "hi" / "hello"	hello	{"rule":"greet","src":"hello","kids":[]}
+top = TX\nTX = "literal"	literal	{"rule":"top","src":"literal","kids":[{"rule":"TX","src":"literal","kids":[]}]}
+e = NR sign NR\nsign = "+" / "-"	1+2	{"rule":"e","src":"1+2","kids":[{"rule":"sign","src":"+","kids":[]}]}
+P = Q\nQ = P PL / NR\nPL = "+"	1++	{"rule":"P","src":"1++","kids":[]}
+x = "x" name "=" value\nname = 1*ALPHA\nvalue = 1*DIGIT	xfoo=42	{"rule":"x","src":"xfoo=42","kids":[{"rule":"name","src":"foo","kids":[]},{"rule":"value","src":"42","kids":[]}]}
+rep = *PL\nPL = "+"	++	{"rule":"rep","src":"++","kids":[]}
+v = p\np = "a" q\nq = "b" "c"	a bc	{"rule":"v","src":"abc","kids":[{"rule":"p","src":"abc","kids":[{"rule":"q","src":"bc","kids":[]}]}]}

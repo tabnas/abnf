@@ -95,8 +95,18 @@ func TestAstSingleTerminal(t *testing.T) {
 
 func TestAstRefAsChildNode(t *testing.T) {
 	// `p = "a" q` keeps q as a kid (q is not at the leading position).
-	j := makeParser(t, "p = \"a\" q\nq = \"b\"", nil)
-	assertParse(t, j, "a b", node("p", "ab", node("q", "b")))
+	// `q` is a two-element sequence deliberately: a production whose whole
+	// body is a single literal is lifted to a named token, and tokens are not
+	// AST nodes (see TestLiftBindsProductionNameAsTokenName).
+	j := makeParser(t, "p = \"a\" q\nq = \"b\" \"c\"", nil)
+	assertParse(t, j, "a bc", node("p", "abc", node("q", "bc")))
+}
+
+func TestAstPureAliasSurvives(t *testing.T) {
+	// A pure alias (`v = p`) is not inlined, so it survives as its own node
+	// wrapping the rule it names.
+	j := makeParser(t, "v = p\np = \"a\" q\nq = \"b\" \"c\"", nil)
+	assertParse(t, j, "a bc", node("v", "abc", node("p", "abc", node("q", "bc"))))
 }
 
 func TestAstCompositeRule(t *testing.T) {

@@ -198,6 +198,12 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 		"@atom-nv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.Node = parseNumericValue(r.O[0].Src)
 		}),
+		"@atom-pv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
+			// Strip the surrounding `<` and `>`; the resolveProseTerminals
+			// pass decides what the prose means.
+			src := r.O[0].Src
+			r.Node = &abnfElement{Kind: kindProse, Text: src[1 : len(src)-1]}
+		}),
 		"@atom-tx": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			r.Node = &abnfElement{Kind: kindRef, Name: tokString(r.O[0], r, ctx)}
 		}),
@@ -248,6 +254,7 @@ func AbnfRules() map[string]*tabnas.GrammarRuleSpec {
 			{S: "#NV", B: 1, P: "elem"},
 			{S: "#SS", B: 1, P: "elem"},
 			{S: "#SI", B: 1, P: "elem"},
+			{S: "#PV", B: 1, P: "elem"},
 			{S: "#TX", B: 1, P: "elem"},
 			{S: "#LP", B: 1, P: "elem"},
 			{S: "#OB", B: 1, P: "elem"},
@@ -320,6 +327,7 @@ func AbnfRules() map[string]*tabnas.GrammarRuleSpec {
 				{S: "#SI #ST", A: "@atom-si"},
 				{S: "#ST", A: "@atom-st"},
 				{S: "#NV", A: "@atom-nv"},
+				{S: "#PV", A: "@atom-pv"},
 				{S: "#TX", A: "@atom-tx"},
 				{S: "#LP", A: "@atom-lp", P: "alts"},
 				{S: "#OB", A: "@atom-ob", P: "alts"},
@@ -332,6 +340,7 @@ func AbnfRules() map[string]*tabnas.GrammarRuleSpec {
 				{S: "#NV", B: 1},
 				{S: "#SS", B: 1},
 				{S: "#SI", B: 1},
+				{S: "#PV", B: 1},
 				{S: "#NUM", B: 1},
 				{S: "#STAR", B: 1},
 				{S: "#LP", B: 1},
@@ -379,6 +388,9 @@ func abnfParserOptions() tabnas.Options {
 	matchTok := map[string]*regexp.Regexp{
 		"#NUM": regexp.MustCompile(`^[0-9]+`),
 		"#NV":  regexp.MustCompile(`^%[xdbXDB][0-9a-fA-F]+(?:[-.][0-9a-fA-F]+)*`),
+		// RFC 5234 prose-val: `<` free text `>`. The body is every printable
+		// char except `>` itself (%x20-3D / %x3F-7E).
+		"#PV": regexp.MustCompile(`^<[\x20-\x3D\x3F-\x7E]*>`),
 	}
 	// `#NV` (numeric value, `%xNN…`) must lex even at non-leading
 	// lookahead slots — e.g. the atom after a repetition prefix
@@ -387,14 +399,17 @@ func abnfParserOptions() tabnas.Options {
 	// (the TS engine uses a per-position tcol), so mark `#NV` eager so it
 	// fires regardless of slot. It starts with `%`, so it never
 	// over-matches other tokens.
-	matchEager := map[string]bool{"#NV": true}
+	// `#PV` is eager for the same reason as `#NV`: it must lex at
+	// non-leading lookahead slots too. It starts with `<`, which opens no
+	// other token, so it never over-matches.
+	matchEager := map[string]bool{"#NV": true, "#PV": true}
 
 	return tabnas.Options{
 		Rule:  &tabnas.RuleOptions{Start: "abnf"},
 		Fixed: &tabnas.FixedOptions{Token: fixedTok},
 		Match: &tabnas.MatchOptions{Token: matchTok, TokenEager: matchEager},
 		TokenSet: map[string][]string{
-			"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI"},
+			"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI", "#PV"},
 		},
 		Comment: &tabnas.CommentOptions{
 			Def: map[string]*tabnas.CommentDef{
@@ -464,7 +479,7 @@ func getAbnfParser() (*tabnas.Tabnas, error) {
 		// applied after #NV / #SS / #SI tins exist so the names resolve.
 		j.SetOptions(tabnas.Options{
 			TokenSet: map[string][]string{
-				"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI"},
+				"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI", "#PV"},
 			},
 		})
 
