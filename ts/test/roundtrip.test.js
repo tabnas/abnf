@@ -19,10 +19,14 @@
 
 const { describe, it } = require('node:test')
 const assert = require('node:assert')
+const Fs = require('node:fs')
+const Path = require('node:path')
 
 const { Tabnas } = require('@tabnas/parser')
 const { abnf: abnfPlugin } = require('..')
 const { abnf } = require('../dist/converter.js')
+
+const FIXTURE = Path.join(__dirname, 'grammar', 'addition.abnf')
 
 function loadDebug() {
   const candidates = [process.env.TABNAS_DEBUG_PATH, '@tabnas/debug'].filter(
@@ -109,6 +113,36 @@ describe('round-trip', () => {
 })
 
 
+describe('addition.abnf fixture', () => {
+  // End-to-end over the on-disk fixture, as required for a dialect
+  // extension (AGENTS.md: add a fixture grammar plus an end-to-end test).
+  const src = Fs.readFileSync(FIXTURE).toString()
+
+  it('compiles and parses from the fixture file', () => {
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
+    tn.abnf(src)
+    assert.equal(tn.parse('1+2+3').rule, 'val')
+    assert.equal(tn.parse('1+2+3').src, '1+2+3')
+    assert.equal(tn.parse('7').src, '7')
+  })
+
+  it('compiles NR to the built-in token and PL to a named token', () => {
+    const spec = abnf(src)
+    assert.equal(spec.options.fixed.token['#PL'], '+')
+    assert.equal(spec.rule.NR, undefined, 'prose line emits no rule')
+    assert.equal(spec.rule.PL, undefined, 'lexical definition emits no rule')
+    assert.ok(spec.rule.val, 'the pure alias survives as a rule')
+  })
+
+  it('renders back to the fixture, comments and all stripped', { skip }, () => {
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
+    tn.abnf(src)
+    tn.use(Debug, { print: false })
+    assert.equal(tn.debug.model().abnf, GRAMMAR)
+  })
+})
+
+
 describe('single-literal productions lift to named tokens', () => {
   it('binds the production name as the token name', () => {
     const spec = abnf('add = NR [ PL add ]\nPL = "+"')
@@ -147,6 +181,30 @@ describe('single-literal productions lift to named tokens', () => {
     const spec = abnf('e = plus NR\nplus = "+"')
     assert.equal(spec.options.fixed.token['#plus'], '+')
     assert.equal(spec.options.fixed.token['#T'], undefined)
+  })
+
+  it('emits the token even when nothing references it', () => {
+    // The production is removed from the grammar, so if allocation only
+    // walked `alts` the declaration would vanish without a trace.
+    const spec = abnf('top = "x"\nPL = "+"')
+    assert.equal(spec.options.fixed.token['#PL'], '+')
+  })
+
+  it('lifts neither of two names sharing one literal', () => {
+    // The engine keys fixed tokens by literal (cfg.fixed.token inverts to
+    // src -> tin), so `+` can only ever be one token. Lifting either name
+    // would drop the other; emitting both would collapse to a single tin
+    // and leave rules expecting the loser permanently unmatchable.
+    const spec = abnf('top = A B\nA = "+"\nB = "+"')
+    assert.ok(spec.rule.A, 'A stays a rule')
+    assert.ok(spec.rule.B, 'B stays a rule')
+    assert.equal(spec.options.fixed.token['#A'], undefined)
+    assert.equal(spec.options.fixed.token['#B'], undefined)
+
+    // And the grammar still parses — one shared token, both rules live.
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
+    tn.abnf('top = A B\nA = "+"\nB = "+"')
+    assert.equal(tn.parse('++').src, '++')
   })
 })
 

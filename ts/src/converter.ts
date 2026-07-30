@@ -1693,6 +1693,17 @@ const RESERVED_TOKEN_NAMES = new Set([
 ])
 
 
+// A literal production lifted to a named token, as returned by
+// `liftLiteralTokens` so the emitter can allocate the token even when
+// nothing in the grammar references it.
+type LiftedLiteral = {
+  kind: 'term'
+  literal: string
+  caseSensitive?: boolean
+  tokenName: string
+}
+
+
 // Lift single-literal productions into *named lexer tokens*.
 //
 // A production whose whole body is one string literal is a lexical
@@ -1715,7 +1726,10 @@ const RESERVED_TOKEN_NAMES = new Set([
 // are left alone, as are names the engine already owns (see
 // RESERVED_TOKEN_NAMES) and the RFC 5234 core rules, which callers expect
 // to behave as rules wherever they are referenced.
-function liftLiteralTokens(grammar: AbnfGrammar, start: string): void {
+function liftLiteralTokens(
+  grammar: AbnfGrammar,
+  start: string,
+): LiftedLiteral[] {
   const lifted = new Map<string, { literal: string; caseSensitive?: boolean }>()
 
   for (const prod of grammar.productions) {
@@ -1731,7 +1745,23 @@ function liftLiteralTokens(grammar: AbnfGrammar, start: string): void {
     lifted.set(prod.name, { literal: el.literal, caseSensitive: el.caseSensitive })
   }
 
-  if (lifted.size === 0) return
+  // The engine keys its fixed tokens by literal (`cfg.fixed.token` is
+  // inverted to src -> tin), so one literal is one token — two names for
+  // the same literal cannot both become tokens. When `A = "+"` and
+  // `B = "+"` both claim `+`, lifting either would silently drop the
+  // other, so neither is lifted and both stay ordinary rules.
+  const byLiteral = new Map<string, string[]>()
+  for (const [name, lit] of lifted) {
+    const key = termKey(lit)
+    const names = byLiteral.get(key)
+    if (names) names.push(name)
+    else byLiteral.set(key, [name])
+  }
+  for (const names of byLiteral.values()) {
+    if (1 < names.length) for (const n of names) lifted.delete(n)
+  }
+
+  if (lifted.size === 0) return []
 
   const walk = (el: AbnfElement): AbnfElement => {
     if (el.kind === 'ref') {
@@ -1753,6 +1783,13 @@ function liftLiteralTokens(grammar: AbnfGrammar, start: string): void {
   grammar.productions = grammar.productions
     .filter((p) => !lifted.has(p.name))
     .map((p) => ({ ...p, alts: p.alts.map((alt) => alt.map(walk)) }))
+
+  // Return every lifted definition, referenced or not. The production is
+  // gone from the grammar, so an unreferenced one (`top = "x"` with a
+  // spare `PL = "+"`) would otherwise leave no element behind for the
+  // emitter to allocate a token from, and the user's declaration would
+  // vanish silently instead of compiling to the promised named token.
+  return [...lifted].map(([name, lit]) => ({ kind: 'term' as const, ...lit, tokenName: name }))
 }
 
 
@@ -1834,7 +1871,7 @@ function emitGrammarSpec(
   // tokens, then resolve bare built-in token names (`TX`/`NR`/`ST`/`VL`)
   // to token terminals — both before any structural pass sees them as
   // rule references.
-  liftLiteralTokens(grammar, start)
+  const liftedLiterals = liftLiteralTokens(grammar, start)
   normalizeBuiltinTokens(grammar)
 
   // Eliminate direct left recursion (P → P α | β) by rewriting to
@@ -1857,8 +1894,10 @@ function emitGrammarSpec(
   const matchTokens: Record<string, RegExp> = {}
 
   // Gather every terminal first. Probe-helper productions store their
-  // vocab as AbnfElements rather than in `alts`, so walk those too.
-  const terminals: AbnfElement[] = []
+  // vocab as AbnfElements rather than in `alts`, so walk those too. The
+  // lifted literals are seeded up front: their productions no longer
+  // exist, so an unreferenced one has no element anywhere in `alts`.
+  const terminals: AbnfElement[] = [...liftedLiterals]
   for (const prod of grammar.productions) {
     for (const alt of prod.alts) terminals.push(...alt)
     if (prod.probeHelper) terminals.push(...prod.probeHelper.vocabElements)
