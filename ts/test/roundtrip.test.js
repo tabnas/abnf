@@ -24,7 +24,7 @@ const Path = require('node:path')
 
 const { Tabnas } = require('@tabnas/parser')
 const { abnf: abnfPlugin } = require('..')
-const { abnf } = require('../dist/converter.js')
+const { abnf, parseAbnf, emitGrammarSpec } = require('../dist/converter.js')
 
 const FIXTURE = Path.join(__dirname, 'grammar', 'addition.abnf')
 
@@ -188,6 +188,20 @@ describe('single-literal productions lift to named tokens', () => {
     // walked `alts` the declaration would vanish without a trace.
     const spec = abnf('top = "x"\nPL = "+"')
     assert.equal(spec.options.fixed.token['#PL'], '+')
+  })
+
+  it('survives a second emission from the same parsed grammar', () => {
+    // The emit pipeline rewrites the grammar, and lifting *removes* the
+    // production — so without a defensive copy the second emission would
+    // find no `PL` left and drop the token entirely.
+    const ast = parseAbnf('top = "x"\nPL = "+"')
+    const first = emitGrammarSpec(ast)
+    const second = emitGrammarSpec(ast)
+    assert.equal(first.options.fixed.token['#PL'], '+')
+    assert.deepStrictEqual(
+      second.options.fixed.token, first.options.fixed.token)
+    assert.deepStrictEqual(
+      Object.keys(second.rule).sort(), Object.keys(first.rule).sort())
   })
 
   it('lifts neither of two names sharing one literal', () => {

@@ -193,6 +193,24 @@ func withCoreRules(user []*abnfProduction) []*abnfProduction {
 	return append(append([]*abnfProduction{}, user...), out...)
 }
 
+// cloneGrammar copies a grammar deeply enough that the emit pipeline cannot
+// disturb the caller's AST. The passes replace Productions, Alts and the
+// individual sequences, but treat elements as immutable (each rewriting walk
+// returns fresh elements), so sharing elements is safe.
+func cloneGrammar(grammar *abnfGrammar) *abnfGrammar {
+	prods := make([]*abnfProduction, len(grammar.Productions))
+	for i, p := range grammar.Productions {
+		alts := make([]abnfSequence, len(p.Alts))
+		for j, a := range p.Alts {
+			alts[j] = append(abnfSequence{}, a...)
+		}
+		cp := *p
+		cp.Alts = alts
+		prods[i] = &cp
+	}
+	return &abnfGrammar{Productions: prods}
+}
+
 // ---- left-recursion elimination (Paull's) --------------------------
 
 func eliminateLeftRecursion(grammar *abnfGrammar) *abnfGrammar {

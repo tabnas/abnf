@@ -25,6 +25,13 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 	if opts == nil {
 		opts = &AbnfConvertOptions{}
 	}
+	// Work on a copy: resolveProseTerminals, liftLiteralTokens and
+	// normalizeBuiltinTokens all rewrite the grammar in place, so emitting
+	// twice from one ParseAbnf result would otherwise give two different
+	// specs — the second missing every lifted production, since the first
+	// pass had already removed them.
+	grammar = cloneGrammar(grammar)
+
 	// Drop informational prose definitions (`NR = <number>`) first, so the
 	// names they document fall through to the builtin tokens — and so a
 	// leading prose line is never mistaken for the start rule.

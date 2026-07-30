@@ -102,6 +102,46 @@ func TestAstRefAsChildNode(t *testing.T) {
 	assertParse(t, j, "a bc", node("p", "abc", node("q", "bc")))
 }
 
+func TestEmitIsRepeatable(t *testing.T) {
+	// The emit pipeline rewrites the grammar, and lifting *removes* the
+	// production — so without a defensive copy the second emission would find
+	// no `PL` left and drop the token entirely.
+	g, err := ParseAbnf("top = \"x\"\nPL = \"+\"")
+	if err != nil {
+		t.Fatalf("ParseAbnf: %v", err)
+	}
+	fixedOf := func(spec *tabnas.GrammarSpec) map[string]string {
+		out := map[string]string{}
+		if spec.Options != nil && spec.Options.Fixed != nil {
+			for k, v := range spec.Options.Fixed.Token {
+				if v != nil {
+					out[k] = *v
+				}
+			}
+		}
+		return out
+	}
+	first, err := EmitGrammarSpec(g, nil)
+	if err != nil {
+		t.Fatalf("emit #1: %v", err)
+	}
+	second, err := EmitGrammarSpec(g, nil)
+	if err != nil {
+		t.Fatalf("emit #2: %v", err)
+	}
+	if got := fixedOf(first)["#PL"]; got != "+" {
+		t.Fatalf("emit #1 fixed[#PL] = %q, want \"+\"", got)
+	}
+	if !reflect.DeepEqual(fixedOf(second), fixedOf(first)) {
+		t.Errorf("fixed tokens differ between emissions:\n  #1 %v\n  #2 %v",
+			fixedOf(first), fixedOf(second))
+	}
+	if len(second.Rule) != len(first.Rule) {
+		t.Errorf("rule count differs between emissions: #1 %d, #2 %d",
+			len(first.Rule), len(second.Rule))
+	}
+}
+
 func TestAstPureAliasSurvives(t *testing.T) {
 	// A pure alias (`v = p`) is not inlined, so it survives as its own node
 	// wrapping the rule it names.
