@@ -101,8 +101,11 @@ describe('abnf', () => {
 
 
     it('chains aux rules for multi-segment alternatives', () => {
+      // `inner` is a two-element sequence so it stays a rule: a
+      // production whose whole body is one literal is lifted to a named
+      // token instead (see 'lifts single-literal productions...').
       const spec = abnf('chain = "a" inner "b" inner "c"\n' +
-        'inner = "x"')
+        'inner = "x" "y"')
       // Root rule consumes 'a' then pushes inner; close replaces with
       // the first continuation rule.
       assert.deepEqual(stripActions(spec.rule.chain.open), [
@@ -883,17 +886,31 @@ describe('abnf', () => {
       assert.deepEqual(j.parse('hi'), { rule: 'g', src: 'hi', kids: [] })
       assert.deepEqual(j.parse('hello'), { rule: 'g', src: 'hello', kids: [] })
 
-      // Note: under current Paull-style LR elimination, a leading
-      // ref to another user rule gets inlined, so that rule does
-      // NOT appear as a child node. `p = "a" q, q = "b"` works
-      // because `q` is NOT at the leading position of p's alt —
-      // it's preceded by the `"a"` terminal.
+      // Note: a leading ref to another user rule inside a *cycle* gets
+      // inlined by Paull-style LR elimination, so that rule does NOT
+      // appear as a child node. `p = "a" q, q = "b" "c"` works because
+      // `q` is NOT at the leading position of p's alt — it's preceded
+      // by the `"a"` terminal.
+      //
+      // `q` is a two-element sequence deliberately: a production whose
+      // whole body is a single literal is lifted to a named token, and
+      // tokens are not AST nodes.
       const j2 = tn.make()
-      j2.abnf('p = "a" q\nq = "b"')
-      assert.deepEqual(j2.parse('a b'), {
+      j2.abnf('p = "a" q\nq = "b" "c"')
+      assert.deepEqual(j2.parse('a bc'), {
         rule: 'p',
-        src: 'ab',
-        kids: [{ rule: 'q', src: 'b', kids: [] }],
+        src: 'abc',
+        kids: [{ rule: 'q', src: 'bc', kids: [] }],
+      })
+
+      // A pure alias (`v = p`) is NOT inlined, so it survives as its own
+      // node wrapping the rule it names.
+      const j3 = tn.make()
+      j3.abnf('v = p\np = "a" q\nq = "b" "c"')
+      assert.deepEqual(j3.parse('a bc'), {
+        rule: 'v',
+        src: 'abc',
+        kids: [{ rule: 'p', src: 'abc', kids: [{ rule: 'q', src: 'bc', kids: [] }] }],
       })
     })
 

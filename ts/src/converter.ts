@@ -64,6 +64,11 @@ type AbnfElement =
       // match. (Has no effect when the literal contains no ASCII
       // letters — those match exactly either way.)
       caseSensitive?: boolean;
+      // Preferred lexer token name, set by `liftLiteralTokens` when this
+      // terminal came from a production that names it (`PL = "+"` →
+      // `#PL`). Without it the emitter derives a name from the literal
+      // text, which for punctuation degrades to `#T`, `#T1`, …
+      tokenName?: string;
     }
   | { kind: 'ref'; name: string }
   // A terminal that matches a built-in engine lexer token directly (e.g.
@@ -72,6 +77,14 @@ type AbnfElement =
   // grammar reference the lexer's whole-word tokens (`ident = TX`) instead
   // of re-deriving them char-by-char. `name` is the full token name incl. `#`.
   | { kind: 'token'; name: string }
+  // RFC 5234 `prose-val` — `<free text>`. Prose is *informational*: it
+  // describes a terminal in English rather than defining one. The
+  // converter accepts it only as the entire body of a production whose
+  // name is a built-in lexer token (`NR = <number>`), where it documents
+  // the token the lexer already provides; `resolveProseTerminals` then
+  // drops the production so refs resolve to that built-in. Anywhere else
+  // there is nothing to compile, and it is an error.
+  | { kind: 'prose'; text: string }
   | { kind: 'regex'; pattern: string; flags: string }  // internal: for future %x
   | { kind: 'opt'; inner: AbnfElement }     // [ A ]
   | { kind: 'star'; inner: AbnfElement }    // *A
@@ -182,7 +195,8 @@ type AmbiguityReport = {
 //   element    = repetition? atom
 //   repetition = NUM '*' NUM / NUM '*' / '*' NUM / '*' / NUM
 //   atom       = IDENT | STRING | ['%s' | '%i'] STRING | NUMVAL
-//              | '(' alts ')' | '[' alts ']'
+//              | '(' alts ')' | '[' alts ']' | PROSE
+//   prose      = '<' *(%x20-3D / %x3F-7E) '>'
 //   numval     = '%' ('x' / 'd' / 'b') DIGITS [ '-' DIGITS | ('.' DIGITS)* ]
 const abnfRules: Record<
   string,
@@ -283,6 +297,7 @@ const abnfRules: Record<
       { s: '#NV', b: 1, p: 'elem' },
       { s: '#SS', b: 1, p: 'elem' },
       { s: '#SI', b: 1, p: 'elem' },
+      { s: '#PV', b: 1, p: 'elem' },
       { s: '#TX', b: 1, p: 'elem' },
       { s: '#LP', b: 1, p: 'elem' },
       { s: '#OB', b: 1, p: 'elem' },
@@ -301,6 +316,7 @@ const abnfRules: Record<
       { s: '#NV', b: 1, p: 'elem' },
       { s: '#SS', b: 1, p: 'elem' },
       { s: '#SI', b: 1, p: 'elem' },
+      { s: '#PV', b: 1, p: 'elem' },
       { s: '#TX', b: 1, p: 'elem' },
       { s: '#LP', b: 1, p: 'elem' },
       { s: '#OB', b: 1, p: 'elem' },
@@ -431,6 +447,15 @@ const abnfRules: Record<
           r.node = parseNumericValue(r.o[0].src as string)
         },
       },
+      // Prose terminal `<free text>` — carried through as-is; the
+      // `resolveProseTerminals` pass decides what it means.
+      {
+        s: '#PV',
+        a: (r: Rule) => {
+          const src = r.o[0].src as string
+          r.node = { kind: 'prose', text: src.slice(1, -1) }
+        },
+      },
       {
         s: '#TX',
         a: (r: Rule) => {
@@ -479,6 +504,7 @@ const abnfRules: Record<
       { s: '#NV', b: 1 },
       { s: '#SS', b: 1 },
       { s: '#SI', b: 1 },
+      { s: '#PV', b: 1 },
       { s: '#NUM', b: 1 },
       { s: '#STAR', b: 1 },
       { s: '#LP', b: 1 },
@@ -548,6 +574,9 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
         // requires `"` so they don't steal the `%` of `%xNN`.
         '#SS': /^%[sS](?=")/,
         '#SI': /^%[iI](?=")/,
+        // RFC 5234 prose-val: `<` free text `>`. The body is every
+        // printable char except `>` itself (%x20-3D / %x3F-7E).
+        '#PV': /^<[\x20-\x3D\x3F-\x7E]*>/,
       },
     },
     tokenSet: {
@@ -556,7 +585,7 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
       // — that way the tcol at the atom-starter position includes
       // every matcher tin (notably #NV), so the lexer doesn't fall
       // through to #TX when the actual atom is `%xNN`.
-      ATOM: ['#ST', '#NV', '#TX', '#LP', '#OB', '#SS', '#SI'],
+      ATOM: ['#ST', '#NV', '#TX', '#LP', '#OB', '#SS', '#SI', '#PV'],
     },
     comment: {
       // ABNF uses `;` to start a line comment. Override tabnas's
@@ -620,15 +649,6 @@ function eliminateLeftRecursion(grammar: AbnfGrammar): AbnfGrammar {
   // substitution inlines A_j's alts into A_i for j < i, so putting
   // dependencies first is what makes nullable-prefixed hidden left
   // recursion reachable by the substitution step.
-  //
-  // Note: substitution here always runs, even for cycle-free
-  // grammars. The reason is pragmatic rather than theoretical —
-  // populating tcol from multi-token altPrefixes (needed so the
-  // lexer's regex matchers fire with the right tin in nested
-  // contexts) requires the full inlined shape. A future refactor
-  // could compute tcol from the un-substituted grammar and only
-  // apply Paull's to the cyclic SCCs, which would preserve more
-  // named-rule structure in the emitted AST.
   let prods = topoOrderForPaull(
     grammar.productions.map((p) => ({
       name: p.name,
@@ -637,11 +657,41 @@ function eliminateLeftRecursion(grammar: AbnfGrammar): AbnfGrammar {
     })),
   )
 
+  // Substitution normally runs for every production, even a cycle-free
+  // one. That is pragmatic rather than theoretical: the multi-token
+  // `altPrefixes` used to populate tcol (so the lexer's regex matchers
+  // fire with the right tin in nested contexts) are read off the fully
+  // inlined shape, and a rule choosing between several alternatives
+  // needs that lookahead to dispatch. Scoping substitution to the cyclic
+  // SCCs in general therefore has to wait for tcol to be computed from
+  // the un-substituted grammar.
+  //
+  // One case is safe to exempt today, and it is the one that visibly
+  // mangles a grammar: a *pure alias*, a production whose single
+  // alternative is a single rule reference (`val = add`). Inlining it
+  // rewrites `val = add` into `val = NR [ PL add ]` — the alias name is
+  // dissolved, so the rule vanishes from the emitted AST and the grammar
+  // no longer renders back to the ABNF it was written in. Because such a
+  // production has exactly one alternative, it has nothing to dispatch
+  // between: it unconditionally pushes its target, needs no lookahead,
+  // and so cannot depend on the inlined prefixes. Aliases caught up in a
+  // leading-reference cycle are still inlined — that is where Paull's
+  // substitution is doing real work (`P = Q`, `Q = P a / b`).
+  const cyclic = findLeadingRefCycleMembers(prods)
+  const isExemptAlias = (p: AbnfProduction): boolean =>
+    p.alts.length === 1 &&
+    p.alts[0].length === 1 &&
+    p.alts[0][0].kind === 'ref' &&
+    !cyclic.has(p.name) &&
+    !cyclic.has((p.alts[0][0] as { name: string }).name)
+
   for (let i = 0; i < prods.length; i++) {
     // For each earlier production A_j, inline any alternative of
     // A_i whose leading element is a reference to A_j.
-    for (let j = 0; j < i; j++) {
-      prods[i] = substituteLeadingRef(prods[i], prods[j])
+    if (!isExemptAlias(prods[i])) {
+      for (let j = 0; j < i; j++) {
+        prods[i] = substituteLeadingRef(prods[i], prods[j])
+      }
     }
     prods[i] = eliminateDirectLeftRec(prods[i])
   }
@@ -867,6 +917,13 @@ function desugar(grammar: AbnfGrammar): AbnfGrammar {
       return el
     }
 
+    if (el.kind === 'prose') {
+      // Unreachable: `resolveProseTerminals` drops every prose element
+      // (or throws) before desugaring runs.
+      throw new Error(
+        `abnf: internal: unresolved prose terminal '<${el.text}>'`)
+    }
+
     if (el.kind === 'group') {
       // Recurse into the group's alts so nested sugar is flattened,
       // then emit a helper production whose body is those alts.
@@ -878,9 +935,14 @@ function desugar(grammar: AbnfGrammar): AbnfGrammar {
 
     // `opt`, `star`, `plus` all wrap a single inner element.
     const inner = desugarElement(el.inner)
+    // Name the generated helper after what it repeats. A literal lifted
+    // from a named production (`PL = "+"`) carries that name, and a
+    // built-in token carries its own, so `*PL` still yields
+    // `_genN_star_PL` rather than an anonymous `_genN_star_term`.
     const hint =
       inner.kind === 'ref' ? inner.name :
-        inner.kind === 'term' ? 'term' : 'x'
+        inner.kind === 'term' ? (inner.tokenName ?? 'term') :
+          inner.kind === 'token' ? inner.name.replace(/^#/, '') : 'x'
 
     if (el.kind === 'opt') {
       // H ::= inner | (empty)
@@ -1535,6 +1597,202 @@ const BUILTIN_TOKENS: Record<string, string> = {
 }
 
 
+// Resolve RFC 5234 `prose-val` terminals (`<free text>`).
+//
+// Prose is informational by definition — RFC 5234 §4 calls it a "last
+// resort" escape hatch for describing a terminal in English when no
+// formal notation will do. There is nothing to compile, so the converter
+// accepts it in exactly one position: as the *entire* body of a
+// production naming a built-in lexer token.
+//
+//   NR = <number>
+//
+// That line documents, in the grammar text, that `NR` is the engine's
+// number token. The lexer already supplies it, so the production is
+// dropped here and every `NR` reference falls through to
+// `normalizeBuiltinTokens`, which binds it to `#NR`. This is what lets a
+// grammar state its terminals explicitly and still round-trip: the same
+// line is what @tabnas/debug emits when it renders a live grammar back
+// to ABNF.
+//
+// Prose anywhere else has no definition behind it, so it is an error
+// rather than a silently-ignored rule.
+function resolveProseTerminals(grammar: AbnfGrammar): void {
+  const isProse = (el: AbnfElement) => el.kind === 'prose'
+  const kept: AbnfProduction[] = []
+
+  for (const prod of grammar.productions) {
+    const onlyProse =
+      prod.alts.length === 1 &&
+      prod.alts[0].length === 1 &&
+      isProse(prod.alts[0][0])
+
+    if (onlyProse) {
+      if (BUILTIN_TOKENS[prod.name]) continue // informational — the lexer defines it
+      const text = (prod.alts[0][0] as { text: string }).text
+      throw new Error(
+        `abnf: rule '${prod.name}' is defined only by prose ('<${text}>'), ` +
+        `which describes a terminal but does not define one. Prose is ` +
+        `allowed only for built-in lexer tokens (${
+          Object.keys(BUILTIN_TOKENS).join(', ')
+        }).`)
+    }
+
+    // Any surviving prose is embedded in a larger expression, where it
+    // cannot be given a meaning. Search nested groups and repetitions
+    // too, so `x = ( <foo> / "a" )` reports the same clear error as a
+    // top-level `x = "a" <foo>`.
+    const findStray = (el: AbnfElement): { text: string } | undefined => {
+      if (isProse(el)) return el as { text: string }
+      if (el.kind === 'opt' || el.kind === 'star' || el.kind === 'plus' ||
+          el.kind === 'rep') {
+        return findStray(el.inner)
+      }
+      if (el.kind === 'group') {
+        for (const alt of el.alts) {
+          for (const inner of alt) {
+            const hit = findStray(inner)
+            if (hit) return hit
+          }
+        }
+      }
+      return undefined
+    }
+    for (const alt of prod.alts) {
+      for (const el of alt) {
+        const stray = findStray(el)
+        if (stray) {
+          throw new Error(
+            `abnf: rule '${prod.name}' uses prose ('<${stray.text}>') inside an ` +
+            `expression; prose may only stand alone as the whole definition ` +
+            `of a built-in lexer token.`)
+        }
+      }
+    }
+    kept.push(prod)
+  }
+
+  if (kept.length === 0) {
+    throw new Error(
+      'abnf: grammar defines no rules — only informational prose terminals.')
+  }
+
+  grammar.productions = kept
+}
+
+
+// Token names the engine itself owns: the standard lexer tokens
+// (`utility.ts` registers these under `standard$`) plus the fixed tokens
+// the default config installs. A lifted literal must never claim one of
+// these — binding `#TX` to a literal would displace the lexer's text
+// matcher rather than add a token — so a production so named stays an
+// ordinary rule.
+const RESERVED_TOKEN_NAMES = new Set([
+  'BD', 'ZZ', 'UK', 'AA', 'SP', 'LN', 'CM', 'NR', 'ST', 'TX', 'VL',
+  'OB', 'CB', 'OS', 'CS', 'CL', 'CA',
+])
+
+
+// A literal production lifted to a named token, as returned by
+// `liftLiteralTokens` so the emitter can allocate the token even when
+// nothing in the grammar references it.
+type LiftedLiteral = {
+  kind: 'term'
+  literal: string
+  caseSensitive?: boolean
+  tokenName: string
+}
+
+
+// Lift single-literal productions into *named lexer tokens*.
+//
+// A production whose whole body is one string literal is a lexical
+// definition, not a syntactic rule:
+//
+//   PL = "+"
+//
+// Compiled as a rule it would produce a token named after the literal
+// text — and since `+` has no word characters to name it after, that
+// degrades to `#T` / `#T1` / … — plus a one-token `PL` rule wrapping it,
+// so a grammar rendered back to ABNF reads `PL = T` with a separate
+// `T = "+"`. Lifting instead binds the literal to `#PL` directly and
+// drops the rule, which is exactly how the same grammar is written by
+// hand against the engine (`fixed: { token: { '#PL': '+' } }`), and what
+// lets `PL = "+"` survive the round-trip through @tabnas/debug unchanged.
+//
+// The start rule is never lifted: it has to stay a rule for the grammar
+// to have an entry point, so `greet = "hi"` still compiles to a rule.
+// Multi-alternative productions (`sign = "+" / "-"`) are real choices and
+// are left alone, as are names the engine already owns (see
+// RESERVED_TOKEN_NAMES) and the RFC 5234 core rules, which callers expect
+// to behave as rules wherever they are referenced.
+function liftLiteralTokens(
+  grammar: AbnfGrammar,
+  start: string,
+): LiftedLiteral[] {
+  const lifted = new Map<string, { literal: string; caseSensitive?: boolean }>()
+
+  for (const prod of grammar.productions) {
+    if (prod.name === start) continue
+    if (RESERVED_TOKEN_NAMES.has(prod.name)) continue
+    if (prod.nodeKind === 'core') continue
+    if (prod.alts.length !== 1 || prod.alts[0].length !== 1) continue
+    const el = prod.alts[0][0]
+    if (el.kind !== 'term') continue
+    // `path-empty = ""` (RFC 3986) matches the empty string — a rule that
+    // derives epsilon, not a token the lexer could ever emit.
+    if (el.literal === '') continue
+    lifted.set(prod.name, { literal: el.literal, caseSensitive: el.caseSensitive })
+  }
+
+  // The engine keys its fixed tokens by literal (`cfg.fixed.token` is
+  // inverted to src -> tin), so one literal is one token — two names for
+  // the same literal cannot both become tokens. When `A = "+"` and
+  // `B = "+"` both claim `+`, lifting either would silently drop the
+  // other, so neither is lifted and both stay ordinary rules.
+  const byLiteral = new Map<string, string[]>()
+  for (const [name, lit] of lifted) {
+    const key = termKey(lit)
+    const names = byLiteral.get(key)
+    if (names) names.push(name)
+    else byLiteral.set(key, [name])
+  }
+  for (const names of byLiteral.values()) {
+    if (1 < names.length) for (const n of names) lifted.delete(n)
+  }
+
+  if (lifted.size === 0) return []
+
+  const walk = (el: AbnfElement): AbnfElement => {
+    if (el.kind === 'ref') {
+      const lit = lifted.get(el.name)
+      return lit
+        ? { kind: 'term', ...lit, tokenName: el.name }
+        : el
+    }
+    if (el.kind === 'opt' || el.kind === 'star' || el.kind === 'plus' ||
+        el.kind === 'rep') {
+      return { ...el, inner: walk(el.inner) }
+    }
+    if (el.kind === 'group') {
+      return { kind: 'group', alts: el.alts.map((a) => a.map(walk)) }
+    }
+    return el
+  }
+
+  grammar.productions = grammar.productions
+    .filter((p) => !lifted.has(p.name))
+    .map((p) => ({ ...p, alts: p.alts.map((alt) => alt.map(walk)) }))
+
+  // Return every lifted definition, referenced or not. The production is
+  // gone from the grammar, so an unreferenced one (`top = "x"` with a
+  // spare `PL = "+"`) would otherwise leave no element behind for the
+  // emitter to allocate a token from, and the user's declaration would
+  // vanish silently instead of compiling to the promised named token.
+  return [...lifted].map(([name, lit]) => ({ kind: 'term' as const, ...lit, tokenName: name }))
+}
+
+
 // Rewrite every bareword reference whose name is a built-in token AND is not a
 // defined production into a `token` terminal element. Run before any other
 // pass so the rest of the pipeline treats these as ordinary terminals.
@@ -1600,12 +1858,20 @@ function emitGrammarSpec(
   grammar: AbnfGrammar,
   opts?: AbnfConvertOptions,
 ): GrammarSpec {
+  // Drop informational prose definitions (`NR = <number>`) first, so the
+  // names they document fall through to the built-in tokens — and so a
+  // leading prose line is never mistaken for the start rule.
+  resolveProseTerminals(grammar)
+
   const start = opts?.start ?? grammar.productions[0].name
   const tag = opts?.tag ?? 'abnf'
   const wordKeywords = !!opts?.wordKeywords
 
-  // Resolve bare built-in token names (`TX`/`NR`/`ST`/`VL`) to token
-  // terminals before any structural pass sees them as rule references.
+  // Turn single-literal productions (`PL = "+"`) into named lexer
+  // tokens, then resolve bare built-in token names (`TX`/`NR`/`ST`/`VL`)
+  // to token terminals — both before any structural pass sees them as
+  // rule references.
+  const liftedLiterals = liftLiteralTokens(grammar, start)
   normalizeBuiltinTokens(grammar)
 
   // Eliminate direct left recursion (P → P α | β) by rewriting to
@@ -1626,45 +1892,36 @@ function emitGrammarSpec(
   const usedNames = new Set<string>()
   const fixedTokens: Record<string, string> = {}
   const matchTokens: Record<string, RegExp> = {}
+
+  // Gather every terminal first. Probe-helper productions store their
+  // vocab as AbnfElements rather than in `alts`, so walk those too. The
+  // lifted literals are seeded up front: their productions no longer
+  // exist, so an unreferenced one has no element anywhere in `alts`.
+  const terminals: AbnfElement[] = [...liftedLiterals]
   for (const prod of grammar.productions) {
-    for (const alt of prod.alts) {
-      for (const el of alt) {
-        if (el.kind === 'term') {
-          const key = termKey(el)
-          if (!literals.has(key)) {
-            const name = allocTokenName(el.literal, usedNames)
-            literals.set(key, name)
-            emitLiteralToken(el, name, fixedTokens, matchTokens, wordKeywords)
-          }
-        } else if (el.kind === 'regex') {
-          const key = regexKey(el)
-          if (!regexTokens.has(key)) {
-            const name = allocTokenName('rx_' + el.pattern, usedNames)
-            regexTokens.set(key, name)
-            matchTokens[name] = new RegExp('^' + el.pattern, el.flags)
-          }
-        }
+    for (const alt of prod.alts) terminals.push(...alt)
+    if (prod.probeHelper) terminals.push(...prod.probeHelper.vocabElements)
+  }
+
+  // Terminals carrying a lifted production name are allocated first, so
+  // the name wins even when the same literal also appears inline in an
+  // earlier rule (`PL = "+"` must yield `#PL`, not `#T`, regardless of
+  // where the bare `"+"` shows up).
+  const named = terminals.filter((el) => el.kind === 'term' && el.tokenName)
+  for (const el of [...named, ...terminals]) {
+    if (el.kind === 'term') {
+      const key = termKey(el)
+      if (!literals.has(key)) {
+        const name = allocTokenName(el.literal, usedNames, el.tokenName)
+        literals.set(key, name)
+        emitLiteralToken(el, name, fixedTokens, matchTokens, wordKeywords)
       }
-    }
-    // Probe-helper productions store their vocab as AbnfElements —
-    // walk those too so the required tokens get allocated.
-    if (prod.probeHelper) {
-      for (const el of prod.probeHelper.vocabElements) {
-        if (el.kind === 'term') {
-          const key = termKey(el)
-          if (!literals.has(key)) {
-            const name = allocTokenName(el.literal, usedNames)
-            literals.set(key, name)
-            emitLiteralToken(el, name, fixedTokens, matchTokens, wordKeywords)
-          }
-        } else if (el.kind === 'regex') {
-          const key = regexKey(el)
-          if (!regexTokens.has(key)) {
-            const name = allocTokenName('rx_' + el.pattern, usedNames)
-            regexTokens.set(key, name)
-            matchTokens[name] = new RegExp('^' + el.pattern, el.flags)
-          }
-        }
+    } else if (el.kind === 'regex') {
+      const key = regexKey(el)
+      if (!regexTokens.has(key)) {
+        const name = allocTokenName('rx_' + el.pattern, usedNames)
+        regexTokens.set(key, name)
+        matchTokens[name] = new RegExp('^' + el.pattern, el.flags)
       }
     }
   }
@@ -2555,7 +2812,20 @@ function parseNumericValue(src: string): AbnfElement {
 }
 
 
-function allocTokenName(literal: string, used: Set<string>): string {
+function allocTokenName(
+  literal: string,
+  used: Set<string>,
+  preferred?: string,
+): string {
+  // A literal lifted from a named production (`PL = "+"`) keeps that
+  // name, so the emitted grammar reads `PL` rather than `T`.
+  if (preferred) {
+    const want = '#' + preferred
+    if (!used.has(want)) {
+      used.add(want)
+      return want
+    }
+  }
   const base = literal
     .replace(/[^A-Za-z0-9]/g, '_')
     .toUpperCase()

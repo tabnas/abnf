@@ -24,6 +24,86 @@ tn.abnf(`greet = "hi" / "hello"`)
 tn.parse('hi') // => ({ rule: 'greet', src: 'hi', kids: [] })
 ```
 
+## The same grammar, two ways
+
+This is the integer-addition grammar from the
+[engine README](https://github.com/tabnas/parser#readme), written in ABNF:
+
+```
+val = add
+add = NR [ PL add ]
+
+NR = <number>
+PL = "+"
+```
+
+`NR` is the engine's built-in number token and `PL` is `"+"`. Two things
+are worth noticing, because they are what make this the *same* grammar
+the engine README builds by hand:
+
+- **`PL = "+"` compiles to a token, not a rule.** A production whose
+  whole body is a single string literal is a lexical definition, so the
+  compiler binds it to a named fixed token `#PL` — exactly what the
+  hand-written grammar spells `fixed: { token: { '#PL': '+' } }`.
+  Multi-alternative productions (`sign = "+" / "-"`) are real choices and
+  stay rules.
+- **`NR = <number>` is informational.** RFC 5234 `prose-val` describes a
+  terminal in English rather than defining one. For a built-in lexer
+  token that is exactly right — the lexer already supplies `NR` — so the
+  line documents the terminal and compiles to nothing. Prose anywhere
+  else is an error, because there would be no definition behind it.
+
+Because both sides agree, the grammar round-trips: compile it, and
+[`@tabnas/debug`](https://github.com/tabnas/debug) renders the running
+engine back to the ABNF it was written in.
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+const { Debug } = require('@tabnas/debug')
+
+const GRAMMAR = `val = add
+add = NR [ PL add ]
+
+NR = <number>
+PL = "+"`
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(GRAMMAR)
+tn.use(Debug, { print: false })
+
+// Rendered back out, character for character — and re-compilable.
+tn.debug.model().abnf === GRAMMAR // => true
+```
+
+Add an action to fold the operands into a running total on `val`, the
+same way the hand-written grammar accumulates into its `val` node:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  val = add
+  add = NR [ PL add ]
+  NR  = <number>
+  PL  = "+"
+`, {
+  actions: {
+    // Add every number to the one `val` node — no child integration.
+    '@add:o:NR': (r) => {
+      let val = r
+      while (val.parent && 'val' !== val.name) val = val.parent
+      val.node.value = (val.node.value || 0) + Number(r.o[0].val)
+    },
+  },
+})
+
+tn.parse('1+2+3').value   // => 6
+tn.parse('12+3+45').value // => 60
+```
+
 ## Left recursion
 
 ABNF grammars are often clearest written left-recursively — an additive
@@ -50,8 +130,12 @@ tn.abnf(`
 
 // The left-recursive `expr` parses a whole additive chain, left to right:
 tn.parse('1+2+3').rule                    // => 'expr'
-tn.parse('1+2+3').kids.map((k) => k.rule) // => ['PL', 'term', 'PL', 'term']
+tn.parse('1+2+3').kids.map((k) => k.rule) // => ['term', 'term']
 ```
+
+(`PL = "+"` is a single-literal production, so it compiles to the token
+`#PL` rather than a rule — which is why the operators do not appear among
+the children. Only `term` does.)
 
 ### Details and caveats
 
@@ -62,14 +146,20 @@ tn.parse('1+2+3').kids.map((k) => k.rule) // => ['PL', 'term', 'PL', 'term']
     `expr`. The repeated `(PL term)` pairs become direct children, and the
     *leading* operand (`1` above) is folded into `expr` itself rather than
     surfacing as its own `term` child — so `1+2+3` yields
-    `['PL','term','PL','term']`, and a lone `1` parses to an `expr` with no
+    `['term','term']`, and a lone `1` parses to an `expr` with no
     children at all. Left-associativity is a fact you apply in an action,
     not a shape you read off the AST.
   - **The rewritten branches are look-up-only for `@ref` actions.** The
     source `P a` / `b` alternatives do not survive as distinct marks, so an
     alt-mark action cannot reliably attach to them. Hang actions on the
-    sub-rules (`term`, `PL`) instead, or fold a running value as you would
+    sub-rules (`term`) instead, or fold a running value as you would
     for any iterative (`*(...)`) rule.
+- **A rewritten rule does not round-trip.** The `*(…)` iteration compiles
+  to a probe-optimised subgraph that `@tabnas/debug` cannot reconstruct,
+  so rendering the live grammar back to ABNF yields a
+  recognition-equivalent grammar spelled in terms of the generated helper
+  rules, not the left-recursive source. Grammars written in the iterative
+  form (like the addition grammar above) round-trip exactly.
 - **A purely left-recursive rule is an error.** `loop = loop PL`, with no
   base (seed) alternative, throws `abnf: rule 'loop' is purely
   left-recursive (no seed alternative); cannot eliminate` — there is
@@ -84,6 +174,11 @@ tn.parse('1+2+3').kids.map((k) => k.rule) // => ['PL', 'term', 'PL', 'term']
 This repository contains two implementations. `ts/` is canonical; `go/`
 tracks it. Both compile the same `.abnf` fixtures (in
 `ts/test/grammar/`) and produce the same parse trees.
+
+> **Note:** prose-val (`NR = <number>`), lifting single-literal
+> productions to named tokens, and preserving pure aliases (`val = add`)
+> currently exist in `ts/` only. Until `go/` catches up, grammars using
+> those features compile differently across the two implementations.
 
 | Path | Description |
 |---|---|
