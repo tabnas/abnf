@@ -211,7 +211,45 @@ case-sensitive `%s"…"` / explicit `%i"…"`, numeric values
 (`%xNN`/`%dNN`/`%bNN`, ranges `-`, concatenation `.`), repetition
 (`*A`, `1*A`, `m*nA`, `*nA`, `nA`), optional `[ … ]`, grouping
 `( … )`, references (bare names), the RFC 5234 Appendix B.1 core rules
-(auto-included on reference), and `;` line comments. Quoted-string case
-folding follows RFC 5234.
+(auto-included on reference), prose-val `< … >` for built-in lexer tokens,
+and `;` line comments. Quoted-string case folding follows RFC 5234.
 
-Out of scope: prose-val `< … >`, and ABNF features beyond the above.
+Out of scope: ABNF features beyond the above.
+
+### Prose-val
+
+RFC 5234 `prose-val` (`< … >`) describes a terminal in English rather
+than defining one, so it is accepted in exactly one position: as the
+entire body of a production naming a built-in lexer token.
+
+```
+NR = <number>
+```
+
+The line documents that `NR` is the engine's number token; the lexer
+already supplies it, so the production compiles to nothing and every `NR`
+reference binds to `#NR`. The recognised names are `TX`, `NR`, `ST` and
+`VL`. Prose for any other name, or prose used inside a larger
+expression, is an error — there would be no definition behind it.
+
+### Single-literal productions
+
+A production whose whole body is one string literal is a *lexical*
+definition, and compiles to a named fixed token rather than a rule:
+
+```
+PL = "+"        ; => fixed token #PL, no `PL` rule
+```
+
+The production name becomes the token name, so the grammar renders back
+out as `PL = "+"` rather than as a rule wrapping an anonymously-named
+token. Four cases are deliberately excluded, and stay rules: the start
+rule (the grammar needs an entry point), multi-alternative productions
+(`sign = "+" / "-"` is a choice), names the engine already owns (`TX`,
+`NR`, `ZZ`, `OB`, … — binding one would displace a lexer matcher), and
+the empty literal (`path-empty = ""` derives epsilon, which no token can
+match).
+
+Because tokens are not AST nodes, a lifted production does not appear in
+the parse tree. Give it a second element (`q = "b" "c"`) to keep it a
+rule.

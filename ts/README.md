@@ -27,6 +27,37 @@ tn.abnf(`greet = "hi" / "hello"`)
 tn.parse('hi') // => ({ rule: 'greet', src: 'hi', kids: [] })
 ```
 
+## Round-tripping
+
+The integer-addition grammar shared with the
+[engine README](https://github.com/tabnas/parser#readme) compiles to the
+same grammar that README builds by hand, and renders back out unchanged:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+const { Debug } = require('@tabnas/debug')
+
+const GRAMMAR = `val = add
+add = NR [ PL add ]
+
+NR = <number>
+PL = "+"`
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(GRAMMAR)
+tn.use(Debug, { print: false })
+
+tn.debug.model().abnf === GRAMMAR // => true
+```
+
+Two rules make that work. A production whose whole body is a single
+string literal (`PL = "+"`) is a lexical definition, so it compiles to a
+named fixed token `#PL` rather than a rule. And RFC 5234 `prose-val`
+(`NR = <number>`) is informational: for a built-in lexer token it
+documents the terminal the lexer already provides and compiles to
+nothing. See the [root README](../README.md#the-same-grammar-two-ways).
+
 ## Left recursion
 
 Left-recursive rules are accepted directly. A left-recursion pass
@@ -45,14 +76,17 @@ tn.abnf(`
   PL   = "+"
 `)
 
-tn.parse('1+2+3').kids.map((k) => k.rule) // => ['PL', 'term', 'PL', 'term']
+tn.parse('1+2+3').kids.map((k) => k.rule) // => ['term', 'term']
 ```
 
 Because it is a rewrite, the tree is **flat** (no nested `expr`; the
 leading operand folds into the rule, so associativity is applied in an
 action, not read off the AST), and `@ref` alt actions on the rewritten
 branches are look-up-only — attach actions to the sub-rules instead. A
-**purely** left-recursive rule (no non-recursive branch) is an error.
+**purely** left-recursive rule (no non-recursive branch) is an error, and
+a rewritten rule does not round-trip back to its left-recursive source.
+(`PL = "+"` compiles to a token, not a rule, so the operators are not
+among the children — only `term` is.)
 See [concepts.md](doc/concepts.md) and the root
 [README](../README.md#left-recursion) for the full details and caveats.
 
