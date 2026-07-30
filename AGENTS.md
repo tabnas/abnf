@@ -90,10 +90,16 @@ Non-obvious things an agent should know before touching `converter.ts`:
   and `*vocab` helper rules. Output AST nodes carry a `nodeKind`
   (`user` / `core` / `helper`); only `user` nodes get their own tree
   node, the others flatten their `src`/`kids` into the enclosing rule.
-- **Larger ABNF surface is still partial.** `%x`/`%d`/`%b` numeric ranges,
-  prose-val, and similar are in-progress (the `rfc3986-uri.abnf` fixture
-  documents the workarounds it needed). When you extend the dialect, add a
-  fixture grammar under `ts/test/grammar/` and an end-to-end test.
+- **Larger ABNF surface is still partial.** `%x`/`%d`/`%b` numeric ranges
+  and similar are in-progress (the `rfc3986-uri.abnf` fixture documents
+  the workarounds it needed). Prose-val is supported only as the whole
+  body of a production naming a built-in lexer token (`NR = <number>`),
+  where it is informational; general prose such as RFC 3986's
+  `path-empty = 0<pchar>` is still an error, since there is no definition
+  behind it. When you extend the dialect, add a fixture grammar under
+  `ts/test/grammar/` and an end-to-end test — plus a cross-runtime case
+  under [`test/spec/`](test/) so `go/` cannot drift (see
+  [`test/AGENTS.md`](test/AGENTS.md)).
 
 ## The tabnas engine dependency
 

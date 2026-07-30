@@ -47,6 +47,14 @@ const (
 	// is emitted verbatim into a rule's token sequence (no allocation, unlike
 	// a literal term).
 	kindToken elemKind = "token"
+	// kindProse is an RFC 5234 prose-val (`<free text>`). Prose is
+	// informational: it describes a terminal in English rather than defining
+	// one. The converter accepts it only as the entire body of a production
+	// naming a builtin lexer token (`NR = <number>`), where it documents the
+	// token the lexer already provides; resolveProseTerminals then drops the
+	// production so refs resolve to that builtin. Anywhere else there is
+	// nothing to compile, and it is an error. Text holds the prose body.
+	kindProse elemKind = "prose"
 )
 
 // abnfElement is one element of an ABNF sequence (a term, ref, regex, or
@@ -58,6 +66,14 @@ type abnfElement struct {
 	Literal       string
 	CaseSensitive bool // explicit %s flag (ABNF strings are insensitive by default)
 	hasCaseSens   bool // whether CaseSensitive was set explicitly (TS optional flag)
+	// TokenName is the preferred lexer token name, set by liftLiteralTokens
+	// when this terminal came from a production that names it (`PL = "+"` ->
+	// `#PL`). Without it the emitter derives a name from the literal text,
+	// which for punctuation degrades to `#T`, `#T1`, …
+	TokenName string
+
+	// prose
+	Text string
 
 	// regex
 	Pattern string

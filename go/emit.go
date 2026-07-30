@@ -25,6 +25,20 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 	if opts == nil {
 		opts = &AbnfConvertOptions{}
 	}
+	// Work on a copy: resolveProseTerminals, liftLiteralTokens and
+	// normalizeBuiltinTokens all rewrite the grammar in place, so emitting
+	// twice from one ParseAbnf result would otherwise give two different
+	// specs — the second missing every lifted production, since the first
+	// pass had already removed them.
+	grammar = cloneGrammar(grammar)
+
+	// Drop informational prose definitions (`NR = <number>`) first, so the
+	// names they document fall through to the builtin tokens — and so a
+	// leading prose line is never mistaken for the start rule.
+	if err := resolveProseTerminals(grammar); err != nil {
+		return nil, err
+	}
+
 	start := opts.Start
 	if start == "" {
 		start = grammar.Productions[0].Name
@@ -34,8 +48,10 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 		tag = "abnf"
 	}
 
-	// Resolve bare builtin token names (TX/NR/ST/VL) to token terminals before
-	// any structural pass sees them as rule references.
+	// Turn single-literal productions (`PL = "+"`) into named lexer tokens,
+	// then resolve bare builtin token names (TX/NR/ST/VL) to token terminals —
+	// both before any structural pass sees them as rule references.
+	liftedLiterals := liftLiteralTokens(grammar, start)
 	normalizeBuiltinTokens(grammar)
 
 	grammar = eliminateLeftRecursion(grammar)
@@ -62,7 +78,7 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 		if _, ok := literals[key]; ok {
 			return
 		}
-		name := allocTokenName(el.Literal, usedNames)
+		name := allocTokenName(el.Literal, usedNames, el.TokenName)
 		literals[key] = name
 		// A word-keyword literal (ending in a word char) needs a trailing `\b`
 		// guard so it only matches as a whole word; that forces a regex token
@@ -90,7 +106,7 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 		if _, ok := regexTokens[key]; ok {
 			return
 		}
-		name := allocTokenName("rx_"+el.Pattern, usedNames)
+		name := allocTokenName("rx_"+el.Pattern, usedNames, "")
 		regexTokens[key] = name
 		matchTokens[name] = goRegex(el.Pattern, el.Flags)
 		// The Go engine gates non-eager match tokens by alt position 0
@@ -102,24 +118,35 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 		matchOrder = append(matchOrder, name)
 	}
 
+	// Gather every terminal first. Probe-helper productions store their vocab
+	// as elements rather than in Alts, so walk those too. The lifted literals
+	// are seeded up front: their productions no longer exist, so an
+	// unreferenced one has no element anywhere in Alts.
+	terminals := append([]*abnfElement{}, liftedLiterals...)
 	for _, prod := range grammar.Productions {
 		for _, alt := range prod.Alts {
-			for _, el := range alt {
-				if el.Kind == kindTerm {
-					allocTerm(el)
-				} else if el.Kind == kindRegex {
-					allocRegex(el)
-				}
-			}
+			terminals = append(terminals, alt...)
 		}
 		if prod.ProbeHelper != nil {
-			for _, el := range prod.ProbeHelper.VocabElements {
-				if el.Kind == kindTerm {
-					allocTerm(el)
-				} else if el.Kind == kindRegex {
-					allocRegex(el)
-				}
-			}
+			terminals = append(terminals, prod.ProbeHelper.VocabElements...)
+		}
+	}
+
+	// Terminals carrying a lifted production name are allocated first, so the
+	// name wins even when the same literal also appears inline in an earlier
+	// rule (`PL = "+"` must yield `#PL`, not `#T`, regardless of where the
+	// bare `"+"` shows up).
+	named := []*abnfElement{}
+	for _, el := range terminals {
+		if el.Kind == kindTerm && el.TokenName != "" {
+			named = append(named, el)
+		}
+	}
+	for _, el := range append(named, terminals...) {
+		if el.Kind == kindTerm {
+			allocTerm(el)
+		} else if el.Kind == kindRegex {
+			allocRegex(el)
 		}
 	}
 

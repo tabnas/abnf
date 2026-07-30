@@ -1853,11 +1853,32 @@ function emitLiteralToken(
 }
 
 
+// Copy a grammar deeply enough that the emit pipeline cannot disturb the
+// caller's AST. The passes below replace `productions`, `alts` and the
+// individual sequences, but treat elements as immutable (each rewriting
+// walk returns fresh element objects), so sharing elements is safe.
+function cloneGrammar(grammar: AbnfGrammar): AbnfGrammar {
+  return {
+    productions: grammar.productions.map((p) => ({
+      ...p,
+      alts: p.alts.map((alt) => alt.slice()),
+    })),
+  }
+}
+
+
 // Convert an ABNF grammar AST into a tabnas GrammarSpec.
 function emitGrammarSpec(
   grammar: AbnfGrammar,
   opts?: AbnfConvertOptions,
 ): GrammarSpec {
+  // Work on a copy: `resolveProseTerminals`, `liftLiteralTokens` and
+  // `normalizeBuiltinTokens` all rewrite the grammar in place, so emitting
+  // twice from one `parseAbnf` result would otherwise give two different
+  // specs — the second missing every lifted production, since the first
+  // pass had already removed them.
+  grammar = cloneGrammar(grammar)
+
   // Drop informational prose definitions (`NR = <number>`) first, so the
   // names they document fall through to the built-in tokens — and so a
   // leading prose line is never mistaken for the start rule.

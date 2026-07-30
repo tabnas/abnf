@@ -1,0 +1,6 @@
+grammar	expected
+x = <foo>	ERROR:abnf: rule 'x' is defined only by prose ('<foo>'), which describes a terminal but does not define one. Prose is allowed only for built-in lexer tokens (TX, NR, ST, VL).
+y = "a" <foo>	ERROR:abnf: rule 'y' uses prose ('<foo>') inside an expression; prose may only stand alone as the whole definition of a built-in lexer token.
+y = ( <foo> / "a" )	ERROR:abnf: rule 'y' uses prose ('<foo>') inside an expression; prose may only stand alone as the whole definition of a built-in lexer token.
+y = *<foo>	ERROR:abnf: rule 'y' uses prose ('<foo>') inside an expression; prose may only stand alone as the whole definition of a built-in lexer token.
+NR = <number>	ERROR:abnf: grammar defines no rules — only informational prose terminals.
