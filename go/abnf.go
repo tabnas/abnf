@@ -123,7 +123,19 @@ type abnfProduction struct {
 	Incremental bool
 	ProbeDisp   *probeDispatchSpec
 	ProbeHelper *probeHelperSpec
+	// TailRepeat is set by rewriteTailRepeats on a production of the
+	// shape `X = prefix [ sep X ]` (all-terminal prefix and separator,
+	// self-ref last). The opt is removed from Alts (leaving just the
+	// prefix) and the separator elements are stashed here; the emitter
+	// compiles the production to a same-depth close-phase repeat
+	// (`r: X`) instead of the opt→group→push helper chain. Mirrors the
+	// TS `tailRepeat` flag.
+	TailRepeat  *tailRepeatSpec
 	NodeKind    string // "", "user", "core", "helper"
+}
+
+type tailRepeatSpec struct {
+	Sep abnfSequence
 }
 
 func (p *abnfProduction) kind() string {

@@ -32,8 +32,8 @@ const REF_FIELDS = new Set(['a', 'bo', 'bc'])
 // Tree-building `$`-builtins (emitted with `builtins: true`). Pure
 // recognition mode drops these too; their per-alt config lives under
 // `k.node$` / `k.capture$`.
-const TREE_BUILTINS = new Set(['@node$', '@capture$', '@bubble$'])
-const TREE_CONFIG_KEYS = ['node$', 'capture$']
+const TREE_BUILTINS = new Set(['@node$', '@capture$', '@bubble$', '@fold$'])
+const TREE_CONFIG_KEYS = ['node$', 'capture$', 'fold$']
 
 
 export class AbnfCompileError extends Error {

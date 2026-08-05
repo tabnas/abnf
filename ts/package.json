@@ -1,6 +1,6 @@
 {
   "name": "@tabnas/abnf",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "main": "dist/abnf.js",
   "type": "commonjs",
   "types": "dist/abnf.d.ts",
@@ -39,7 +39,7 @@
     ".": "./dist/abnf.js"
   },
   "peerDependencies": {
-    "@tabnas/parser": ">=0"
+    "@tabnas/parser": ">=0.5.0"
   },
   "devDependencies": {
     "@tabnas/debug": "*",

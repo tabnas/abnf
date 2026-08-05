@@ -199,9 +199,8 @@ tn.use(Debug, { print: false })
 tn.debug.model().abnf === GRAMMAR // => true
 ```
 
-Add actions to fold the operands into a total on the `val` node, the same
-way the hand-written grammar accumulates into its own `val` node — each
-one a single expression:
+Add actions to accumulate a total on the `val` node — the same two
+actions, on the same two rules, as the hand-written grammar above:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
@@ -215,14 +214,11 @@ tn.abnf(`
   PL  = "+"
 `, {
   actions: {
-    // Each `add` holds its own number...
-    '@add:o:NR': (r) => { r.node.value = r.o[0].val },
+    // `val` holds the running total.
+    '@val:o:add': (r) => { r.node.value = 0 },
 
-    // ...plus whatever the nested `add` came to.
-    '@add:ac': (r) => { r.node.value += r.node.kids[0]?.value ?? 0 },
-
-    // `val` carries the result of the parse.
-    '@val:ac': (r) => { r.node.value = r.node.kids[0].value },
+    // Each number adds to it.
+    '@add:o:NR': (r) => { r.parent.node.value += r.o[0].val },
   },
 })
 
@@ -230,21 +226,18 @@ tn.parse('1+2+3').value   // => 6
 tn.parse('12+3+45').value // => 60
 ```
 
-The total lands on `val`'s node rather than in a variable outside the
-parse, so `parse` returns it and the instance carries no state between
-calls.
+`r.parent` is `val` for **every** repetition, because the compiler turns
+the tail self-reference `[ PL add ]` into a same-depth repeat — the same
+`r: 'add'` close alternate the hand-written grammar declares — rather
+than a nested push. One consequence is a flat tree: `1+2+3` yields three
+sibling `add` kids under `val`, each spanning its own number.
 
-The two reference kinds are doing different jobs. `@add:o:NR` is an
-**alternate mark**: the `add` rule's open-phase alternate whose leading
-discriminator is `NR`. `r.o` holds the tokens that alternate matched, so
-`r.o[0].val` is the number just read, already numeric. `@add:ac` and
-`@val:ac` are **rule-phase hooks** — *after close*, on the way back up the
-stack, which is when a rule's children are finished and can be folded in.
-The phases are `bo`, `ao`, `bc` and `ac`.
-
-Note that `add`'s only child node is the nested `add`: `PL = "+"` is a
-lexical definition, so it compiles to a token rather than a rule and never
-appears in `kids`.
+`@val:o:add` and `@add:o:NR` are **alternate marks**: a rule's alternate
+named by its leading discriminator (the pushed rule for `val`, the `NR`
+token for `add`). `r.o` holds the tokens that alternate matched, so
+`r.o[0].val` is the number just read, already numeric. Rule-phase hooks
+(`bo`, `ao`, `bc`, `ac` — before/after open and close) are also
+available, e.g. `@add:c:PL` fires on the repeat itself.
 
 Mark names are assigned by the compiler, not chosen by you. Ask for them
 rather than guessing — `tabnas-abnf --marks -f grammar.abnf` lists every

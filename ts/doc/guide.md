@@ -173,11 +173,11 @@ Same-leading-token alternatives get a `~N` suffix to keep marks unique.
 
 ## Accumulate a value across a whole parse
 
-Alternate marks fire per match, which is what you want for reading a
-token. For state that spans the parse — a running total, a counter, a
-collected list — pair them with a **rule-phase hook** on the start rule.
-`@<rule>:bo` (before-open) runs once, before anything is matched, so it
-is where the accumulator gets initialised.
+For state that spans the parse — a running total, a counter, a collected
+list — keep it on a wrapping rule's node and let the repeating rule write
+to `r.parent.node`. The compiler turns a tail self-reference
+(`add = NR [ PL add ]`) into a same-depth repeat, so **every** repetition
+shares the same parent:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
@@ -191,31 +191,26 @@ tn.abnf(`
   PL  = "+"
 `, {
   actions: {
-    // Each `add` holds its own number...
-    '@add:o:NR': (r) => { r.node.value = r.o[0].val },
+    // `val` holds the running total.
+    '@val:o:add': (r) => { r.node.value = 0 },
 
-    // ...plus whatever the nested `add` came to.
-    '@add:ac': (r) => { r.node.value += r.node.kids[0]?.value ?? 0 },
-
-    // `val` carries the result of the parse.
-    '@val:ac': (r) => { r.node.value = r.node.kids[0].value },
+    // Each number adds to it.
+    '@add:o:NR': (r) => { r.parent.node.value += r.o[0].val },
   },
 })
 
 tn.parse('1+2+3').value // => 6
 ```
 
-Each action is a single expression, and the total lives on the node
+Both actions are a single expression, and the total lives on the node
 rather than in a variable outside the parse — so `parse` returns it, the
 instance holds no state between calls, and two parses cannot interfere.
 
-`@add:o:NR` reads a token as it is matched. `@add:ac` and `@val:ac` are
-**rule-phase hooks** — *after close*, on the way back up the stack, which
-is when a rule's children are complete and can be folded in. The phases
-are `bo`, `ao`, `bc` and `ac`.
-
-`add`'s only child node is the nested `add`, because `PL = "+"` is a
-lexical definition and compiles to a token rather than a rule.
+The tail-repeat compilation also flattens the tree: `1+2+3` yields three
+sibling `add` kids under `val`, each spanning its own number, rather than
+a right-nested chain. The repeat itself is addressable as a close-phase
+mark (`@add:c:PL`), and the run's last iteration closes through
+`@add:c:_`.
 
 ## Compile a grammar to portable pure data
 

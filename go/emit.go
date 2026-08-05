@@ -56,6 +56,7 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 
 	grammar = eliminateLeftRecursion(grammar)
 	grammar = rewriteProbeDispatches(grammar)
+	grammar = rewriteTailRepeats(grammar, start)
 	grammar = desugar(grammar)
 
 	// Token allocation.
@@ -383,6 +384,52 @@ func (rr *refRegistry) bubble() map[string]any {
 	return map[string]any{"a": string(ref)}
 }
 
+// fold returns alt-spec fields for a tail-repeat iteration delivering
+// its node to the parent (closure-mode twin of the engine's `@fold$`
+// builtin — the two MUST stay behaviourally identical; the fixture
+// suite pins this).
+func (rr *refRegistry) fold(cN int) map[string]any {
+	if rr.useBuiltins {
+		cfg := map[string]any{}
+		if cN > 0 {
+			cfg["cN"] = cN
+		}
+		return map[string]any{"a": "@fold$", "k": map[string]any{"fold$": cfg}}
+	}
+	ref := rr.registerAction(func(r *tabnas.Rule, _ *tabnas.Context) {
+		if r.Parent == nil {
+			return
+		}
+		p, _ := r.Parent.Node.(map[string]any)
+		if p == nil {
+			return
+		}
+		if _, hasSrc := p["src"]; !hasSrc {
+			return
+		}
+		if own, ok := r.Node.(map[string]any); ok && own != nil && !sameMap(own, p) {
+			if _, hasSrc := own["src"]; hasSrc {
+				ps, _ := p["src"].(string)
+				os, _ := own["src"].(string)
+				p["src"] = ps + os
+				if rv, ok := own["rule"]; ok && rv != nil && rv != "" {
+					p["kids"] = append(asAnyKids(p["kids"]), own)
+				} else if ok2, okk := own["kids"].([]any); okk {
+					p["kids"] = append(asAnyKids(p["kids"]), ok2...)
+				}
+			}
+		}
+		for i := 0; i < cN && i < len(r.C); i++ {
+			if r.C[i] != nil {
+				ps, _ := p["src"].(string)
+				p["src"] = ps + r.C[i].Src
+			}
+		}
+		r.Node = tabnas.Undefined
+	})
+	return map[string]any{"a": string(ref)}
+}
+
 // ---- AST node helpers ----------------------------------------------
 
 func mkAstNode(ruleName, nodeKind string) map[string]any {
@@ -483,6 +530,61 @@ func captureChildFields(refs *refRegistry, ruleName, nodeKind string) map[string
 
 // ---- emitProduction ------------------------------------------------
 
+// emitTailRepeat emits a production marked by rewriteTailRepeats:
+//
+//	open:  [ { s: prefix,  node$ init } ]
+//	close: [ { s: sep, r: SELF, fold$ cN } , { fold$ } ]
+//
+// The same shape a hand-written tabnas grammar uses for `X = a [ b X ]`.
+// Mirrors the TS emitTailRepeat; the alignment TSVs pin the shape.
+func emitTailRepeat(prod *abnfProduction, literals, regexTokens map[string]string,
+	tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec, refs *refRegistry) {
+
+	prodKind := prod.kind()
+	prefixAlt := prod.Alts[0]
+	sep := prod.TailRepeat.Sep
+
+	// All-terminal sequences (guaranteed by the rewrite's guards), so
+	// each segmentizes to exactly one ref-free segment.
+	prefixSeg := segmentize(prefixAlt, literals, regexTokens)[0]
+	sepSeg := segmentize(sep, literals, regexTokens)[0]
+
+	var marks *markTable
+	if prodKind == "user" && refs.emitMarks {
+		marks = buildMarks([]abnfSequence{prefixAlt, sep}, literals, regexTokens)
+	}
+
+	open := segmentToAlt(prefixSeg, tag, refs, true, prod.Name, prodKind)
+	if marks != nil {
+		open["m"] = marks.byIndex[0]
+	}
+
+	repeat := map[string]any{
+		"s": strings.Join(sepSeg.terms, " "),
+		"r": prod.Name,
+		"g": tag,
+	}
+	for k, v := range refs.fold(len(sepSeg.terms)) {
+		repeat[k] = v
+	}
+	if marks != nil {
+		repeat["m"] = marks.byIndex[1]
+	}
+
+	end := map[string]any{"g": tag}
+	for k, v := range refs.fold(0) {
+		end[k] = v
+	}
+	if marks != nil {
+		end["m"] = "_"
+	}
+
+	ruleSpec[prod.Name] = &tabnas.GrammarRuleSpec{
+		Open:  []*tabnas.GrammarAltSpec{mapToAlt(open)},
+		Close: []*tabnas.GrammarAltSpec{mapToAlt(repeat), mapToAlt(end)},
+	}
+}
+
 func emitProduction(prod *abnfProduction, grammar *abnfGrammar, literals, regexTokens map[string]string,
 	knownRules map[string]bool, tag string, ruleSpec map[string]*tabnas.GrammarRuleSpec,
 	firstSets map[string]map[string]bool, nullable map[string]bool, refs *refRegistry) error {
@@ -491,6 +593,11 @@ func emitProduction(prod *abnfProduction, grammar *abnfGrammar, literals, regexT
 		if err := validateRefs(alt, knownRules, prod.Name); err != nil {
 			return err
 		}
+	}
+
+	if prod.TailRepeat != nil {
+		emitTailRepeat(prod, literals, regexTokens, tag, ruleSpec, refs)
+		return nil
 	}
 
 	allSimple := true
