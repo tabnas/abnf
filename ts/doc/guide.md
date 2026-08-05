@@ -171,6 +171,46 @@ The mark is the alternative's leading discriminator — the token name
 (without the `#`), the pushed rule name, or `_` for an empty alt.
 Same-leading-token alternatives get a `~N` suffix to keep marks unique.
 
+## Accumulate a value across a whole parse
+
+Alternate marks fire per match, which is what you want for reading a
+token. For state that spans the parse — a running total, a counter, a
+collected list — pair them with a **rule-phase hook** on the start rule.
+`@<rule>:bo` (before-open) runs once, before anything is matched, so it
+is where the accumulator gets initialised.
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+let total = 0
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  val = add
+  add = NR [ PL add ]
+  NR  = <number>
+  PL  = "+"
+`, {
+  actions: {
+    '@val:bo': () => { total = 0 },
+    '@add:o:NR': (r) => { total += r.o[0].val },
+  },
+})
+
+tn.parse('1+2+3')
+total // => 6
+```
+
+Both actions are a single expression, and because `@val:bo` resets on
+every parse there is no cleanup between calls — `tn.parse('12+3+45')`
+leaves `total` at `60`.
+
+Note the wrapping `val` rule. It exists so there is somewhere to hang
+the once-per-parse hook; `add` alone would give you a hook that fires
+again on each repetition. The phases are `bo`, `ao`, `bc` and `ac` —
+before/after open and close.
+
 ## Compile a grammar to portable pure data
 
 `abnfCompile` emits the grammar as **jsonic text** with no closures —
