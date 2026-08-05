@@ -199,12 +199,15 @@ tn.use(Debug, { print: false })
 tn.debug.model().abnf === GRAMMAR // => true
 ```
 
-Add an action to fold the operands into a running total on `val`, the
-same way the hand-written grammar accumulates into its `val` node:
+Add actions to fold the operands into a running total, the same way the
+hand-written grammar accumulates into its `val` node. Two references, and
+each one is a single expression:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
 const { abnf } = require('@tabnas/abnf')
+
+let total = 0
 
 const tn = new Tabnas({ plugins: [abnf] })
 tn.abnf(`
@@ -214,18 +217,33 @@ tn.abnf(`
   PL  = "+"
 `, {
   actions: {
-    // Add every number to the one `val` node — no child integration.
-    '@add:o:NR': (r) => {
-      let val = r
-      while (val.parent && 'val' !== val.name) val = val.parent
-      val.node.value = (val.node.value || 0) + Number(r.o[0].val)
-    },
+    // Zero the accumulator once, before `val` opens.
+    '@val:bo': () => { total = 0 },
+
+    // Add each number to it.
+    '@add:o:NR': (r) => { total += r.o[0].val },
   },
 })
 
-tn.parse('1+2+3').value   // => 6
-tn.parse('12+3+45').value // => 60
+tn.parse('1+2+3')
+total                     // => 6
+
+// `@val:bo` resets on every parse, so no cleanup between calls.
+tn.parse('12+3+45')
+total                     // => 60
 ```
+
+The two reference kinds are doing different jobs. `@val:bo` is a
+**rule-phase hook** — the `val` rule, *before open* — so it fires once per
+parse, which is exactly where an accumulator wants zeroing. `@add:o:NR` is
+an **alternate mark**: the `add` rule's open-phase alternate whose leading
+discriminator is `NR`. `r.o` holds the tokens that alternate matched, so
+`r.o[0].val` is the number just read, already numeric.
+
+Mark names are assigned by the compiler, not chosen by you. Ask for them
+rather than guessing — `tabnas-abnf --marks -f grammar.abnf` lists every
+mark a grammar has, and attaching an action to one that doesn't exist is a
+compile error rather than a silent no-op.
 
 ## Left recursion
 
