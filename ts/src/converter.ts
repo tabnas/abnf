@@ -102,6 +102,14 @@ type AbnfProduction = {
   // production with the same name. The flag is gone by the time
   // the AST reaches the emitter.
   incremental?: boolean
+  // Set by `rewriteTailRepeats` on a production of the shape
+  // `X = prefix [ sep X ]` (all-terminal prefix and separator, self-ref
+  // last). The opt is removed from `alts` (leaving just the prefix) and
+  // the separator elements are stashed here; the emitter compiles the
+  // production to a same-depth close-phase repeat (`r: X`) instead of
+  // the opt→group→push helper chain, so every iteration shares one
+  // parent and the tree comes out flat.
+  tailRepeat?: { sep: AbnfSequence }
   // Set on synthetic productions introduced by the probe-dispatch
   // rewriter. The emitter emits a phase-retry rule body instead of
   // compiling `alts` through the normal path.
@@ -891,6 +899,66 @@ function eliminateDirectLeftRec(prod: AbnfProduction): AbnfProduction {
 }
 
 
+// Rewrite tail self-references into same-depth repeats.
+//
+//   X = prefix [ sep X ]
+//
+// compiles naturally to a rule that repeats itself (`r: X`) from its
+// close phase — the form a hand-written tabnas grammar uses — rather
+// than to an optional-group helper chain that re-pushes X. The repeat
+// keeps every iteration at one stack depth with the SAME parent, which
+// is what makes `r.parent.node` usable from user actions, and flattens
+// the tree: `1+2+3` yields sibling X kids instead of a right-nested
+// chain.
+//
+// The rewrite is deliberately narrow. It applies only when:
+//   - the production has exactly one alternative;
+//   - its last element is an option wrapping `sep… X` with the
+//     self-reference LAST and at least one separator element;
+//   - every prefix and separator element is a terminal (literal,
+//     token, or regex — all resolved before this pass runs);
+//   - the production is not the start production (the `__start__`
+//     wrapper allocates no node for a fold to land in).
+// Anything else keeps the existing compilation.
+function rewriteTailRepeats(grammar: AbnfGrammar, start: string): AbnfGrammar {
+  const isTerminal = (el: AbnfElement) =>
+    el.kind === 'term' || el.kind === 'token' || el.kind === 'regex'
+
+  for (const prod of grammar.productions) {
+    if (prod.probeDispatch || prod.probeHelper) continue
+    if (prod.name === start) continue
+    if (prod.alts.length !== 1) continue
+    const alt = prod.alts[0]
+    if (alt.length < 2) continue
+    const last = alt[alt.length - 1]
+    if (last.kind !== 'opt') continue
+
+    // Normalize the option body to a sequence: `[ a b ]` parses as
+    // opt(group([[a, b]])); `[ a ]` as opt(a).
+    let seq: AbnfSequence
+    if (last.inner.kind === 'group') {
+      if (last.inner.alts.length !== 1) continue
+      seq = last.inner.alts[0]
+    } else {
+      seq = [last.inner]
+    }
+    if (seq.length < 2) continue // need at least one separator + the self-ref
+
+    const tail = seq[seq.length - 1]
+    if (tail.kind !== 'ref' || tail.name !== prod.name) continue
+    const sep = seq.slice(0, -1)
+    if (!sep.every(isTerminal)) continue
+
+    const prefix = alt.slice(0, -1)
+    if (prefix.length === 0 || !prefix.every(isTerminal)) continue
+
+    prod.alts = [prefix]
+    prod.tailRepeat = { sep }
+  }
+  return grammar
+}
+
+
 function desugar(grammar: AbnfGrammar): AbnfGrammar {
   const extra: AbnfProduction[] = []
   const used = new Set(grammar.productions.map((p) => p.name))
@@ -1028,10 +1096,13 @@ function desugar(grammar: AbnfGrammar): AbnfGrammar {
       alts: p.alts.map(desugarAlt),
       nodeKind: p.nodeKind,
     }
-    // Probe-dispatch flags survive desugar unchanged — the emitter
-    // routes around the standard alt-compilation path for these.
+    // Probe-dispatch and tail-repeat flags survive desugar unchanged —
+    // the emitter routes around the standard alt-compilation path for
+    // these. (A tail-repeat separator is all-terminal by construction,
+    // so it needs no desugaring of its own.)
     if (p.probeDispatch) out.probeDispatch = p.probeDispatch
     if (p.probeHelper) out.probeHelper = p.probeHelper
+    if (p.tailRepeat) out.tailRepeat = p.tailRepeat
     return out
   })
 
@@ -1902,6 +1973,7 @@ function emitGrammarSpec(
   // (`?`, `*`, `+`, grouping) into plain ABNF.
   grammar = eliminateLeftRecursion(grammar)
   grammar = rewriteProbeDispatches(grammar)
+  grammar = rewriteTailRepeats(grammar, start)
   grammar = desugar(grammar)
 
   // Allocate a fixed token for each unique literal, and a match
@@ -2135,6 +2207,34 @@ class RefRegistry {
   bubble(closure: Function): { a: any } {
     return this.useBuiltins ? { a: '@bubble$' } : { a: this.register(closure) }
   }
+  fold(cfg: Record<string, any>, closure: Function): { a: any; k?: any } {
+    return this.useBuiltins
+      ? { a: '@fold$', k: { fold$: cfg } }
+      : { a: this.register(closure) }
+  }
+}
+
+
+// Closure-mode twin of the engine's `@fold$` builtin (see
+// `@tabnas/parser` builtins.ts — the two MUST stay behaviourally
+// identical; the fixture suite pins this). Folds a tail-repeat
+// iteration's node into its parent as a sibling kid, appends `cN`
+// close-phase (separator) tokens' src to the parent, and clears the
+// own node so the parent's capture no-ops on its stale first-iteration
+// child pointer.
+function mkFoldClosure(cN: number): (r: Rule) => void {
+  return (r: Rule) => {
+    const p = r.parent && (r.parent.node as any)
+    if (null == p || 'object' !== typeof p || !('src' in p)) return
+    const own = r.node as any
+    if (null != own && 'object' === typeof own && 'src' in own && own !== p) {
+      p.src += own.src
+      if (own.rule) p.kids.push(own)
+      else if (Array.isArray(own.kids)) p.kids.push(...own.kids)
+    }
+    for (let i = 0; i < cN; i++) p.src += r.c[i].src
+    r.node = undefined
+  }
 }
 
 
@@ -2259,6 +2359,58 @@ function captureChildFields(
 }
 
 
+// Emit a production marked by `rewriteTailRepeats`:
+//
+//   open:  [ { s: prefix,  node$ init } ]
+//   close: [ { s: sep, r: SELF, fold$ cN } , { fold$ } ]
+//
+// The same shape a hand-written tabnas grammar uses for `X = a [ b X ]`.
+// Every iteration folds itself into the parent (see mkFoldClosure /
+// `@fold$`); marks land on the close alts too, so `@X:c:<sep>` and
+// `@X:c:_` user actions can attach.
+function emitTailRepeat(
+  prod: AbnfProduction,
+  literals: Map<string, string>,
+  regexTokens: Map<string, string>,
+  tag: string,
+  ruleSpec: NonNullable<GrammarSpec['rule']>,
+  refs: RefRegistry,
+) {
+  const prodKind = prod.nodeKind ?? 'user'
+  const prefixAlt = prod.alts[0]
+  const sep = prod.tailRepeat!.sep
+
+  // All-terminal sequences (guaranteed by the rewrite's guards), so
+  // each segmentizes to exactly one ref-free segment.
+  const prefixSeg = segmentize(prefixAlt, literals, regexTokens)[0]
+  const sepSeg = segmentize(sep, literals, regexTokens)[0]
+
+  const marks = (prodKind === 'user' && refs.emitMarks)
+    ? assignMarks([prefixAlt, sep], literals, regexTokens)
+    : null
+
+  const open = segmentToAlt(prefixSeg, tag, refs, true, prod.name, prodKind)
+  if (marks) open.m = marks.get(prefixAlt)
+
+  const repeat: any = {
+    s: sepSeg.terms.join(' '),
+    r: prod.name,
+    ...refs.fold({ cN: sepSeg.terms.length },
+      mkFoldClosure(sepSeg.terms.length)),
+    g: tag,
+  }
+  if (marks) repeat.m = marks.get(sep)
+
+  const end: any = {
+    ...refs.fold({}, mkFoldClosure(0)),
+    g: tag,
+  }
+  if (marks) end.m = '_'
+
+  ruleSpec[prod.name] = { open: [open], close: [repeat, end] }
+}
+
+
 function emitProduction(
   prod: AbnfProduction,
   grammar: AbnfGrammar,
@@ -2273,6 +2425,11 @@ function emitProduction(
 ) {
   for (const alt of prod.alts) {
     validateRefs(alt, knownRules, prod.name)
+  }
+
+  if (prod.tailRepeat) {
+    emitTailRepeat(prod, literals, regexTokens, tag, ruleSpec, refs)
+    return
   }
 
   const allSimple = prod.alts.every(isSingleSegment)

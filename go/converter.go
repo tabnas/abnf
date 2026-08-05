@@ -476,6 +476,85 @@ func eliminateDirectLeftRec(prod *abnfProduction) *abnfProduction {
 
 // ---- desugar -------------------------------------------------------
 
+// rewriteTailRepeats rewrites tail self-references into same-depth
+// repeats:
+//
+//	X = prefix [ sep X ]
+//
+// compiles naturally to a rule that repeats itself (`r: X`) from its
+// close phase — the form a hand-written tabnas grammar uses — rather
+// than to an optional-group helper chain that re-pushes X. The repeat
+// keeps every iteration at one stack depth with the SAME parent, which
+// is what makes r.Parent.Node usable from user actions, and flattens
+// the tree. Mirrors the TS `rewriteTailRepeats`; the guards MUST stay
+// identical (the alignment TSVs pin the emitted shape cross-engine).
+func rewriteTailRepeats(grammar *abnfGrammar, start string) *abnfGrammar {
+	isTerminal := func(el *abnfElement) bool {
+		return el.Kind == kindTerm || el.Kind == kindToken || el.Kind == kindRegex
+	}
+	allTerminal := func(seq abnfSequence) bool {
+		for _, el := range seq {
+			if !isTerminal(el) {
+				return false
+			}
+		}
+		return true
+	}
+
+	for _, prod := range grammar.Productions {
+		if prod.ProbeDisp != nil || prod.ProbeHelper != nil {
+			continue
+		}
+		if prod.Name == start {
+			continue
+		}
+		if len(prod.Alts) != 1 {
+			continue
+		}
+		alt := prod.Alts[0]
+		if len(alt) < 2 {
+			continue
+		}
+		last := alt[len(alt)-1]
+		if last.Kind != kindOpt {
+			continue
+		}
+
+		// Normalize the option body to a sequence: `[ a b ]` parses as
+		// opt(group([[a, b]])); `[ a ]` as opt(a).
+		var seq abnfSequence
+		if last.Inner.Kind == kindGroup {
+			if len(last.Inner.Alts) != 1 {
+				continue
+			}
+			seq = last.Inner.Alts[0]
+		} else {
+			seq = abnfSequence{last.Inner}
+		}
+		if len(seq) < 2 { // need at least one separator + the self-ref
+			continue
+		}
+
+		tail := seq[len(seq)-1]
+		if tail.Kind != kindRef || tail.Name != prod.Name {
+			continue
+		}
+		sep := seq[:len(seq)-1]
+		if !allTerminal(sep) {
+			continue
+		}
+
+		prefix := alt[:len(alt)-1]
+		if len(prefix) == 0 || !allTerminal(prefix) {
+			continue
+		}
+
+		prod.Alts = []abnfSequence{prefix}
+		prod.TailRepeat = &tailRepeatSpec{Sep: sep}
+	}
+	return grammar
+}
+
 func desugar(grammar *abnfGrammar) *abnfGrammar {
 	extra := []*abnfProduction{}
 	used := map[string]bool{}
@@ -607,6 +686,9 @@ func desugar(grammar *abnfGrammar) *abnfGrammar {
 		}
 		if p.ProbeHelper != nil {
 			out.ProbeHelper = p.ProbeHelper
+		}
+		if p.TailRepeat != nil {
+			out.TailRepeat = p.TailRepeat
 		}
 		rewritten = append(rewritten, out)
 	}

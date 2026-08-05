@@ -1,6 +1,6 @@
 grammar	expected
-val = add\nadd = NR [ PL add ]\nNR = <number>\nPL = "+"	["__start__","_gen1_group","_gen2_opt__gen1_group","add","val"]
-val = add\nadd = NR [ PL add ]\nPL = "+"	["__start__","_gen1_group","_gen2_opt__gen1_group","add","val"]
+val = add\nadd = NR [ PL add ]\nNR = <number>\nPL = "+"	["__start__","add","val"]
+val = add\nadd = NR [ PL add ]\nPL = "+"	["__start__","add","val"]
 NR = <number>\nadd = NR [ PL add ]\nPL = "+"	["__start__","_gen1_group","_gen2_opt__gen1_group","add"]
 add = NR [ PL add ]\nPL = "+"	["__start__","_gen1_group","_gen2_opt__gen1_group","add"]
 top = "x"\nPL = "+"	["__start__","top"]

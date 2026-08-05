@@ -1,6 +1,6 @@
 grammar	input	expected
-val = add\nadd = NR [ PL add ]\nNR = <number>\nPL = "+"	1+2+3	{"rule":"val","src":"1+2+3","kids":[{"rule":"add","src":"1+2+3","kids":[{"rule":"add","src":"2+3","kids":[{"rule":"add","src":"3","kids":[]}]}]}]}
-val = add\nadd = NR [ PL add ]\nPL = "+"	1+2+3	{"rule":"val","src":"1+2+3","kids":[{"rule":"add","src":"1+2+3","kids":[{"rule":"add","src":"2+3","kids":[{"rule":"add","src":"3","kids":[]}]}]}]}
+val = add\nadd = NR [ PL add ]\nNR = <number>\nPL = "+"	1+2+3	{"rule":"val","src":"1+2+3","kids":[{"rule":"add","src":"1","kids":[]},{"rule":"add","src":"2","kids":[]},{"rule":"add","src":"3","kids":[]}]}
+val = add\nadd = NR [ PL add ]\nPL = "+"	1+2+3	{"rule":"val","src":"1+2+3","kids":[{"rule":"add","src":"1","kids":[]},{"rule":"add","src":"2","kids":[]},{"rule":"add","src":"3","kids":[]}]}
 NR = <number>\nadd = NR [ PL add ]\nPL = "+"	1+2	{"rule":"add","src":"1+2","kids":[{"rule":"add","src":"2","kids":[]}]}
 add = NR [ PL add ]\nPL = "+"	1+2	{"rule":"add","src":"1+2","kids":[{"rule":"add","src":"2","kids":[]}]}
 top = "x"\nPL = "+"	x	{"rule":"top","src":"x","kids":[]}
