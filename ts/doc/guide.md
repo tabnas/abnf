@@ -183,8 +183,6 @@ is where the accumulator gets initialised.
 const { Tabnas } = require('@tabnas/parser')
 const { abnf } = require('@tabnas/abnf')
 
-let total = 0
-
 const tn = new Tabnas({ plugins: [abnf] })
 tn.abnf(`
   val = add
@@ -193,23 +191,31 @@ tn.abnf(`
   PL  = "+"
 `, {
   actions: {
-    '@val:bo': () => { total = 0 },
-    '@add:o:NR': (r) => { total += r.o[0].val },
+    // Each `add` holds its own number...
+    '@add:o:NR': (r) => { r.node.value = r.o[0].val },
+
+    // ...plus whatever the nested `add` came to.
+    '@add:ac': (r) => { r.node.value += r.node.kids[0]?.value ?? 0 },
+
+    // `val` carries the result of the parse.
+    '@val:ac': (r) => { r.node.value = r.node.kids[0].value },
   },
 })
 
-tn.parse('1+2+3')
-total // => 6
+tn.parse('1+2+3').value // => 6
 ```
 
-Both actions are a single expression, and because `@val:bo` resets on
-every parse there is no cleanup between calls — `tn.parse('12+3+45')`
-leaves `total` at `60`.
+Each action is a single expression, and the total lives on the node
+rather than in a variable outside the parse — so `parse` returns it, the
+instance holds no state between calls, and two parses cannot interfere.
 
-Note the wrapping `val` rule. It exists so there is somewhere to hang
-the once-per-parse hook; `add` alone would give you a hook that fires
-again on each repetition. The phases are `bo`, `ao`, `bc` and `ac` —
-before/after open and close.
+`@add:o:NR` reads a token as it is matched. `@add:ac` and `@val:ac` are
+**rule-phase hooks** — *after close*, on the way back up the stack, which
+is when a rule's children are complete and can be folded in. The phases
+are `bo`, `ao`, `bc` and `ac`.
+
+`add`'s only child node is the nested `add`, because `PL = "+"` is a
+lexical definition and compiles to a token rather than a rule.
 
 ## Compile a grammar to portable pure data
 
