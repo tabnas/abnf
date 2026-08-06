@@ -126,6 +126,41 @@ describe('abnf', () => {
     })
 
 
+    it('redefines a fixed punctuation token', () => {
+      // The fixed tokens are literals by definition, so naming one binds
+      // it to a new spelling — the same as `fixed: { token: { '#CA': ';' } }`
+      // by hand — and the production is lifted away rather than kept as a
+      // rule wrapping an anonymous token.
+      const spec = abnf('list = NR *( CA NR )\nCA = ";"')
+      assert.deepEqual(spec.options.fixed.token, { '#CA': ';' })
+      assert.equal(spec.rule.CA, undefined)
+
+      // End to end: the comma token now matches a semicolon.
+      const j = new Tabnas({ plugins: [abnfPlugin] })
+      j.abnf('list = NR *( CA NR )\nCA = ";"')
+      assert.equal(j.parse('1;2;3').src, '1;2;3')
+      assert.throws(() => j.parse('1,2'))
+    })
+
+
+    it('does not rebind a matcher-owned token', () => {
+      // These tins belong to a matcher, not to a literal spelling, so a
+      // matcher name is never lifted. The production stays an ordinary
+      // rule that shadows the bareword inside this grammar (see
+      // token.test.js), and the token itself is left alone — lifting
+      // would try to bind #TX to a literal, which the engine refuses.
+      for (const name of [
+        'BD', 'ZZ', 'UK', 'AA', 'SP', 'LN', 'CM', 'NR', 'ST', 'TX', 'VL',
+      ]) {
+        const spec = abnf(`top = ${name}\n${name} = "x"`)
+        assert.ok(spec.rule[name], name + ' must stay a rule')
+        assert.equal(
+          spec.options.fixed.token['#' + name], undefined,
+          name + ' must not be bound as a fixed token')
+      }
+    })
+
+
     it('rejects unknown rule reference', () => {
       assert.throws(
         () => abnf('x = missing'),

@@ -1752,15 +1752,18 @@ function resolveProseTerminals(grammar: AbnfGrammar): void {
 }
 
 
-// Token names the engine itself owns: the standard lexer tokens
-// (`utility.ts` registers these under `standard$`) plus the fixed tokens
-// the default config installs. A lifted literal must never claim one of
-// these — binding `#TX` to a literal would displace the lexer's text
-// matcher rather than add a token — so a production so named stays an
-// ordinary rule.
-const RESERVED_TOKEN_NAMES = new Set([
+// Token names produced by the engine's own matchers. Their tin belongs to
+// a matcher (number, string, text, value, space, line, comment) or to a
+// parse position (bad, end, unknown, any), never to a literal spelling —
+// so `TX = "foo"` cannot mean anything. The engine refuses the binding
+// outright (`checkFixedTokenNames` in @tabnas/parser); catching it here
+// first lets the error name the offending production.
+//
+// The fixed punctuation tokens (OB CB OS CS CL CA) are NOT reserved. They
+// are literals by definition, so `CA = ";"` is a meaningful redefinition
+// of the comma token and is lifted like any other literal production.
+const MATCHER_TOKEN_NAMES = new Set([
   'BD', 'ZZ', 'UK', 'AA', 'SP', 'LN', 'CM', 'NR', 'ST', 'TX', 'VL',
-  'OB', 'CB', 'OS', 'CS', 'CL', 'CA',
 ])
 
 
@@ -1794,9 +1797,13 @@ type LiftedLiteral = {
 // The start rule is never lifted: it has to stay a rule for the grammar
 // to have an entry point, so `greet = "hi"` still compiles to a rule.
 // Multi-alternative productions (`sign = "+" / "-"`) are real choices and
-// are left alone, as are names the engine already owns (see
-// RESERVED_TOKEN_NAMES) and the RFC 5234 core rules, which callers expect
-// to behave as rules wherever they are referenced.
+// are left alone, as are the RFC 5234 core rules, which callers expect to
+// behave as rules wherever they are referenced.
+//
+// Naming an existing fixed token *redefines* it: `CA = ";"` binds the
+// comma token to a semicolon, the same as `fixed: { token: { '#CA': ';' } }`
+// by hand. Matcher-owned names are rejected instead — see
+// MATCHER_TOKEN_NAMES.
 function liftLiteralTokens(
   grammar: AbnfGrammar,
   start: string,
@@ -1805,7 +1812,12 @@ function liftLiteralTokens(
 
   for (const prod of grammar.productions) {
     if (prod.name === start) continue
-    if (RESERVED_TOKEN_NAMES.has(prod.name)) continue
+    // A matcher-owned name is never lifted. `TX = "literal"` stays an
+    // ordinary rule that shadows the bareword for references inside this
+    // grammar (see token.test.js, 'a user rule of the same name wins over
+    // the built-in') — which leaves #TX itself untouched. Lifting would
+    // instead try to bind #TX to a literal, which the engine refuses.
+    if (MATCHER_TOKEN_NAMES.has(prod.name)) continue
     if (prod.nodeKind === 'core') continue
     if (prod.alts.length !== 1 || prod.alts[0].length !== 1) continue
     const el = prod.alts[0][0]
