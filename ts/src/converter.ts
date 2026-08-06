@@ -26,6 +26,7 @@
  */
 
 import type { GrammarSpec, Rule } from '@tabnas/parser'
+import { util as engineUtil } from '@tabnas/parser'
 
 
 // ABNF converter options.
@@ -157,6 +158,10 @@ type AbnfGrammar = {
   // ambiguous `[X D] Y` pattern detected, populated whether or not
   // the rewrite was actually applied.
   ambiguities?: AmbiguityReport[]
+  // `<remove>` directives. `remove` names rules/tokens to drop;
+  // `clearAll` is `* = <remove>`, which wipes the instance first.
+  remove?: string[]
+  clearAll?: boolean
 }
 
 type AmbiguityReport = {
@@ -241,6 +246,19 @@ const abnfRules: Record<
         },
         p: 'alts',
       },
+      // `<all> = <remove>` — the whole-grammar reset. Prose lexes as its
+      // own token (#PV), so it cannot be confused with a rule name or
+      // with the `*` repetition operator. The name is kept with its
+      // angle brackets, which no #TX rulename can produce, so it can
+      // never collide with a production actually called `all`.
+      {
+        s: '#PV #DEF',
+        a: (r: Rule) => {
+          r.u.name = (r.o[0].src as string)
+        },
+        p: 'alts',
+      },
+
       // Incremental alternatives:   name =/ alts
       {
         s: '#TX #DEFA',
@@ -257,6 +275,7 @@ const abnfRules: Record<
       // them.
       { s: '#TX #DEF', b: 2, r: 'prod' },
       { s: '#TX #DEFA', b: 2, r: 'prod' },
+      { s: '#PV #DEF', b: 2, r: 'prod' },
       { b: 1 },
     ],
     bc: (r) => {
@@ -295,6 +314,9 @@ const abnfRules: Record<
     open: [
       { s: '#TX #DEF', b: 2, g: 'end' },
       { s: '#TX #DEFA', b: 2, g: 'end' },
+      // `<all> =` starts the next production; without this the prose
+      // would be taken as another element of this sequence.
+      { s: '#PV #DEF', b: 2, g: 'end' },
       { s: '#ALT', b: 1, g: 'end' },
       { s: '#ZZ', b: 1, g: 'end' },
       { s: '#RP', b: 1, g: 'end' },
@@ -1668,6 +1690,20 @@ const BUILTIN_TOKENS: Record<string, string> = {
 }
 
 
+// The one prose directive the compiler acts on. Matched case-insensitively
+// after trimming, so `<remove>`, `<Remove>` and `< remove >` all work.
+const REMOVE_PROSE = 'remove'
+
+// The one prose *name*: `<all> = <remove>` clears the whole grammar.
+const REMOVE_ALL = 'all'
+
+// A production whose name came from a prose token keeps its angle
+// brackets, which no ordinary rulename can contain — so `<all>` and a
+// production actually called `all` stay distinct.
+const isProseName = (name: string): boolean =>
+  name.startsWith('<') && name.endsWith('>')
+
+
 // Resolve RFC 5234 `prose-val` terminals (`<free text>`).
 //
 // Prose is informational by definition — RFC 5234 §4 calls it a "last
@@ -1698,9 +1734,51 @@ function resolveProseTerminals(grammar: AbnfGrammar): void {
       prod.alts[0].length === 1 &&
       isProse(prod.alts[0][0])
 
+    // A prose name is only ever the removal directive. Checked here as
+    // well as in the prose-body branch below, because `<all> = "x"` has
+    // a *literal* body and would otherwise fall through and be lifted
+    // into a token literally named `#<all>`.
+    if (isProseName(prod.name) && !onlyProse) {
+      throw new Error(
+        `abnf: '${prod.name}' is prose, and prose is only valid as a ` +
+        `production name for the removal directive '<all> = <remove>'.`)
+    }
+
     if (onlyProse) {
-      if (BUILTIN_TOKENS[prod.name]) continue // informational — the lexer defines it
       const text = (prod.alts[0][0] as { text: string }).text
+
+      // `<remove>` — the one prose form that *does* compile to something.
+      // Prose is otherwise informational, which is exactly why it is the
+      // right place for a directive: it cannot collide with a real
+      // terminal, and RFC 5234 already says a tool may interpret it.
+      //
+      //   name = <remove>   drop that rule and that fixed token
+      //   * = <remove>      drop everything — a fresh empty grammar
+      if (REMOVE_PROSE === text.trim().toLowerCase()) {
+        if (isProseName(prod.name)) {
+          const target = prod.name.slice(1, -1).trim().toLowerCase()
+          if (REMOVE_ALL !== target) {
+            throw new Error(
+              `abnf: '<${target}>' is not a removal target. The only prose ` +
+              `name is '<all>', as in '<all> = <remove>', which clears the ` +
+              `whole grammar. To remove one rule or token, name it directly: ` +
+              `'${target} = <remove>'.`)
+          }
+          grammar.clearAll = true
+        }
+        else {
+          (grammar.remove ??= []).push(prod.name)
+        }
+        continue
+      }
+
+      if (isProseName(prod.name)) {
+        throw new Error(
+          `abnf: '${prod.name}' is prose, and prose is only valid as a ` +
+          `production name for the removal directive '<all> = <remove>'.`)
+      }
+
+      if (BUILTIN_TOKENS[prod.name]) continue // informational — the lexer defines it
       throw new Error(
         `abnf: rule '${prod.name}' is defined only by prose ('<${text}>'), ` +
         `which describes a terminal but does not define one. Prose is ` +
@@ -1743,7 +1821,8 @@ function resolveProseTerminals(grammar: AbnfGrammar): void {
     kept.push(prod)
   }
 
-  if (kept.length === 0) {
+  if (kept.length === 0 && !grammar.clearAll &&
+    (undefined === grammar.remove || 0 === grammar.remove.length)) {
     throw new Error(
       'abnf: grammar defines no rules — only informational prose terminals.')
   }
@@ -1752,19 +1831,32 @@ function resolveProseTerminals(grammar: AbnfGrammar): void {
 }
 
 
-// Token names produced by the engine's own matchers. Their tin belongs to
-// a matcher (number, string, text, value, space, line, comment) or to a
-// parse position (bad, end, unknown, any), never to a literal spelling —
-// so `TX = "foo"` cannot mean anything. The engine refuses the binding
-// outright (`checkFixedTokenNames` in @tabnas/parser); catching it here
-// first lets the error name the offending production.
+// Which token names belong to a lexer matcher is the engine's rule, and
+// the engine is where it is enforced (a matcher binding throws from
+// `configure()`). This compiler asks rather than keeping its own copy,
+// so the two cannot drift: an engine that grows a matcher token gets the
+// right compilation here without a matching edit.
 //
-// The fixed punctuation tokens (OB CB OS CS CL CA) are NOT reserved. They
-// are literals by definition, so `CA = ";"` is a meaningful redefinition
-// of the comma token and is lifted like any other literal production.
-const MATCHER_TOKEN_NAMES = new Set([
-  'BD', 'ZZ', 'UK', 'AA', 'SP', 'LN', 'CM', 'NR', 'ST', 'TX', 'VL',
-])
+// The distinction still matters at compile time, because it selects how
+// a single-literal production is compiled, not whether it is allowed:
+//
+//   CA = ";"        fixed token — a literal by definition, so this
+//                   rebinds #CA, exactly as `fixed: { token: … }` would
+//   TX = "literal"  matcher token — cannot be rebound, so the production
+//                   stays an ordinary rule shadowing the bareword
+//
+// ABNF production names are bare (`TX`), engine token names are prefixed
+// (`#TX`).
+const isMatcherTokenName = (name: string): boolean => {
+  const fn = (engineUtil as any).isMatcherToken
+  if ('function' !== typeof fn) {
+    throw new Error(
+      'abnf: this @tabnas/parser is too old — it does not export ' +
+      'util.isMatcherToken, which the compiler needs to tell a fixed ' +
+      'token from a matcher-owned one. Upgrade @tabnas/parser.')
+  }
+  return fn('#' + name)
+}
 
 
 // A literal production lifted to a named token, as returned by
@@ -1802,8 +1894,8 @@ type LiftedLiteral = {
 //
 // Naming an existing fixed token *redefines* it: `CA = ";"` binds the
 // comma token to a semicolon, the same as `fixed: { token: { '#CA': ';' } }`
-// by hand. Matcher-owned names are rejected instead — see
-// MATCHER_TOKEN_NAMES.
+// by hand. Matcher-owned names are never lifted — see
+// isMatcherTokenName.
 function liftLiteralTokens(
   grammar: AbnfGrammar,
   start: string,
@@ -1817,7 +1909,7 @@ function liftLiteralTokens(
     // grammar (see token.test.js, 'a user rule of the same name wins over
     // the built-in') — which leaves #TX itself untouched. Lifting would
     // instead try to bind #TX to a literal, which the engine refuses.
-    if (MATCHER_TOKEN_NAMES.has(prod.name)) continue
+    if (isMatcherTokenName(prod.name)) continue
     if (prod.nodeKind === 'core') continue
     if (prod.alts.length !== 1 || prod.alts[0].length !== 1) continue
     const el = prod.alts[0][0]
@@ -1967,6 +2059,12 @@ function emitGrammarSpec(
   // leading prose line is never mistaken for the start rule.
   resolveProseTerminals(grammar)
 
+  // Capture the <remove> directives before the rewrite passes below:
+  // each returns a fresh grammar object carrying only `productions`, so
+  // anything else on the grammar is dropped at the first reassignment.
+  const removeNames = grammar.remove ? [...grammar.remove] : []
+  const clearAll = !!grammar.clearAll
+
   const start = opts?.start ?? grammar.productions[0].name
   const tag = opts?.tag ?? 'abnf'
   const wordKeywords = !!opts?.wordKeywords
@@ -2096,6 +2194,22 @@ function emitGrammarSpec(
     ref: refs.map,
     options,
     rule: ruleSpec,
+  }
+
+  // `<remove>` directives. `* = <remove>` maps to the engine's `clear`,
+  // which wipes rules and fixed tokens before the rest of the spec is
+  // applied — so a grammar can reset an instance and rebuild it in one
+  // pass. A named removal drops both the rule and the fixed token of
+  // that name, because ABNF does not distinguish them at the point of
+  // use and a removal that matches nothing is a no-op either way.
+  if (clearAll) {
+    spec.clear = true
+  }
+  if (0 < removeNames.length) {
+    for (const name of removeNames) {
+      ;(spec.rule as any)[name] = null
+      options.fixed.token['#' + name] = null
+    }
   }
 
   return spec
