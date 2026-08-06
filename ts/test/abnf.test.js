@@ -161,6 +161,69 @@ describe('abnf', () => {
     })
 
 
+    it('removes a named rule or token with <remove>', () => {
+      // Prose is informational everywhere else, which is why it is the
+      // right carrier for a directive: it cannot collide with a real
+      // terminal. A named removal emits both a rule removal and a token
+      // removal, because ABNF does not distinguish the two at the point
+      // of use and a removal that matches nothing is a no-op.
+      const spec = abnf('top = NR\nfoo = <remove>')
+      assert.equal(spec.rule.foo, null)
+      assert.equal(spec.options.fixed.token['#foo'], null)
+
+      // End to end against a host grammar.
+      const j = new Tabnas({ plugins: [abnfPlugin] })
+      j.abnf('top = NR\nhelper = "x"')
+      assert.ok(Object.keys(j.rule()).includes('top'))
+      j.abnf('top = NR\ntop = <remove>')
+      assert.ok(!Object.keys(j.rule()).includes('top'))
+    })
+
+
+    it('clears the whole grammar with <all> = <remove>', () => {
+      assert.equal(abnf('top = NR\n<all> = <remove>').clear, true)
+
+      // Trimmed and case-insensitive, like the directive itself.
+      assert.equal(abnf('top = NR\n<all> = < Remove >').clear, true)
+
+      // The point of it: reset an instance that already carries a
+      // grammar, and rebuild in the same pass.
+      const j = new Tabnas({ plugins: [abnfPlugin] })
+      j.abnf('a = NR\nb = "x"')
+      assert.ok(Object.keys(j.rule()).includes('a'))
+
+      j.abnf('<all> = <remove>\ngreet = "hi" / "hello"')
+      assert.ok(!Object.keys(j.rule()).includes('a'), 'old grammar is gone')
+      assert.equal(j.parse('hi').src, 'hi')
+    })
+
+
+    it('rejects prose in name position other than <all> = <remove>', () => {
+      // Wrong target.
+      assert.throws(
+        () => abnf('top = NR\n<everything> = <remove>'),
+        /is not a removal target/)
+
+      // Prose name with a non-prose body would otherwise be lifted into
+      // a token literally named `#<all>`.
+      assert.throws(
+        () => abnf('top = NR\n<all> = "x"'),
+        /prose is only valid as a production name/)
+    })
+
+
+    it('leaves informational prose alone', () => {
+      // `NR = <number>` still documents a built-in token and compiles to
+      // nothing; only <remove> is acted on.
+      const spec = abnf('val = add\nadd = NR [ PL add ]\nNR = <number>\nPL = "+"')
+      assert.deepEqual(Object.keys(spec.rule), ['val', 'add', '__start__'])
+      assert.equal(spec.clear, undefined)
+
+      // Prose that is neither informational nor a directive still errors.
+      assert.throws(() => abnf('top = NR\nfoo = <mystery>'), /does not define one/)
+    })
+
+
     it('rejects unknown rule reference', () => {
       assert.throws(
         () => abnf('x = missing'),
