@@ -26,6 +26,7 @@
  */
 
 import type { GrammarSpec, Rule } from '@tabnas/parser'
+import { util as engineUtil } from '@tabnas/parser'
 
 
 // ABNF converter options.
@@ -1752,19 +1753,32 @@ function resolveProseTerminals(grammar: AbnfGrammar): void {
 }
 
 
-// Token names produced by the engine's own matchers. Their tin belongs to
-// a matcher (number, string, text, value, space, line, comment) or to a
-// parse position (bad, end, unknown, any), never to a literal spelling —
-// so `TX = "foo"` cannot mean anything. The engine refuses the binding
-// outright (`checkFixedTokenNames` in @tabnas/parser); catching it here
-// first lets the error name the offending production.
+// Which token names belong to a lexer matcher is the engine's rule, and
+// the engine is where it is enforced (a matcher binding throws from
+// `configure()`). This compiler asks rather than keeping its own copy,
+// so the two cannot drift: an engine that grows a matcher token gets the
+// right compilation here without a matching edit.
 //
-// The fixed punctuation tokens (OB CB OS CS CL CA) are NOT reserved. They
-// are literals by definition, so `CA = ";"` is a meaningful redefinition
-// of the comma token and is lifted like any other literal production.
-const MATCHER_TOKEN_NAMES = new Set([
-  'BD', 'ZZ', 'UK', 'AA', 'SP', 'LN', 'CM', 'NR', 'ST', 'TX', 'VL',
-])
+// The distinction still matters at compile time, because it selects how
+// a single-literal production is compiled, not whether it is allowed:
+//
+//   CA = ";"        fixed token — a literal by definition, so this
+//                   rebinds #CA, exactly as `fixed: { token: … }` would
+//   TX = "literal"  matcher token — cannot be rebound, so the production
+//                   stays an ordinary rule shadowing the bareword
+//
+// ABNF production names are bare (`TX`), engine token names are prefixed
+// (`#TX`).
+const isMatcherTokenName = (name: string): boolean => {
+  const fn = (engineUtil as any).isMatcherToken
+  if ('function' !== typeof fn) {
+    throw new Error(
+      'abnf: this @tabnas/parser is too old — it does not export ' +
+      'util.isMatcherToken, which the compiler needs to tell a fixed ' +
+      'token from a matcher-owned one. Upgrade @tabnas/parser.')
+  }
+  return fn('#' + name)
+}
 
 
 // A literal production lifted to a named token, as returned by
@@ -1802,8 +1816,8 @@ type LiftedLiteral = {
 //
 // Naming an existing fixed token *redefines* it: `CA = ";"` binds the
 // comma token to a semicolon, the same as `fixed: { token: { '#CA': ';' } }`
-// by hand. Matcher-owned names are rejected instead — see
-// MATCHER_TOKEN_NAMES.
+// by hand. Matcher-owned names are never lifted — see
+// isMatcherTokenName.
 function liftLiteralTokens(
   grammar: AbnfGrammar,
   start: string,
@@ -1817,7 +1831,7 @@ function liftLiteralTokens(
     // grammar (see token.test.js, 'a user rule of the same name wins over
     // the built-in') — which leaves #TX itself untouched. Lifting would
     // instead try to bind #TX to a literal, which the engine refuses.
-    if (MATCHER_TOKEN_NAMES.has(prod.name)) continue
+    if (isMatcherTokenName(prod.name)) continue
     if (prod.nodeKind === 'core') continue
     if (prod.alts.length !== 1 || prod.alts[0].length !== 1) continue
     const el = prod.alts[0][0]
