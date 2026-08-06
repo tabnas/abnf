@@ -24,7 +24,11 @@
     "watch": "tsc --build src -w",
     "build": "tsc --build src",
     "clean": "rm -rf node_modules dist dist-test yarn.lock package-lock.json",
-    "reset": "npm run clean && npm i && npm run build && npm test"
+    "reset": "npm run clean && npm i && npm run build && npm test",
+    "repo-stage": "npm run clean && npm i && npm run repo-stage-quick",
+    "repo-stage-quick": "npm run build && npm run test && npm stage publish",
+    "repo-stage-list": "npm stage list",
+    "repo-stage-approve": "npm stage approve"
   },
   "license": "MIT",
   "files": [
