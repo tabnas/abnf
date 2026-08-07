@@ -1,0 +1,14 @@
+grammar	expected	why
+a = %x41	ACCEPT	RFC 5234 s3.4 hex-val (control: must pass both)
+a = %s"abc"	ACCEPT	RFC 7405 case-sensitive char-val (control)
+a = %i"abc"	ACCEPT	RFC 7405 case-insensitive char-val (control)
+a = %q41	REJECT	num-val = "%" (bin-val / dec-val / hex-val); no "q" base (control)
+a = ALPHA *ALPHA	ACCEPT	repetition = [repeat] element, unbounded (control)
+a = ALPHA 1*ALPHA	ACCEPT	RFC 5234 s3.6 variable repetition after a rulename. TS REJECTS (red), Go accepts.
+a = ALPHA 2ALPHA	ACCEPT	RFC 5234 s3.7 specific repetition after a rulename. TS REJECTS (red), Go accepts.
+a = "a" /	REJECT	alternation needs a concatenation after each "/". BOTH ACCEPT (red).
+9bad = "x"	REJECT	rulename = ALPHA *(ALPHA / DIGIT / "-"); may not start with a DIGIT. BOTH ACCEPT (red).
+a = ( "x" / "y"	REJECT	group = "(" *c-wsp alternation *c-wsp ")" - unclosed. Go ACCEPTS (red), TS rejects.
+a = [ "x"	REJECT	option = "[" *c-wsp alternation *c-wsp "]" - unclosed. Go ACCEPTS (red), TS rejects.
+a = "\"	ACCEPT	char-val = DQUOTE *(%x20-21 / %x23-7E) DQUOTE; %x5C is an ordinary char, ABNF has no escapes. RFC 5322 publishes this literal. BOTH REJECT (red).
+false = "f"\r\na = false	ACCEPT	rulename may be "false"; the engine value-token lexer owns it. BOTH REJECT (red).

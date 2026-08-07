@@ -198,3 +198,39 @@ func TestSpecAbnfErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestSpecAbnfAccept — does the compiler ACCEPT or REJECT this grammar?
+//
+// Added in the 2026-08 conformance pass; the mirror of the
+// `spec: alignment-abnf-accept` suite in ts/test/parity.test.js. Every
+// expectation in the fixture is the RFC 5234 / RFC 7405 answer, independently
+// confirmed by a third-party ABNF parser (npm `abnf` 5.0.4 ==
+// hildjj/node-abnf), not by either runtime. The file deliberately pins rows
+// where TS and Go currently DISAGREE, so the wrong runtime goes red instead of
+// the disagreement staying invisible. It is red on purpose: this is an
+// instrument, not a pass mark. Do NOT weaken a row to get green — fix the
+// compiler, or leave it failing.
+func TestSpecAbnfAccept(t *testing.T) {
+	for _, row := range loadSpecTSV(t, "alignment-abnf-accept") {
+		grammar, expected := row.cols[0], row.cols[1]
+		why := ""
+		if len(row.cols) > 2 {
+			why = row.cols[2]
+		}
+		t.Run(specLabel(grammar), func(t *testing.T) {
+			if expected != "ACCEPT" && expected != "REJECT" {
+				t.Fatalf("expected column must be ACCEPT or REJECT, got %q (line %d)",
+					expected, row.lineNo)
+			}
+			_, err := Abnf(grammar, nil)
+			accepted := err == nil
+			if accepted != (expected == "ACCEPT") {
+				if expected == "ACCEPT" {
+					t.Errorf("valid RFC 5234 rejected: %v\n  %s", err, why)
+				} else {
+					t.Errorf("invalid RFC 5234 accepted\n  %s", why)
+				}
+			}
+		})
+	}
+}

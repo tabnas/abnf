@@ -185,7 +185,14 @@ describe('doc-examples', () => {
   }
 
   it('found at least one tested example (sanity)', () => {
-    // Not a hard failure if a repo has no `// =>` examples yet.
-    assert.ok(testable >= 0, `tested ${testable} doc example block(s)`)
+    // WAS: `assert.ok(testable >= 0, ...)` — a count is never negative, so
+    // this could not fail. If the block extractor broke, or the doc paths
+    // moved, every doc example would silently stop running and the suite
+    // would stay green. That is the defect class this whole effort exists
+    // to remove. This repo's README demonstrably carries many `// =>`
+    // blocks, so demanding several of them is the honest assertion.
+    assert.ok(testable >= 5,
+      `only ${testable} doc example block(s) were executed — the extractor ` +
+      `or the doc paths are broken (files scanned: ${files.length})`)
   })
 })

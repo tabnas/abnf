@@ -99,3 +99,35 @@ describe('spec: alignment-abnf-errors', () => {
     })
   }
 })
+
+
+// alignment-abnf-accept — does the compiler ACCEPT or REJECT this grammar?
+//
+// Added in the 2026-08 conformance pass. Every expectation in the fixture is
+// the RFC 5234 / RFC 7405 answer, independently confirmed by a third-party
+// ABNF parser (npm `abnf` 5.0.4 == hildjj/node-abnf), not by either runtime.
+// The file deliberately pins rows where TS and Go currently DISAGREE, so the
+// wrong runtime goes red instead of the disagreement staying invisible. It is
+// red on purpose: this is an instrument, not a pass mark. Do NOT weaken a row
+// to get green — fix the compiler, or leave it failing.
+describe('spec: alignment-abnf-accept', () => {
+  for (const { cols, row } of loadTSV('alignment-abnf-accept')) {
+    const [grammar, expected, why] = cols
+    it(`row ${row}: ${label(grammar)}`, () => {
+      assert.ok(expected === 'ACCEPT' || expected === 'REJECT',
+        `expected column must be ACCEPT or REJECT, got ${expected}`)
+      let accepted = true
+      let err = null
+      try {
+        abnf(grammar)
+      } catch (e) {
+        accepted = false
+        err = e
+      }
+      assert.equal(accepted, expected === 'ACCEPT',
+        `${expected === 'ACCEPT'
+          ? 'valid RFC 5234 rejected: ' + (err && err.message)
+          : 'invalid RFC 5234 accepted'}\n  ${why}`)
+    })
+  }
+})

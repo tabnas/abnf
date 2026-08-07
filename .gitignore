@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Third-party ABNF conformance corpus — fetched by scripts/fetch-abnf-corpus.sh.
+# NEVER COMMIT THIS. See scripts/fetch-abnf-corpus.sh and test/corpus/manifest.tsv.
+test/abnf-corpus/

@@ -5,7 +5,7 @@
 # repo-set go.work + node_modules symlinks (admin/scripts/link.sh).
 
 .PHONY: all build test clean build-ts build-go test-ts test-go \
-        clean-ts clean-go publish-ts publish-go tags-go reset
+        clean-ts clean-go publish-ts publish-go tags-go reset corpus
 
 all: build test
 
@@ -18,6 +18,11 @@ clean: clean-ts clean-go
 # --- TypeScript (package in ts/) ---
 build-ts:
 	cd ts && npm run build
+
+# Fetch the third-party ABNF conformance corpus at its pinned SHAs.
+# Idempotent; never commits anything (test/abnf-corpus/ is gitignored).
+corpus:
+	./scripts/fetch-abnf-corpus.sh
 
 test-ts:
 	cd ts && npm test
@@ -33,7 +38,7 @@ publish-ts: test-ts
 build-go:
 	cd go && go build ./...
 
-test-go:
+test-go: corpus
 	cd go && go test -v ./...
 
 clean-go:

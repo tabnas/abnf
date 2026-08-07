@@ -167,15 +167,18 @@ describe('rfc3986', () => {
     // add the concrete failing input as a `.skip` or `.todo` test
     // with a one-line explanation.
 
-    it.skip('placeholder for grammars with non-terminal disambiguators', () => {
-      // Example shape:
-      //   rule = [ A B ] C     where A, B, C are all nonterminals,
-      //                        FIRST(A) ∩ FIRST(C) ≠ ∅, and B is
-      //                        not a terminal (so there's no single
-      //                        token to peek for).
-      // The current rewriter requires `D` to be a term / regex
-      // element; detection skips this shape with no rewrite.
-    })
+    // (Removed: an `it.skip('placeholder …')` with an EMPTY body used to
+    // sit here. It asserted nothing, so un-skipping it would have passed
+    // trivially — a comment wearing a test's clothes, and one more way for
+    // this suite to look bigger than it is. The prose above is the real
+    // content; the concrete unhandled shape is covered by the two `.skip`
+    // cases in probe.test.js, which at least carry a grammar and an
+    // assertion. Example shape, for the record:
+    //   rule = [ A B ] C   where A, B, C are all nonterminals,
+    //                      FIRST(A) ∩ FIRST(C) ≠ ∅, and B is not a
+    //                      terminal (so there is no single token to peek
+    //                      for). The rewriter requires `D` to be a term /
+    //                      regex element; detection skips this shape.
 
   })
 

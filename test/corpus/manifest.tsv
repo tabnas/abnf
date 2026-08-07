@@ -1,0 +1,69 @@
+path	class	source-note
+ex_abnf/test/resources/RFC3261.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/RFC3966.abnf	valid	parses; all refs resolve (core rules allowed)
+ex_abnf/test/resources/RFC3986.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/RFC4566.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/RFC5322-no-obs.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/RFC5322.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/RFC7405.abnf	valid	parses; all refs resolve (core rules allowed)
+ex_abnf/test/resources/bad_line_endings.abnf	valid	parses; all refs resolve (core rules allowed)
+ex_abnf/test/resources/basic.abnf	valid	parses; all refs resolve (core rules allowed)
+ex_abnf/test/resources/ipv4.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/ipv6.abnf	valid	parses; all refs resolve (core rules allowed)
+ex_abnf/test/resources/module_code.abnf	invalid	Error: Expected ";", "\r", [A-Za-z], [\n\r], or [\t ] but "!" found.
+ex_abnf/test/resources/path.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+ex_abnf/test/resources/reduce.abnf	invalid	Error: Expected "#", "%", "%i", "%s", "(", "*", "/", ";", "<", "[", "\"", "\r", [0-9], [A-Za-z], [\n\r], or [\
+go-abnf/cmd/pap/example.abnf	invalid	Invalid code point 265993262
+go-abnf/examples/fuzzing/my-grammar.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/abnf.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/aftn.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/atomic.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/cycle.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/element.abnf	fragment	unresolved refs: rulename,group,option,char-val,num-val,prose-val
+go-abnf/testdata/fixed-abnf-raw.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/fixed-abnf.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/fun.abnf	fragment	unresolved refs: some-rule
+go-abnf/testdata/fuzz_regex_eaa469604868c87f.abnf	invalid	Invalid code point 13609380878214744000
+go-abnf/testdata/issue189.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/json.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/multi.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/nocycle.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/noob.abnf	fragment	unresolved refs: some-rule
+go-abnf/testdata/platypus.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/redefine.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/rule.abnf	fragment	unresolved refs: b,c-d,e
+go-abnf/testdata/rulelist.abnf	fragment	unresolved refs: rule,c-wsp,c-nl
+go-abnf/testdata/toml.abnf	valid	parses; all refs resolve (core rules allowed)
+go-abnf/testdata/void.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/abnf.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/core.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/email.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/jid.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/json.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/jsonpath.abnf	valid	parses; all refs resolve (core rules allowed)
+node-abnf/examples/open-pgp.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/abnf.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/alternation.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/comments.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/dhall.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/elements.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/alternation.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/concatenation.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_ALPHA.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_BIT.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_CHAR.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_CR.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_CRLF.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_CTL.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_DIGIT.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_DQUOTE.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_HEXDIG.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_HTAB.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_LF.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_LWSP.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_OCTET.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_SP.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_VCHAR.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/generated/core_WSP.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/postal.abnf	valid	parses; all refs resolve (core rules allowed)
+tree-sitter-abnf/examples/repetitions.abnf	valid	parses; all refs resolve (core rules allowed)

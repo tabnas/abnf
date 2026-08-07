@@ -163,6 +163,41 @@ bare engine, parse the sample(s), print the tree(s), exit non-zero on any
 failure), and `--help`/`-h`. Bare non-flag args are treated as inline ABNF
 source. Example: `tabnas-abnf 'greet = "hi" / "hello"' --parse 'hi'`.
 
+## Third-party conformance (2026-08)
+
+`ts/test/conformance.test.js` and `go/conformance_test.go` measure this
+compiler against ABNF that real RFCs publish. **The corpus is never
+committed** — `scripts/fetch-abnf-corpus.sh` clones four collections at
+pinned commit SHAs into `test/abnf-corpus/`, which `.gitignore` excludes.
+`npm test` fetches via the `pretest` hook; `go test` fetches from
+`TestMain`; `make corpus` does it by hand.
+
+There is **no official IETF conformance suite for RFC 5234**, so the
+corpus is assembled from four third-party collections
+(`marcelog/ex_abnf`, `hildjj/node-abnf`, `pandatix/go-abnf`,
+`jmitchell/tree-sitter-abnf`). Each file's valid/invalid/fragment class
+lives in `test/corpus/manifest.tsv` and was decided by an INDEPENDENT
+third-party ABNF parser (npm `abnf` 5.0.4 == hildjj/node-abnf), not by
+this implementation and not by hand. `test/corpus/mutations.tsv` lists 13
+mutation classes that expand the must-fail half; every mutant was
+confirmed rejected by that same oracle before its class was admitted.
+
+Rules for anyone touching this:
+
+- **It must never skip.** Missing corpus ⇒ loud failure with the fetch
+  command, in both runtimes. A conformance test that quietly does not run
+  is worse than no test, because the green tick is a lie.
+- **Valid grammars get a VALUE assertion.** Every rulename the source
+  declares must be reachable in the compiled `GrammarSpec` as a rule, a
+  fixed token or a match token. "It didn't throw" is not a pass.
+- **It is RED on purpose.** The Phase-1 baseline is TS 39/52 valid and
+  620/687 invalid; Go 42/52 and 557/687. Those numbers are ratcheted in
+  the `…Dial` tests so they cannot silently regress. Do NOT narrow the
+  corpus, loosen an assertion or add a skip to raise them — fix the
+  compiler.
+- `test/spec/alignment-abnf-accept.tsv` pins the inputs where TS and Go
+  currently DISAGREE, to the RFC answer. See `test/AGENTS.md`.
+
 ## CI
 
 `.github/workflows/build.yml` runs on `ubuntu`/`windows`/`macos` ×

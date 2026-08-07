@@ -20,6 +20,7 @@
     "directory": "ts"
   },
   "scripts": {
+    "pretest": "../scripts/fetch-abnf-corpus.sh",
     "test": "node --enable-source-maps --test test/**/*.test.js",
     "watch": "tsc --build src -w",
     "build": "tsc --build src",
