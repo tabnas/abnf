@@ -13,3 +13,19 @@ P = Q\nQ = P PL / NR\nPL = "+"	1++	{"rule":"P","src":"1++","kids":[]}
 x = "x" name "=" value\nname = 1*ALPHA\nvalue = 1*DIGIT	xfoo=42	{"rule":"x","src":"xfoo=42","kids":[{"rule":"name","src":"foo","kids":[]},{"rule":"value","src":"42","kids":[]}]}
 rep = *PL\nPL = "+"	++	{"rule":"rep","src":"++","kids":[]}
 v = p\np = "a" q\nq = "b" "c"	a bc	{"rule":"v","src":"abc","kids":[{"rule":"p","src":"abc","kids":[{"rule":"q","src":"bc","kids":[]}]}]}
+a = b a / "x"\nb = c\nc = "y" /	y x	{"rule":"a","src":"yx","kids":[{"rule":"a","src":"x","kids":[]}]}
+a = b a / "x"\nb = c\nc = "y" /	y y x	{"rule":"a","src":"yyx","kids":[{"rule":"a","src":"yx","kids":[{"rule":"a","src":"x","kids":[]}]}]}
+a = b a / "x"\nb = c\nc = "y" /	x	{"rule":"a","src":"x","kids":[]}
+g = "z" LWSP "y"	z y	{"rule":"g","src":"z y","kids":[]}
+g = "z" LWSP "y"	zy	{"rule":"g","src":"zy","kids":[]}
+g = a 1*b\na = "a"\nb = "b"	ab	{"rule":"g","src":"ab","kids":[]}
+g = a 1*b\na = "a"\nb = "b"	abbb	{"rule":"g","src":"abbb","kids":[]}
+g = a 2b\na = "a"\nb = "b"	abb	{"rule":"g","src":"abb","kids":[]}
+qp = "\" x\nx = "z"	\z	{"rule":"qp","src":"\\z","kids":[]}
+value = false / null / true\nfalse = "f"\nnull = "n"\ntrue = "t"	f	{"rule":"value","src":"f","kids":[]}
+value = false / null / true\nfalse = "f"\nnull = "n"\ntrue = "t"	n	{"rule":"value","src":"n","kids":[]}
+value = false / null / true\nfalse = "f"\nnull = "n"\ntrue = "t"	t	{"rule":"value","src":"t","kids":[]}
+g = "z" *200"a"	z	{"rule":"g","src":"z","kids":[]}
+g = "z" *200"a"	zaaa	{"rule":"g","src":"zaaa","kids":[]}
+g = %xE000-10FFFF	😀	{"rule":"g","src":"😀","kids":[]}
+g = %x1F600	😀	{"rule":"g","src":"😀","kids":[]}

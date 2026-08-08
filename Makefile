@@ -5,7 +5,8 @@
 # repo-set go.work + node_modules symlinks (admin/scripts/link.sh).
 
 .PHONY: all build test clean build-ts build-go test-ts test-go \
-        clean-ts clean-go publish-ts publish-go tags-go reset
+        clean-ts clean-go publish-ts publish-go tags-go reset \
+        abnf-corpus
 
 all: build test
 
@@ -14,6 +15,13 @@ build: build-ts build-go
 test: test-ts test-go
 
 clean: clean-ts clean-go
+
+# --- External reference corpus ---
+# Fetch four other ABNF implementations into test/abnf-corpus (gitignored)
+# for their grammar corpora. Nothing in `make test` reads it — it is what
+# the conformance figures in AGENTS.md were measured against.
+abnf-corpus:
+	sh test/fetch-abnf-corpus.sh
 
 # --- TypeScript (package in ts/) ---
 build-ts:

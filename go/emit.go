@@ -39,6 +39,13 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 		return nil, err
 	}
 
+	// Capture the <remove> directives before the rewrite passes below: each
+	// returns a fresh grammar carrying only Productions, so anything else on
+	// the grammar is dropped at the first reassignment. Mirrors the TS
+	// emitter, which snapshots removeNames/clearAll for the same reason.
+	removeNames := append([]string{}, grammar.Remove...)
+	clearAll := grammar.ClearAll
+
 	start := opts.Start
 	if start == "" {
 		start = grammar.Productions[0].Name
@@ -201,6 +208,21 @@ func emitGrammarSpec(grammar *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.Gr
 		Ref:     refs.refMap(),
 		Options: opt,
 		Rule:    ruleSpec,
+	}
+
+	// `<remove>` directives. `<all> = <remove>` maps to the engine's Clear,
+	// which wipes rules and fixed tokens before the rest of the spec is
+	// applied — so a grammar can reset an instance and rebuild it in one
+	// pass. A named removal drops both the rule and the fixed token of that
+	// name, because ABNF does not distinguish them at the point of use and a
+	// removal that matches nothing is a no-op either way. A nil map entry is
+	// how the engine spells "remove" for both. Mirrors the TS emitter.
+	if clearAll {
+		spec.Clear = true
+	}
+	for _, name := range removeNames {
+		ruleSpec[name] = nil
+		fixedTokens["#"+name] = nil
 	}
 	return spec, nil
 }

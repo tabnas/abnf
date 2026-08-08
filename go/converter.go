@@ -9,6 +9,7 @@ package tabnasabnf
 
 import (
 	"fmt"
+	"math/big"
 	"regexp"
 	"sort"
 	"strconv"
@@ -63,12 +64,55 @@ func parseAbnf(src string) (*abnfGrammar, error) {
 	if len(productions) == 0 {
 		return nil, &AbnfParseError{Message: "abnf: no productions found"}
 	}
+	// Surface any deferred numeric-value diagnostic now that the parse is
+	// structurally complete (see abnfElement.numErr).
+	if msg := findNumErr(productions); msg != "" {
+		return nil, &AbnfParseError{
+			Message: "abnf: parse error: " + msg}
+	}
 	merged, merr := mergeIncrementals(productions)
 	if merr != nil {
 		return nil, merr
 	}
 	withCore := withCoreRules(merged)
 	return &abnfGrammar{Productions: withCore}, nil
+}
+
+// findNumErr returns the first deferred numeric-value diagnostic recorded
+// anywhere in the parsed productions, or "" when every numeric value was a
+// valid Unicode code point. Walks nested groups and repetitions.
+func findNumErr(prods []*abnfProduction) string {
+	var walk func(el *abnfElement) string
+	walk = func(el *abnfElement) string {
+		if el.numErr != "" {
+			return el.numErr
+		}
+		switch el.Kind {
+		case kindOpt, kindStar, kindPlus, kindRep:
+			if el.Inner != nil {
+				return walk(el.Inner)
+			}
+		case kindGroup:
+			for _, alt := range el.Alts {
+				for _, inner := range alt {
+					if msg := walk(inner); msg != "" {
+						return msg
+					}
+				}
+			}
+		}
+		return ""
+	}
+	for _, p := range prods {
+		for _, alt := range p.Alts {
+			for _, el := range alt {
+				if msg := walk(el); msg != "" {
+					return msg
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // errLineCol attempts to pull line/column from a tabnas parse error.
@@ -122,6 +166,7 @@ OCTET  = %x00-FF
 SP     = %x20
 VCHAR  = %x21-7E
 WSP    = SP / HTAB
+LWSP   = *( WSP / CRLF WSP )
 `
 
 // coreRuleList returns the parsed core rules (order-preserving) with
@@ -256,10 +301,36 @@ func eliminateLeftRecursion(grammar *abnfGrammar) *abnfGrammar {
 			!cyclic[p.Name] && !cyclic[p.Alts[0][0].Name]
 	}
 
+	// Paull's invariant is that after the inner loop no alternative of A_i
+	// begins with a ref to any A_j, j < i. A single increasing pass gives that
+	// only when every A_j has itself been fully substituted — but the pure-alias
+	// exemption above deliberately leaves some A_j un-substituted, so inlining
+	// such an alias can (re)introduce a leading ref to an A_k with k < j, which
+	// the pass has already walked past. Left in place, a nullable A_k hides the
+	// left recursion from eliminateDirectLeftRec and the emitted grammar
+	// re-enters A_i at the same source position (`a = b a / "x"`, `b = c`,
+	// `c = "y" /`). So re-run the pass until it reaches a fixed point.
+	//
+	// Termination: each round only fires where a leading ref to an earlier
+	// production remains, and earlier productions have already had their own
+	// direct left recursion eliminated, so no substitution can reproduce the ref
+	// it just consumed. The guard is belt-and-braces against a pathological
+	// grammar. Mirrors the TS eliminateLeftRecursion.
 	for i := 0; i < len(prods); i++ {
 		if !isExemptAlias(prods[i]) {
-			for j := 0; j < i; j++ {
-				prods[i] = substituteLeadingRef(prods[i], prods[j])
+			guard := len(prods) + 1
+			for round := 0; round < guard; round++ {
+				changed := false
+				for j := 0; j < i; j++ {
+					if !hasLeadingRefTo(prods[i], prods[j].Name) {
+						continue
+					}
+					prods[i] = substituteLeadingRef(prods[i], prods[j])
+					changed = true
+				}
+				if !changed {
+					break
+				}
 			}
 		}
 		prods[i] = eliminateDirectLeftRec(prods[i])
@@ -413,6 +484,18 @@ func topoOrderForPaull(prods []*abnfProduction) []*abnfProduction {
 		visit(p.Name)
 	}
 	return order
+}
+
+// hasLeadingRefTo reports whether at least one alternative of prod begins with
+// a reference to name — i.e. substituteLeadingRef would change it. Go port of
+// the TS hasLeadingRefTo.
+func hasLeadingRefTo(prod *abnfProduction, name string) bool {
+	for _, alt := range prod.Alts {
+		if len(alt) > 0 && alt[0].Kind == kindRef && alt[0].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func substituteLeadingRef(target, source *abnfProduction) *abnfProduction {
@@ -655,18 +738,38 @@ func desugar(grammar *abnfGrammar) *abnfGrammar {
 				Name: tailStarName, Alts: []abnfSequence{{inner, tailStarRef}, {}}, NodeKind: "helper"})
 			repAlt = append(repAlt, tailStarRef)
 		} else {
-			var nested abnfSequence
+			// Nest (max - min) optionals: [A [A [A ...]]].
+			//
+			// Built bottom-up as an explicit chain of helper productions
+			// rather than as one deeply-nested inline element tree. The shape
+			// (and every generated name) is identical either way, but handing
+			// a nested tree to desugarAlt costs a stack frame per repetition,
+			// and real ABNF carries big bounds — RFC 5322's
+			// `body = (*(*998text CRLF) *998text)`. Mirrors the TS desugar.
+			//
+			// Each level is exactly what desugarElement would have emitted for
+			// opt(group([[inner, <previous level>]])): the group helper first,
+			// then the optional wrapping a reference to it. Pushing in that
+			// order keeps freshName's numbering unchanged.
+			var nestedRef *abnfElement
 			for i := 0; i < max-min; i++ {
-				if len(nested) == 0 {
-					nested = abnfSequence{{Kind: kindOpt,
-						Inner: &abnfElement{Kind: kindGroup, Alts: []abnfSequence{{inner}}}}}
-				} else {
-					inside := append(abnfSequence{inner}, nested...)
-					nested = abnfSequence{{Kind: kindOpt,
-						Inner: &abnfElement{Kind: kindGroup, Alts: []abnfSequence{inside}}}}
+				seq := abnfSequence{inner}
+				if nestedRef != nil {
+					seq = abnfSequence{inner, nestedRef}
 				}
+				groupName := freshName("group")
+				extra = append(extra, &abnfProduction{
+					Name: groupName, Alts: []abnfSequence{seq}, NodeKind: "helper"})
+				groupRef := &abnfElement{Kind: kindRef, Name: groupName}
+				optName := freshName("opt_" + groupName)
+				extra = append(extra, &abnfProduction{
+					Name: optName,
+					Alts: []abnfSequence{{groupRef}, {}}, NodeKind: "helper"})
+				nestedRef = &abnfElement{Kind: kindRef, Name: optName}
 			}
-			repAlt = append(repAlt, nested...)
+			if nestedRef != nil {
+				repAlt = append(repAlt, nestedRef)
+			}
 		}
 		extra = append(extra, &abnfProduction{
 			Name: repName, Alts: []abnfSequence{desugarAlt(repAlt)}, NodeKind: "helper"})
@@ -707,12 +810,46 @@ func parseNumericValue(src string) *abnfElement {
 	}
 	body := src[2:]
 
+	// RFC 5234 puts no ceiling on a numeric value, but Unicode does: nothing
+	// above U+10FFFF is a code point. Check it here so an out-of-range
+	// grammar gets an ABNF diagnostic naming the offending value, rather than
+	// the silent U+FFFD that `string(rune(n))` yields. The message is
+	// recorded on the element rather than returned, because the caller is an
+	// engine alt-action with no error return — see abnfElement.numErr.
+	// Mirrors the TS parseNumericValue check, whose message it reproduces
+	// byte for byte.
+	numErr := ""
+	codePoint := func(text string) int64 {
+		n, err := strconv.ParseInt(text, radix, 64)
+		if err != nil || n < 0 || 0x10FFFF < n {
+			shown := strconv.FormatInt(n, 10)
+			if err != nil {
+				// Overflowed int64 — report the digits as written, in the
+				// same base-10 form the TS side prints.
+				if v, ok := new(big.Int).SetString(text, radix); ok {
+					shown = v.String()
+				} else {
+					shown = text
+				}
+			}
+			if numErr == "" {
+				numErr = fmt.Sprintf(
+					"numeric value '%%%s%s' is %s, which is not a Unicode code "+
+						"point (the maximum is %%x10FFFF).",
+					string(src[1]), text, shown)
+			}
+			return 0
+		}
+		return n
+	}
+
 	if strings.Contains(body, "-") {
 		parts := strings.SplitN(body, "-", 2)
-		lo, _ := strconv.ParseInt(parts[0], radix, 64)
-		hi, _ := strconv.ParseInt(parts[1], radix, 64)
+		lo := codePoint(parts[0])
+		hi := codePoint(parts[1])
 		if lo == hi {
-			return &abnfElement{Kind: kindTerm, Literal: string(rune(lo))}
+			return &abnfElement{
+				Kind: kindTerm, Literal: string(rune(lo)), numErr: numErr}
 		}
 		toEsc := func(n int64) string {
 			return fmt.Sprintf("\\x{%04x}", n)
@@ -721,16 +858,16 @@ func parseNumericValue(src string) *abnfElement {
 			Kind:    kindRegex,
 			Pattern: "[" + toEsc(lo) + "-" + toEsc(hi) + "]",
 			Flags:   "",
+			numErr:  numErr,
 		}
 	}
 
 	parts := strings.Split(body, ".")
 	var sb strings.Builder
 	for _, n := range parts {
-		v, _ := strconv.ParseInt(n, radix, 64)
-		sb.WriteRune(rune(v))
+		sb.WriteRune(rune(codePoint(n)))
 	}
-	return &abnfElement{Kind: kindTerm, Literal: sb.String()}
+	return &abnfElement{Kind: kindTerm, Literal: sb.String(), numErr: numErr}
 }
 
 // ---- key / case-sensitivity helpers --------------------------------
@@ -843,6 +980,22 @@ var reservedTokenNames = map[string]bool{
 //
 // Prose anywhere else has no definition behind it, so it is an error rather
 // than a silently-ignored rule. Go port of the TS resolveProseTerminals.
+// removeProse is the one prose directive the compiler acts on. Matched
+// case-insensitively after trimming, so `<remove>`, `<Remove>` and
+// `< remove >` all work.
+const removeProse = "remove"
+
+// removeAll is the one prose *name*: `<all> = <remove>` clears the whole
+// grammar.
+const removeAll = "all"
+
+// isProseName reports whether a production name came from a prose token. Such
+// a name keeps its angle brackets, which no ordinary rulename can contain — so
+// `<all>` and a production actually called `all` stay distinct.
+func isProseName(name string) bool {
+	return strings.HasPrefix(name, "<") && strings.HasSuffix(name, ">")
+}
+
 func resolveProseTerminals(grammar *abnfGrammar) error {
 	kept := []*abnfProduction{}
 
@@ -866,8 +1019,53 @@ func resolveProseTerminals(grammar *abnfGrammar) error {
 	}
 
 	for _, prod := range grammar.Productions {
-		if len(prod.Alts) == 1 && len(prod.Alts[0]) == 1 &&
-			prod.Alts[0][0].Kind == kindProse {
+		onlyProse := len(prod.Alts) == 1 && len(prod.Alts[0]) == 1 &&
+			prod.Alts[0][0].Kind == kindProse
+
+		// A prose name is only ever the removal directive. Checked here as
+		// well as in the prose-body branch below, because `<all> = "x"` has a
+		// *literal* body and would otherwise fall through and be lifted into a
+		// token literally named `#<all>`.
+		if isProseName(prod.Name) && !onlyProse {
+			return &AbnfParseError{Message: fmt.Sprintf(
+				"abnf: '%s' is prose, and prose is only valid as a production "+
+					"name for the removal directive '<all> = <remove>'.", prod.Name)}
+		}
+
+		if onlyProse {
+			text := prod.Alts[0][0].Text
+
+			// `<remove>` — the one prose form that *does* compile to something.
+			// Prose is otherwise informational, which is exactly why it is the
+			// right place for a directive: it cannot collide with a real
+			// terminal, and RFC 5234 already says a tool may interpret it.
+			//
+			//	name = <remove>   drop that rule and that fixed token
+			//	<all> = <remove>  drop everything — a fresh empty grammar
+			if removeProse == strings.ToLower(strings.TrimSpace(text)) {
+				if isProseName(prod.Name) {
+					target := strings.ToLower(strings.TrimSpace(
+						prod.Name[1 : len(prod.Name)-1]))
+					if removeAll != target {
+						return &AbnfParseError{Message: fmt.Sprintf(
+							"abnf: '<%s>' is not a removal target. The only prose "+
+								"name is '<all>', as in '<all> = <remove>', which clears "+
+								"the whole grammar. To remove one rule or token, name it "+
+								"directly: '%s = <remove>'.", target, target)}
+					}
+					grammar.ClearAll = true
+				} else {
+					grammar.Remove = append(grammar.Remove, prod.Name)
+				}
+				continue
+			}
+
+			if isProseName(prod.Name) {
+				return &AbnfParseError{Message: fmt.Sprintf(
+					"abnf: '%s' is prose, and prose is only valid as a production "+
+						"name for the removal directive '<all> = <remove>'.", prod.Name)}
+			}
+
 			if _, ok := builtinTokens[prod.Name]; ok {
 				continue // informational — the lexer defines it
 			}
@@ -898,7 +1096,9 @@ func resolveProseTerminals(grammar *abnfGrammar) error {
 		kept = append(kept, prod)
 	}
 
-	if len(kept) == 0 {
+	// A grammar that is nothing but `<remove>` directives is legitimate: it
+	// prunes an instance without adding anything back.
+	if len(kept) == 0 && !grammar.ClearAll && len(grammar.Remove) == 0 {
 		return &AbnfParseError{Message: "abnf: grammar defines no rules — " +
 			"only informational prose terminals."}
 	}
