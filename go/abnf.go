@@ -21,8 +21,10 @@
 //     EliminateLeftRecursion, Install — the public facade).
 package tabnasabnf
 
-// Version is the current version of the module.
-const Version = "0.3.4"
+// VERSION is this module's version. It MUST equal ts/package.json
+// "version": the release orchestrator rewrites both, and
+// TestVersionMatchesPackageJSON fails the build if they drift.
+const VERSION = "0.3.4"
 
 // ---- ABNF AST -------------------------------------------------------
 //
