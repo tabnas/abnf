@@ -22,7 +22,7 @@
 package tabnasabnf
 
 // Version is the current version of the module.
-const Version = "0.3.3"
+const Version = "0.3.4"
 
 // ---- ABNF AST -------------------------------------------------------
 //
