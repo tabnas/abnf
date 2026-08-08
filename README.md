@@ -116,6 +116,14 @@ There are three ways to say "a terminal goes here".
 single literal is a lexical definition rather than a rule, so it compiles
 to a named lexer token instead of a rule (`PL = "+"` becomes `#PL`).
 
+There are **no escape sequences inside a literal**. RFC 5234 defines
+`char-val` as `DQUOTE *(%x20-21 / %x23-7E) DQUOTE`, so a backslash is an
+ordinary character: `"\"` is a one-character literal — the way every RFC
+that defines `quoted-pair` writes it — and `"\n"` is the two characters
+`\` and `n`, not a newline. Write control characters as numeric values
+(`%x0A`, or the `LF` core rule) and an embedded double quote as `DQUOTE`
+or `%x22`, since `char-val` cannot contain one.
+
 **A built-in lexer token** — `TX` (bareword), `NR` (number), `ST`
 (quoted string), `VL` (`true`/`false`/`null`) — matches whole tokens the
 engine's lexer already produces. Prefer these over deriving text

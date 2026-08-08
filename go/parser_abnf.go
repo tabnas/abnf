@@ -97,6 +97,13 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			r.EnsureU()["name"] = tokString(r.O[0], r, ctx)
 			r.EnsureU()["incremental"] = false
 		}),
+		// `<all> = …`: the production name is the prose token's raw source,
+		// angle brackets and all, so it can never collide with a real
+		// rulename. Mirrors the TS `#PV #DEF` prod alternative.
+		"@prod-name-prose": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
+			r.EnsureU()["name"] = r.O[0].Src
+			r.EnsureU()["incremental"] = false
+		}),
 		"@prod-name-inc": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			r.EnsureU()["name"] = tokString(r.O[0], r, ctx)
 			r.EnsureU()["incremental"] = true
@@ -246,6 +253,34 @@ func AbnfRules() map[string]*tabnas.GrammarRuleSpec {
 		return []*tabnas.GrammarAltSpec{
 			{S: "#TX #DEF", B: 2, G: "end"},
 			{S: "#TX #DEFA", B: 2, G: "end"},
+			// A rulename followed by a repetition count — `a 1*b`, `a 2b`,
+			// `simple-key 1*( dot-sep simple-key )`.
+			//
+			// This alternative exists for its S: pattern, not its action: it
+			// widens the tcol the lexer uses for the token AFTER a rulename.
+			// The `#TX #DEF` / `#TX #DEFA` lookaheads above are the only other
+			// two-token patterns starting with #TX, so without this one that
+			// tcol is just {#DEF, #DEFA} — the #NUM match.token matcher is
+			// never offered the position, and the digits fall through to the
+			// engine's default matchers. `1*b` then arrives as #NR and fails
+			// to parse at all, and `2b` arrives as a #TX bareword, silently
+			// misparsing as a reference to a rule named `2b`. Mirrors the TS
+			// seq rule in ts/src/converter.ts.
+			{S: "#TX #NUM", B: 2, P: "elem"},
+			// Same problem, same fix, for a rulename followed by another
+			// atom — `#ATOM` covers every atom-starter. TS needs this to
+			// reach its #NV / #SS / #SI / #PV matchers at all; Go gets #NV
+			// and #PV for free via match.TokenEager, but the alternative is
+			// kept so the two tables stay readable side by side.
+			{S: "#TX #ATOM", B: 2, P: "elem"},
+			// `<all> = …` starts the NEXT production, so the current
+			// sequence ends here rather than taking the prose as another
+			// element. TS has always carried this in seq.open; Go's shared
+			// open/close list had it in neither, so `top = NR` followed by
+			// `<all> = <remove>` failed to parse here while it compiled on
+			// the TS side. Must precede the `{S: "#PV", P: "elem"}`
+			// alternative below.
+			{S: "#PV #DEF", B: 2, G: "end"},
 			{S: "#ALT", B: 1, G: "end"},
 			{S: "#ZZ", B: 1, G: "end"},
 			{S: "#RP", B: 1, G: "end"},
@@ -279,11 +314,18 @@ func AbnfRules() map[string]*tabnas.GrammarRuleSpec {
 		"prod": {
 			Open: []*tabnas.GrammarAltSpec{
 				{S: "#TX #DEF", A: "@prod-name", P: "alts"},
+				// `<all> = <remove>` — the whole-grammar reset. Prose lexes as
+				// its own token (#PV), so it cannot be confused with a rule
+				// name or with the `*` repetition operator. The name keeps its
+				// angle brackets, which no #TX rulename can produce, so it can
+				// never collide with a production actually called `all`.
+				{S: "#PV #DEF", A: "@prod-name-prose", P: "alts"},
 				{S: "#TX #DEFA", A: "@prod-name-inc", P: "alts"},
 			},
 			Close: []*tabnas.GrammarAltSpec{
 				{S: "#TX #DEF", B: 2, R: "prod"},
 				{S: "#TX #DEFA", B: 2, R: "prod"},
+				{S: "#PV #DEF", B: 2, R: "prod"},
 				{B: 1},
 			},
 		},
@@ -408,6 +450,32 @@ func abnfParserOptions() tabnas.Options {
 		Rule:  &tabnas.RuleOptions{Start: "abnf"},
 		Fixed: &tabnas.FixedOptions{Token: fixedTok},
 		Match: &tabnas.MatchOptions{Token: matchTok, TokenEager: matchEager},
+		// RFC 5234 rulename is `ALPHA *(ALPHA / DIGIT / "-")` — nothing is
+		// reserved, so `true`, `false` and `null` are ordinary rule names.
+		// JSON's grammar uses all three (`value = false / null / true /
+		// object / array / number / string`), and with the engine's default
+		// keyword-value lexing they arrived as #VL value tokens instead of
+		// #TX barewords, so no ABNF rendering of JSON would compile. The
+		// ABNF meta-grammar has no use for #VL at all — this switch only
+		// affects the parser that reads ABNF source, not the grammars it
+		// emits, where `VL` remains a built-in token name. Mirrors the TS
+		// converter.
+		Value: &tabnas.ValueOptions{Lex: &f},
+		// RFC 5234 char-val has NO escape sequences at all:
+		//   char-val = DQUOTE *(%x20-21 / %x23-7E) DQUOTE
+		// A backslash is just %x5C, an ordinary member of that range, so
+		// `"\"` is a one-character literal — and a common one, since every
+		// RFC defining `quoted-pair` writes it that way (RFC 5322, RFC 3261,
+		// RFC 8259, …). With the engine's default JSON-style escaping the
+		// backslash swallowed the closing quote and the grammar died with
+		// `unterminated_string`, while `"a\b"` silently became `a<BS>b`.
+		//
+		// The engine offers no "escaping off" switch both runtimes share
+		// (TS takes escapeChar: null, Go falls back to `\` on an empty
+		// string), so instead point the escape character at DEL (%x7F) —
+		// outside char-val's %x20-21 / %x23-7E body, hence unreachable in
+		// any legal ABNF literal. Mirrors ts/src/converter.ts.
+		String: &tabnas.StringOptions{EscapeChar: "\x7F"},
 		TokenSet: map[string][]string{
 			"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI", "#PV"},
 		},

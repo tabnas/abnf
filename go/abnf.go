@@ -22,7 +22,7 @@
 package tabnasabnf
 
 // Version is the current version of the module.
-const Version = "0.3.2"
+const Version = "0.3.3"
 
 // ---- ABNF AST -------------------------------------------------------
 //
@@ -74,6 +74,14 @@ type abnfElement struct {
 
 	// prose
 	Text string
+
+	// numErr carries a deferred diagnostic from parseNumericValue: an
+	// alt-action has no error return, and panicking is no good either
+	// because the engine turns a panic into its own `tabnas/internal`
+	// wrapper. So the element is built anyway and parseAbnf reports this
+	// message once the parse is structurally complete. Unexported: it is an
+	// internal signal, not part of the AST.
+	numErr string
 
 	// regex
 	Pattern string
@@ -148,6 +156,12 @@ func (p *abnfProduction) kind() string {
 type abnfGrammar struct {
 	Productions []*abnfProduction
 	Ambiguities []ambiguityReport
+
+	// `<remove>` directives. Remove names rules/tokens to drop; ClearAll is
+	// `<all> = <remove>`, which wipes the instance first. Mirrors the TS
+	// AbnfGrammar `remove` / `clearAll` fields.
+	Remove   []string
+	ClearAll bool
 }
 
 type ambiguityReport struct {

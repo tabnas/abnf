@@ -28,15 +28,35 @@ Rules are RFC 5234 ABNF, **not** the `<x> ::= a | b` style:
 - `name = element ...` — `=` defines a rule, not `::=`.
 - `/` is choice (`greet = "hi" / "hello"`), not `|`.
 - Literals are **double-quoted** and **case-insensitive** by default;
-  `%s"…"` forces case-sensitivity.
+  `%s"…"` forces case-sensitivity, `%i"…"` states the default.
+- A literal has **no escape sequences**: RFC 5234's `char-val` is
+  `DQUOTE *(%x20-21 / %x23-7E) DQUOTE`, so a backslash is just `%x5C`
+  and `"\"` is the one-character literal every RFC spells `quoted-pair`
+  with. `"\n"` is two characters, not a newline. (The parser sets
+  `string.escapeChar` to DEL, which no legal `char-val` can contain, to
+  turn the engine's JSON-style escaping off.)
 - `;` starts a line comment.
-- Repetition / option / group: `*A`, `1*A`, `m*nA`, `[ A ]`, `( A / B )`.
+- Repetition / option / group: `*A`, `1*A`, `m*nA`, `*nA`, `nA`,
+  `[ A ]`, `( A / B )`. Every form works after any element, including
+  after a bare rulename (`a 1*b`, `simple-key 1*( dot-sep simple-key )`).
 - `name =/ alt` incrementally adds alternatives to an existing rule.
-- The RFC 5234 Appendix B.1 **core rules** (`ALPHA`, `DIGIT`, `HEXDIG`,
-  …) are auto-included when referenced and not locally defined; a local
-  `DIGIT = …` always wins. They are defined in `converter.ts` (search
-  `RFC 5234 Appendix B.1`) and emitted as flattened `core` nodes so a
-  matched char class doesn't litter the tree with one node per character.
+- **Numeric values are fully supported**, in all three bases and all
+  three forms: single (`%x41`, `%d65`, `%b1000001`), range
+  (`%x41-5A`), and concatenation (`%x0D.0A`). Code points above the BMP
+  work (`%x1F600`, `%xE000-10FFFF`); anything above `%x10FFFF` is
+  rejected with a diagnostic naming the value.
+- **Rulenames are not keyword-restricted.** RFC 5234 `rulename` is
+  `ALPHA *(ALPHA / DIGIT / "-")`, so `true`, `false` and `null` are
+  ordinary rule names — which JSON's own ABNF relies on. The parser sets
+  `value.lex: false` so the engine's keyword-value lexing doesn't claim
+  them.
+- All **16** RFC 5234 Appendix B.1 **core rules** — `ALPHA`, `BIT`,
+  `CHAR`, `CR`, `CRLF`, `CTL`, `DIGIT`, `DQUOTE`, `HEXDIG`, `HTAB`,
+  `LF`, `LWSP`, `OCTET`, `SP`, `VCHAR`, `WSP` — are auto-included when
+  referenced and not locally defined; a local `DIGIT = …` always wins.
+  They are defined in `converter.ts` (search `RFC 5234 Appendix B.1`)
+  and emitted as flattened `core` nodes so a matched char class doesn't
+  litter the tree with one node per character.
 
 Classic-BNF `::=` / `|` does **not** parse. (Some stale comments in
 `src/converter.ts` and a CLI example in `ts/README.md` still show `::=` —
@@ -90,16 +110,56 @@ Non-obvious things an agent should know before touching `converter.ts`:
   and `*vocab` helper rules. Output AST nodes carry a `nodeKind`
   (`user` / `core` / `helper`); only `user` nodes get their own tree
   node, the others flatten their `src`/`kids` into the enclosing rule.
-- **Larger ABNF surface is still partial.** `%x`/`%d`/`%b` numeric ranges
-  and similar are in-progress (the `rfc3986-uri.abnf` fixture documents
-  the workarounds it needed). Prose-val is supported only as the whole
-  body of a production naming a built-in lexer token (`NR = <number>`),
-  where it is informational; general prose such as RFC 3986's
-  `path-empty = 0<pchar>` is still an error, since there is no definition
-  behind it. When you extend the dialect, add a fixture grammar under
-  `ts/test/grammar/` and an end-to-end test — plus a cross-runtime case
-  under [`test/spec/`](test/) so `go/` cannot drift (see
+- **The RFC 5234 notation itself is complete** — every construct listed
+  under "The dialect is ABNF" above parses and compiles. What remains
+  partial is not the *notation* but the three limits below. When you
+  extend the dialect, add a fixture grammar under `ts/test/grammar/` and
+  an end-to-end test — plus a cross-runtime case under
+  [`test/spec/`](test/) so `go/` cannot drift (see
   [`test/AGENTS.md`](test/AGENTS.md)).
+- **Prose-val is deliberately narrow.** It is supported only as the whole
+  body of a production naming a built-in lexer token (`NR = <number>`),
+  where it is informational, and as the `<remove>` directive. General
+  prose such as RFC 3986's `path-empty = 0<pchar>` is an error, since
+  there is no definition behind it — see the notes at the top of
+  `ts/test/grammar/rfc3986-uri.abnf` for the rewrite that fixture needed.
+- **Paull's substitution can blow up on large mutually-recursive
+  grammars.** The full RFC 5322 (`email.abnf`) and Dhall grammars do not
+  finish compiling. This is the "pathological grammars grow" caveat the
+  README already states, not a separate bug: substitution runs over every
+  production to collect the multi-token `altPrefixes` that populate tcol,
+  so it cannot yet be scoped to the cyclic SCCs. Keep grammars
+  reasonably small.
+- **Alt dispatch is one-token lookahead plus the probe pattern.** Two
+  alternatives sharing an arbitrarily deep prefix with no terminal
+  tie-breaker (`S = A Z / A Y`), or an `[X B] C` whose disambiguator is a
+  nonterminal, need generalised catch-and-rewind at the alt-dispatch
+  level, which the emitter does not provide. The two `it.skip` cases at
+  the end of `ts/test/probe.test.js` mark exactly that boundary and are
+  skipped on purpose — they are capability documentation, not broken
+  tests. (`rfc3986.test.js` carries a third, for the same reason.)
+
+### Conformance, as measured
+
+`test/abnf-corpus/` holds four other ABNF implementations (`ex_abnf`,
+`go-abnf`, `node-abnf`, `tree-sitter-abnf`), kept for their grammar
+corpora — 68 `.abnf` files, including the collected ABNF of RFC 3261,
+3986, 4566, 5322, 7405, JSON, JSONPath, TOML and Dhall. It is a
+reference corpus, not a test suite: nothing in `make test` reads it, so
+a fresh clone passes without it. It is **not vendored** — four
+separately-licensed upstream repos do not belong in this tree, and a
+checkout carrying its own `.git` would commit as a mode-160000 gitlink
+and ship an empty directory to everyone. Fetch it, pinned to the commits
+these figures were measured against, with `make abnf-corpus`
+(`test/fetch-abnf-corpus.sh`).
+
+Last measured, 66 files finished (2 hit the Paull's
+blow-up above): **58 parse** and **48 compile end to end**. Every one of
+the 8 parse rejections is correct — five are `ex_abnf`'s `!!!` embedded
+Elixir extension rather than ABNF, two are fuzzer artifacts with code
+points above `%x10FFFF`, one is an empty file. Of the 10 compile
+rejections, 3 are the prose-val limit above and 7 are grammar fragments
+that reference rules they never define.
 
 ## The tabnas engine dependency
 

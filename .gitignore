@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# External ABNF reference corpus (ex_abnf, go-abnf, node-abnf,
+# tree-sitter-abnf), fetched by test/fetch-abnf-corpus.sh — not vendored.
+test/abnf-corpus/

@@ -314,6 +314,30 @@ const abnfRules: Record<
     open: [
       { s: '#TX #DEF', b: 2, g: 'end' },
       { s: '#TX #DEFA', b: 2, g: 'end' },
+      // A rulename followed by a repetition count — `a 1*b`, `a 2b`,
+      // `simple-key 1*( dot-sep simple-key )`.
+      //
+      // This alternative exists for its `s:` pattern, not its action:
+      // it widens the tcol the lexer uses for the token AFTER a
+      // rulename. The `#TX #DEF` / `#TX #DEFA` lookaheads above are
+      // the only other two-token patterns starting with `#TX`, so
+      // without this one that tcol is just {#DEF, #DEFA} — the `#NUM`
+      // match.token matcher is never offered the position, and the
+      // digits fall through to the engine's default matchers. `1*b`
+      // then arrives as #NR and fails to parse at all, and `2b`
+      // arrives as a #TX bareword, silently misparsing as a reference
+      // to a rule named `2b`. Same reason `elem.open` spells its
+      // atom position `#ATOM` rather than leaving it implicit.
+      { s: '#TX #NUM', b: 2, p: 'elem' },
+      // Same problem, same fix, for a rulename followed by another
+      // atom. `#ATOM` covers every atom-starter, so the `%xNN` (#NV),
+      // `%s"…"` / `%i"…"` (#SS/#SI) and `<prose>` (#PV) matchers are
+      // all offered the position. Without it `ws %x5B ws` silently
+      // became a reference to a rule named `%x5B`, and `a <foo>` a
+      // reference to `<foo>` instead of the prose error it should
+      // raise. (The Go port gets these right via `match.tokenEager`,
+      // which is what exposed the discrepancy.)
+      { s: '#TX #ATOM', b: 2, p: 'elem' },
       // `<all> =` starts the next production; without this the prose
       // would be taken as another element of this sequence.
       { s: '#PV #DEF', b: 2, g: 'end' },
@@ -338,6 +362,22 @@ const abnfRules: Record<
     close: [
       { s: '#TX #DEF', b: 2, g: 'end' },
       { s: '#TX #DEFA', b: 2, g: 'end' },
+      // `<all> = …` starts the next production, exactly as in `open`.
+      // `open` has always carried this alternative; `close` did not,
+      // and only got away with it because the prose was mis-lexed as a
+      // bareword here (so the `#TX #DEF` boundary above caught it by
+      // accident). Now that `#TX #ATOM` lets the #PV matcher see the
+      // position, the boundary has to be checked properly — and before
+      // the `{ s: '#PV', p: 'elem' }` alternative further down, which
+      // would otherwise take `<all>` as a prose element of this
+      // sequence.
+      { s: '#PV #DEF', b: 2, g: 'end' },
+      // See the matching alternatives in `open` — these widen the tcol
+      // for the token after a rulename, so `a 1*b` / `a 2b` lex as
+      // #NUM and `ws %x5B` / `a %s"Q"` / `a <foo>` reach their own
+      // matchers instead of falling through to a #TX bareword.
+      { s: '#TX #NUM', b: 2, p: 'elem' },
+      { s: '#TX #ATOM', b: 2, p: 'elem' },
       { s: '#ALT', b: 1, g: 'end' },
       { s: '#ZZ', b: 1, g: 'end' },
       { s: '#RP', b: 1, g: 'end' },
@@ -609,6 +649,37 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
         '#PV': /^<[\x20-\x3D\x3F-\x7E]*>/,
       },
     },
+    value: {
+      // RFC 5234 rulename is `ALPHA *(ALPHA / DIGIT / "-")` — nothing is
+      // reserved, so `true`, `false` and `null` are ordinary rule names.
+      // JSON's grammar uses all three (`value = false / null / true /
+      // object / array / number / string`), and with the engine's default
+      // keyword-value lexing they arrived as `#VL` value tokens instead of
+      // `#TX` barewords, so no ABNF rendering of JSON would compile.
+      // The ABNF meta-grammar has no use for `#VL` at all — this switch
+      // only affects the parser that reads ABNF source, not the grammars
+      // it emits, where `VL` remains a built-in token name.
+      lex: false,
+    },
+    string: {
+      // RFC 5234 char-val has NO escape sequences at all:
+      //   char-val = DQUOTE *(%x20-21 / %x23-7E) DQUOTE
+      // A backslash is just %x5C, an ordinary member of that range, so
+      // `"\"` is a one-character literal — and it is a common one, since
+      // every RFC that defines `quoted-pair` writes it that way
+      // (RFC 5322, RFC 3261, RFC 8259, …). With the engine's default
+      // JSON-style escaping the backslash swallowed the closing quote
+      // and the grammar died with `unterminated_string`, while `"a\b"`
+      // silently became `a<BS>b` instead of the three characters
+      // `a`, `\`, `b`.
+      //
+      // The engine offers no "escaping off" switch that both runtimes
+      // share (TS takes `escapeChar: null`, Go falls back to `\` on an
+      // empty string), so instead point the escape character at DEL
+      // (%x7F) — outside char-val's %x20-21 / %x23-7E body, hence
+      // unreachable in any legal ABNF literal.
+      escapeChar: '\x7F',
+    },
     tokenSet: {
       // Tokens that can legitimately open an atom. Declaring this
       // as a set lets elem.open use `#ATOM` inside its `s:` patterns
@@ -718,9 +789,34 @@ function eliminateLeftRecursion(grammar: AbnfGrammar): AbnfGrammar {
   for (let i = 0; i < prods.length; i++) {
     // For each earlier production A_j, inline any alternative of
     // A_i whose leading element is a reference to A_j.
+    //
+    // Paull's invariant is that after this inner loop no alternative
+    // of A_i begins with a ref to any A_j, j < i. A single increasing
+    // pass gives that only when every A_j has itself been fully
+    // substituted — but the pure-alias exemption above deliberately
+    // leaves some A_j un-substituted, so inlining such an alias can
+    // (re)introduce a leading ref to an A_k with k < j, which the pass
+    // has already walked past. Left in place, a nullable A_k hides the
+    // left recursion from `eliminateDirectLeftRec` and the emitted
+    // grammar re-enters A_i at the same source position
+    // (`a = b a / "x"`, `b = c`, `c = "y" /`). So re-run the pass
+    // until it reaches a fixed point.
+    //
+    // Termination: each round only fires where a leading ref to an
+    // earlier production remains, and earlier productions have already
+    // had their own direct left recursion eliminated, so no
+    // substitution can reproduce the ref it just consumed. The guard
+    // is belt-and-braces against a pathological grammar.
     if (!isExemptAlias(prods[i])) {
-      for (let j = 0; j < i; j++) {
-        prods[i] = substituteLeadingRef(prods[i], prods[j])
+      const guard = prods.length + 1
+      for (let round = 0; round < guard; round++) {
+        let changed = false
+        for (let j = 0; j < i; j++) {
+          if (!hasLeadingRefTo(prods[i], prods[j].name)) continue
+          prods[i] = substituteLeadingRef(prods[i], prods[j])
+          changed = true
+        }
+        if (!changed) break
       }
     }
     prods[i] = eliminateDirectLeftRec(prods[i])
@@ -839,6 +935,18 @@ function topoOrderForPaull(prods: AbnfProduction[]): AbnfProduction[] {
 
   for (const p of prods) visit(p.name)
   return order
+}
+
+
+// True when at least one alternative of `prod` begins with a
+// reference to `name` — i.e. `substituteLeadingRef` would change it.
+function hasLeadingRefTo(prod: AbnfProduction, name: string): boolean {
+  for (const alt of prod.alts) {
+    if (alt.length > 0 && alt[0].kind === 'ref' && alt[0].name === name) {
+      return true
+    }
+  }
+  return false
 }
 
 
@@ -1093,19 +1201,34 @@ function desugar(grammar: AbnfGrammar): AbnfGrammar {
       repAlt.push(tailStarRef)
     } else {
       // Nest (max - min) optionals: [A [A [A ...]]].
-      let nested: AbnfSequence = []
+      //
+      // Built bottom-up as an explicit chain of helper productions
+      // rather than as one deeply-nested inline element tree. The
+      // shape (and every generated name) is identical either way, but
+      // handing a nested tree to `desugarAlt` costs a stack frame per
+      // repetition, and real ABNF carries big bounds — RFC 5322's
+      // `body = (*(*998text CRLF) *998text)` blew the call stack with
+      // `Maximum call stack size exceeded` before reaching the emitter.
+      //
+      // Each level is exactly what `desugarElement` would have emitted
+      // for `opt(group([[inner, <previous level>]]))`: the group helper
+      // first, then the optional wrapping a reference to it. Pushing in
+      // that order keeps `freshName`'s numbering unchanged.
+      let nestedRef: AbnfElement | null = null
       for (let i = 0; i < max - min; i++) {
-        // Wrap current `nested` into an optional and prepend `inner`.
-        if (nested.length === 0) {
-          nested = [{ kind: 'opt', inner: { kind: 'group', alts: [[inner]] } }]
-        } else {
-          nested = [{
-            kind: 'opt',
-            inner: { kind: 'group', alts: [[inner, ...nested]] },
-          }]
-        }
+        const seq: AbnfSequence = nestedRef ? [inner, nestedRef] : [inner]
+        const groupName = freshName('group')
+        extra.push({ name: groupName, alts: [seq], nodeKind: 'helper' })
+        const groupRef: AbnfElement = { kind: 'ref', name: groupName }
+        const optName = freshName('opt_' + groupName)
+        extra.push({
+          name: optName,
+          alts: [[groupRef], []],
+          nodeKind: 'helper',
+        })
+        nestedRef = { kind: 'ref', name: optName }
       }
-      repAlt.push(...nested)
+      if (nestedRef) repAlt.push(nestedRef)
     }
 
     extra.push({ name: repName, alts: [desugarAlt(repAlt)], nodeKind: 'helper' })
@@ -1197,6 +1320,7 @@ OCTET  = %x00-FF
 SP     = %x20
 VCHAR  = %x21-7E
 WSP    = SP / HTAB
+LWSP   = *( WSP / CRLF WSP )
 `
 
 let _coreRules: Map<string, AbnfProduction> | null = null
@@ -3094,24 +3218,50 @@ function parseNumericValue(src: string): AbnfElement {
   const radix = base === 'x' ? 16 : base === 'd' ? 10 : 2
   const body = src.slice(2)
 
+  // RFC 5234 puts no ceiling on a numeric value, but Unicode does:
+  // nothing above U+10FFFF is a code point. Check it here so an
+  // out-of-range grammar gets an ABNF diagnostic naming the offending
+  // value, rather than a bare `RangeError: Invalid code point` from
+  // String.fromCodePoint (or, as before, a silently truncated
+  // character from String.fromCharCode).
+  const codePoint = (text: string): number => {
+    const n = parseInt(text, radix)
+    if (!Number.isFinite(n) || n < 0 || 0x10FFFF < n) {
+      throw new Error(
+        `numeric value '%${src[1]}${text}' is ${n}, which is not a ` +
+        `Unicode code point (the maximum is %x10FFFF).`)
+    }
+    return n
+  }
+
   if (body.includes('-')) {
     const [loStr, hiStr] = body.split('-')
-    const lo = parseInt(loStr, radix)
-    const hi = parseInt(hiStr, radix)
+    const lo = codePoint(loStr)
+    const hi = codePoint(hiStr)
     if (lo === hi) {
-      return { kind: 'term', literal: String.fromCharCode(lo) }
+      return { kind: 'term', literal: String.fromCodePoint(lo) }
     }
+    // `\uXXXX` only reaches U+FFFF: `%xE000-10FFFF` (JSONPath, TOML)
+    // became `[-ჿff]`, which JS reads as the range E000–10FF
+    // plus a literal `ff` — "Range out of order". Above the BMP the
+    // escape has to be `\u{…}`, which in turn requires the `u` flag.
+    // Stay on the plain form below U+FFFF so existing output is
+    // unchanged. (The Go port emits `\x{…}`, whose length is already
+    // variable, and never had the bug.)
+    const astral = 0xFFFF < lo || 0xFFFF < hi
     const toEsc = (n: number) =>
-      '\\u' + n.toString(16).padStart(4, '0')
+      astral
+        ? '\\u{' + n.toString(16) + '}'
+        : '\\u' + n.toString(16).padStart(4, '0')
     return {
       kind: 'regex',
       pattern: '[' + toEsc(lo) + '-' + toEsc(hi) + ']',
-      flags: '',
+      flags: astral ? 'u' : '',
     }
   }
 
   const parts = body.split('.')
-  const chars = parts.map((n) => String.fromCharCode(parseInt(n, radix)))
+  const chars = parts.map((n) => String.fromCodePoint(codePoint(n)))
   return { kind: 'term', literal: chars.join('') }
 }
 
