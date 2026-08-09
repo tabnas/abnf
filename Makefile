@@ -16,10 +16,12 @@ test: test-ts test-go
 
 clean: clean-ts clean-go
 
-# --- External reference corpus ---
+# --- Third-party conformance corpus ---
 # Fetch four other ABNF implementations into test/abnf-corpus (gitignored)
-# for their grammar corpora. Nothing in `make test` reads it — it is what
-# the conformance figures in AGENTS.md were measured against.
+# for their grammar corpora. The conformance suites in BOTH runtimes read
+# it, and FAIL — never skip — when it is absent, so this is a prerequisite
+# of `make test`, not an optional extra. `npm test` fetches it too, via the
+# `pretest` hook; the Go side fetches it from TestMain. Idempotent.
 abnf-corpus:
 	sh test/fetch-abnf-corpus.sh
 
@@ -41,7 +43,7 @@ publish-ts: test-ts
 build-go:
 	cd go && go build ./...
 
-test-go:
+test-go: abnf-corpus
 	cd go && go test -v ./...
 
 clean-go:

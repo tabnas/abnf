@@ -114,7 +114,14 @@ function importsToRequire(code) {
 }
 
 // Rewrite `<expr>  // => <expected>` lines into __eq(expr, expected) calls.
-const ARROW = /\/\/\s*=>(.*)$/
+//
+// The `m` flag is load-bearing. This regex is used two ways: per line (in
+// rewriteAssertions) and against a whole joined block (the opt-in gate in the
+// suite below). Without `m`, `$` anchors to the end of the WHOLE string, so
+// the gate only saw a `// =>` sitting on the block's last line — every block
+// that made an assertion and then carried on was silently dropped, and the
+// suite stayed green while testing less than it claimed.
+const ARROW = /\/\/\s*=>(.*)$/m
 function rewriteAssertions(code) {
   let count = 0
   const out = code.split('\n').map((line) => {
@@ -184,8 +191,17 @@ describe('doc-examples', () => {
     })
   }
 
-  it('found at least one tested example (sanity)', () => {
-    // Not a hard failure if a repo has no `// =>` examples yet.
-    assert.ok(testable >= 0, `tested ${testable} doc example block(s)`)
+  it('the extractor is still finding the repo doc examples', () => {
+    // WAS: `assert.ok(testable >= 0, ...)`. A count is never negative, so
+    // that assertion could not fail: if the block extractor broke or the doc
+    // paths moved, every doc example would stop running and the suite would
+    // stay green while testing nothing. This repo's README and ts/doc
+    // demonstrably carry 27 assertable blocks today, so requiring most of
+    // them is the honest assertion. Raise the floor when the docs grow.
+    assert.ok(
+      testable >= 20,
+      `only ${testable} doc example block(s) were executed (expected >=20) — ` +
+        `the extractor or the doc paths are broken (files scanned: ${files.length})`,
+    )
   })
 })
