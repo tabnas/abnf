@@ -3,11 +3,19 @@
 #
 # Four other ABNF implementations, kept only for the grammar corpora they
 # ship — 68 `.abnf` files between them, including the collected ABNF of
-# RFC 3261, 3986, 4566, 5322, 7405, JSON, JSONPath, TOML and Dhall. It is a
-# reference corpus, NOT a test suite: nothing in `make test` reads it, so a
-# fresh clone passes with the corpus absent. Run this when you want to
-# re-measure the conformance figures quoted in AGENTS.md ("Conformance, as
-# measured").
+# RFC 3261, 3986, 4566, 5322, 7405, JSON, JSONPath, TOML and Dhall. There is
+# no official IETF conformance suite for RFC 5234, so this is the closest
+# thing: the ABNF that real RFCs publish, as collected by other people.
+#
+# The conformance suites in BOTH runtimes read it (ts/test/conformance.test.js
+# and go/conformance_test.go) and FAIL LOUDLY when it is absent — they never
+# skip. You should not have to run this by hand: `npm test` fetches via the
+# `pretest` hook, `go test` fetches from TestMain, and `make test-go` depends
+# on `make abnf-corpus`.
+#
+# Each file's valid/invalid/fragment class lives in test/corpus/manifest.tsv,
+# decided by an independent third-party ABNF parser — see
+# test/classify-abnf-corpus.sh.
 #
 # The corpus is NOT vendored — it is .gitignore'd. Four separately-licensed
 # upstream repositories have no business in this tree, and committing a

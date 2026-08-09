@@ -1,0 +1,14 @@
+name	append	violates
+no-defined-as	BADRULE "x"	rule = rulename defined-as elements c-nl (RFC 5234 4)
+unterminated-char-val	bad-rule = "x	char-val = DQUOTE *(%x20-21 / %x23-7E) DQUOTE (RFC 5234 4)
+unbalanced-group	bad-rule = ( "a" / "b"	group = "(" *c-wsp alternation *c-wsp ")" (RFC 5234 4)
+stray-close-paren	bad-rule = "a" )	element (RFC 5234 4) - ")" is not an element
+unbalanced-option	bad-rule = [ "a"	option = "[" *c-wsp alternation *c-wsp "]" (RFC 5234 4)
+stray-close-bracket	bad-rule = "a" ]	element (RFC 5234 4) - "]" is not an element
+bad-num-base	bad-rule = %q41	num-val = "%" (bin-val / dec-val / hex-val) (RFC 5234 4)
+empty-hex-val	bad-rule = %x	hex-val = "x" 1*HEXDIG [ ... ] (RFC 5234 4)
+open-hex-range	bad-rule = %x41-	hex-val range needs 1*HEXDIG after "-" (RFC 5234 4)
+dangling-alt	bad-rule = "a" /	alternation = concatenation *(*c-wsp "/" *c-wsp concatenation)
+digit-leading-rulename	9bad-rule = "x"	rulename = ALPHA *(ALPHA / DIGIT / "-") (RFC 5234 2.1)
+bare-repeat	bad-rule = *	repetition = [repeat] element (RFC 5234 3.6)
+unterminated-prose	bad-rule = <unclosed	prose-val = "<" *(%x20-3D / %x3F-7E) ">" (RFC 5234 4)

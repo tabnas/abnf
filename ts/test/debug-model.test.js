@@ -29,7 +29,20 @@ function loadDebug() {
 }
 
 const Debug = loadDebug()
-const skip = Debug ? false : '@tabnas/debug not available (set TABNAS_DEBUG_PATH)'
+
+// @tabnas/debug is a declared devDependency of THIS package, so inside the
+// package it is always resolvable. This used to fall back to `skip`, which
+// meant a missing sibling turned every case below into a green tick for a
+// suite that never ran — the same defect as a swallowed failure. If the
+// sibling really is absent, say so and fail.
+if (!Debug) {
+  throw new Error(
+    '@tabnas/debug could not be resolved, so these tests would silently ' +
+      'vanish. It is a devDependency of this package — run `npm install`, or ' +
+      'clone the sibling repo and set TABNAS_DEBUG_PATH. This must NOT skip.',
+  )
+}
+const skip = false
 
 // A small self-contained ABNF grammar compiled via j.abnf(...), the same
 // way this repo's own tests build a grammar instance (see probe.test.js).

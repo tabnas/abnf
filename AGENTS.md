@@ -144,22 +144,70 @@ Non-obvious things an agent should know before touching `converter.ts`:
 `test/abnf-corpus/` holds four other ABNF implementations (`ex_abnf`,
 `go-abnf`, `node-abnf`, `tree-sitter-abnf`), kept for their grammar
 corpora — 68 `.abnf` files, including the collected ABNF of RFC 3261,
-3986, 4566, 5322, 7405, JSON, JSONPath, TOML and Dhall. It is a
-reference corpus, not a test suite: nothing in `make test` reads it, so
-a fresh clone passes without it. It is **not vendored** — four
-separately-licensed upstream repos do not belong in this tree, and a
-checkout carrying its own `.git` would commit as a mode-160000 gitlink
-and ship an empty directory to everyone. Fetch it, pinned to the commits
-these figures were measured against, with `make abnf-corpus`
-(`test/fetch-abnf-corpus.sh`).
+3986, 4566, 5322, 7405, JSON, JSONPath, TOML and Dhall. There is **no
+official IETF conformance suite for RFC 5234**, so this is the closest
+thing that exists: the ABNF real RFCs publish, as collected by other
+people. It is **not vendored** — four separately-licensed upstream repos
+do not belong in this tree, and a checkout carrying its own `.git` would
+commit as a mode-160000 gitlink and ship an empty directory to everyone.
+It is fetched, pinned to exact commit SHAs, by
+`test/fetch-abnf-corpus.sh`.
 
-Last measured, 66 files finished (2 hit the Paull's
-blow-up above): **58 parse** and **48 compile end to end**. Every one of
-the 8 parse rejections is correct — five are `ex_abnf`'s `!!!` embedded
-Elixir extension rather than ABNF, two are fuzzer artifacts with code
-points above `%x10FFFF`, one is an empty file. Of the 10 compile
-rejections, 3 are the prose-val limit above and 7 are grammar fragments
-that reference rules they never define.
+It is no longer a reference corpus you measure by hand. Both runtimes
+run it as a suite — `ts/test/conformance.test.js` and
+`go/conformance_test.go` — and both **fail, never skip**, if it is
+absent. You should never have to fetch it yourself: `npm test` does so
+through the `pretest` hook, `go test` from `TestMain`, and `make
+test-go` depends on `make abnf-corpus`. CI therefore runs the
+conformance suite on every push.
+
+How it is judged, and by whom:
+
+- Each file's class (`valid` / `invalid` / `fragment`) is in
+  `test/corpus/manifest.tsv` and was decided by an **independent
+  third-party ABNF parser** (npm `abnf` 5.0.4 == `hildjj/node-abnf`),
+  not by hand and not by this implementation. Regenerate with
+  `test/classify-abnf-corpus.sh`. `fragment` files parse but reference
+  rules nothing defines, so they are neither must-accept nor
+  must-reject: excluded from both halves, and **counted**.
+- A valid grammar gets a **value assertion**, not "it didn't throw":
+  every rulename the source declares (RFC 5234 §4) must be reachable in
+  the compiled `GrammarSpec` as a rule, a fixed token or a match token.
+- The must-fail half is widened by the 13 mutation classes in
+  `test/corpus/mutations.tsv`, each appending one line that violates a
+  named RFC 5234 Appendix B production. Every mutant was confirmed
+  rejected by that same third-party oracle before its class was
+  admitted.
+- Every corpus compile runs **in its own process, under a 256 MB / 60 s
+  budget**. The two grammars that hit the Paull's blow-up above
+  (`node-abnf/examples/email.abnf`, `tree-sitter-abnf/examples/dhall.abnf`)
+  exceed it, in both runtimes. That is recorded as a failure to accept —
+  never a pass, never a skip — and it is the only reason those two are
+  left out of the mutation half, since a mutant of a base that never
+  compiles measures nothing.
+- The residual gaps are pinned as an **exact set** in
+  `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
+  as loudly as regressing one; the fix is to delete its row. Never edit a
+  row to silence a failure you did not fix, and never narrow the corpus
+  or loosen an assertion to raise the figure.
+
+Measured on 2026-08-09, at the commit that introduced the suite (run
+`make test` and read the dial the conformance tests print):
+
+|                                   | TS        | Go        |
+| --------------------------------- | --------- | --------- |
+| valid accepted **and** value-correct | 48/52  | 48/52     |
+| invalid rejected                  | 611/661   | 513/661   |
+| excluded fragments                | 5         | 5         |
+| over budget (counted as failures) | 2         | 2         |
+
+The four valid-half gaps are the same files in both runtimes: the two
+budget blow-ups, `go-abnf/testdata/void.abnf` (an empty grammar), and
+`tree-sitter-abnf/examples/elements.abnf` (the deliberate prose-val
+limit above). The invalid-half difference is real and is the largest
+TS/Go divergence in the corpus: Go additionally accepts an unclosed
+group `( "a" / "b"` and an unclosed option `[ "a"`, which TS rejects.
+Both runtimes still accept a dangling alternation `"a" /`.
 
 ## The tabnas engine dependency
 
