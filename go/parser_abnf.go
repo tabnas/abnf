@@ -193,7 +193,7 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 		"@atom-ss": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			r.Node = &abnfElement{
 				Kind: kindTerm, Literal: tokString(r.O[1], r, ctx),
-				CaseSensitive: true, hasCaseSens: true,
+				CaseSensitive: true, HasCaseSens: true,
 			}
 		}),
 		"@atom-si": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
