@@ -29,7 +29,7 @@ import type { GrammarSpec, Rule } from '@tabnas/parser'
 import { util as engineUtil } from '@tabnas/parser'
 
 import {
-  emitGrammarSpec,
+  emitGrammarSpec as bnfEmitGrammarSpec,
   eliminateLeftRecursion,
   refsIn,
 } from '@tabnas/bnf'
@@ -813,9 +813,20 @@ function parseNumericValue(src: string): AbnfElement {
 // Convert ABNF source into a tabnas grammar spec: parse this notation,
 // then hand the IR to the shared compiler. `tag` defaults to 'abnf' so
 // the emitted alts keep their historical group tag.
+// Emit a spec from an already-parsed ABNF grammar. Wraps the shared
+// emitter to keep this package's historical `tag: 'abnf'` default, which
+// consumers use to group and inspect the emitted alts. An explicit tag
+// still wins.
+function emitGrammarSpec(
+  grammar: AbnfGrammar,
+  opts?: AbnfConvertOptions,
+): GrammarSpec {
+  return bnfEmitGrammarSpec(grammar, { ...opts, tag: opts?.tag ?? 'abnf' })
+}
+
+
 function abnf(src: string, opts?: AbnfConvertOptions): GrammarSpec {
-  const grammar = parseAbnf(src)
-  return emitGrammarSpec(grammar, { ...opts, tag: opts?.tag ?? 'abnf' })
+  return emitGrammarSpec(parseAbnf(src), opts)
 }
 
 

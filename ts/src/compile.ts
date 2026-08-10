@@ -33,9 +33,10 @@ import type {
 
 import { abnf as abnfConvert } from './converter'
 
-// Historical names for the shared errors and options.
-const AbnfCompileError = CompileError
-const AbnfActionError = ActionError
+// Historical names for the shared errors and options. These are
+// re-exports, not `const` aliases: a `const` would carry only the value
+// side, so `let e: AbnfCompileError` would stop compiling (TS2749).
+export { CompileError as AbnfCompileError, ActionError as AbnfActionError }
 type AbnfCompileOptions = CompileOptions
 
 
@@ -56,8 +57,6 @@ export {
   attachActions,
   attachActionSlots,
   markListing,
-  AbnfCompileError,
-  AbnfActionError,
 }
 
 export type { AbnfCompileOptions, JsonicOptions, ActionsMap }
