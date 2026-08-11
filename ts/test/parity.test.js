@@ -2,100 +2,71 @@
 'use strict'
 
 // Cross-runtime conformance, driven by the shared `test/spec/*.tsv`
-// fixtures at the repo root — the same convention @tabnas/parser uses (see
-// ../../test/AGENTS.md).
+// fixtures at the repo root (see ../../test/AGENTS.md).
 //
-// `go/parity_test.go` runs the SAME files, so the two implementations cannot
-// drift without one of them going red. That is the check the repo previously
-// lacked: `go/leftrec_test.go` and `go/rfc3986_test.go` mirror the TS suite
-// by hand, which catches nothing when only one side changes.
+// The fixture loader, the escape codec, the `ERROR:` contract and the row
+// loop all come from @tabnas/support, whose Go half `go/parity_test.go`
+// uses to run the SAME files — so the two implementations cannot drift
+// without one of them going red, and neither can the two loaders. That is
+// the check the repo previously lacked: `go/leftrec_test.go` and
+// `go/rfc3986_test.go` mirror the TS suite by hand, which catches nothing
+// when only one side changes.
+//
+// What is left here is only what is specific to abnf: four fixtures, each
+// asserting a different thing about the same `grammar` column.
 
-const { describe, it } = require('node:test')
-const assert = require('node:assert')
-const Fs = require('node:fs')
 const Path = require('node:path')
 
 const { Tabnas } = require('@tabnas/parser')
+const { findSpecDir, makeRunner } = require('@tabnas/support')
+
 const { abnf: abnfPlugin } = require('..')
 const { abnf } = require('../dist/converter.js')
 
-const SPEC = Path.join(__dirname, '..', '..', 'test', 'spec')
+const SPEC = findSpecDir(__dirname)
 
-// Mirrors the loader in @tabnas/parser's ts/test/utility.js: skip the header
-// row, split on tabs, unescape line breaks in every column. ABNF grammars are
-// multi-line, so the `grammar` column relies on `\n` unescaping.
-function unescape(str) {
-  return str.replace(/\\r\\n|\\n|\\r/g, (m) =>
-    m === '\\r\\n' ? '\r\n' : m === '\\n' ? '\n' : '\r')
-}
+// Every fixture's first column is an ABNF grammar, which is multi-line, so
+// it always needs escape-decoding. Where the runner's own input column is
+// something else, it is read explicitly.
+const grammarOf = (row) => row.unescNamed('grammar')
 
-function loadTSV(name) {
-  const file = Path.join(SPEC, name + '.tsv')
-  if (!Fs.existsSync(file)) throw new Error('spec file not found: ' + file)
-  const lines = Fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean)
-  return lines.slice(1).map((line, i) => ({
-    cols: line.split('\t').map(unescape),
-    row: i + 2,
-  }))
-}
-
-// A grammar is the case label; truncated so a failure names it readably.
-const label = (g) => {
-  const one = g.replace(/\n/g, ' ; ')
-  return 60 < one.length ? one.slice(0, 57) + '...' : one
-}
+const run = (file, options) =>
+  makeRunner({ input: 'grammar', expected: 'expected', ...options })
+    .file(Path.join(SPEC, file + '.tsv'))
 
 
-describe('spec: alignment-abnf-ast', () => {
-  for (const { cols, row } of loadTSV('alignment-abnf-ast')) {
-    const [grammar, input, expected] = cols
-    it(`row ${row}: ${label(grammar)}`, () => {
-      const tn = new Tabnas({ plugins: [abnfPlugin] })
-      tn.abnf(grammar)
-      assert.deepStrictEqual(
-        JSON.parse(JSON.stringify(tn.parse(input))), JSON.parse(expected))
-    })
-  }
+// The grammar parses the input into the expected AST.
+run('alignment-abnf-ast', {
+  input: 'input',
+  parse: (input, row) => {
+    const tn = new Tabnas({ plugins: [abnfPlugin] })
+    tn.abnf(grammarOf(row))
+    return tn.parse(input)
+  },
 })
 
 
-describe('spec: alignment-abnf-tokens', () => {
-  for (const { cols, row } of loadTSV('alignment-abnf-tokens')) {
-    const [grammar, expected] = cols
-    it(`row ${row}: ${label(grammar)}`, () => {
-      const spec = abnf(grammar)
-      const fixed = {}
-      for (const [k, v] of Object.entries(spec.options.fixed.token || {})) {
-        fixed[k] = v
-      }
-      assert.deepStrictEqual(fixed, JSON.parse(expected))
-    })
-  }
+// The grammar declares the expected fixed tokens.
+run('alignment-abnf-tokens', {
+  parse: (grammar) => ({ ...abnf(grammar).options.fixed.token }),
 })
 
 
-describe('spec: alignment-abnf-rules', () => {
-  for (const { cols, row } of loadTSV('alignment-abnf-rules')) {
-    const [grammar, expected] = cols
-    it(`row ${row}: ${label(grammar)}`, () => {
-      const spec = abnf(grammar)
-      assert.deepStrictEqual(Object.keys(spec.rule).sort(), JSON.parse(expected))
-    })
-  }
+// The grammar declares the expected rules, by name.
+run('alignment-abnf-rules', {
+  parse: (grammar) => Object.keys(abnf(grammar).rule).sort(),
 })
 
 
-describe('spec: alignment-abnf-errors', () => {
-  for (const { cols, row } of loadTSV('alignment-abnf-errors')) {
-    const [grammar, expected] = cols
-    it(`row ${row}: ${label(grammar)}`, () => {
-      assert.ok(expected.startsWith('ERROR:'), 'expected column must be ERROR:…')
-      const want = expected.slice('ERROR:'.length)
-      assert.throws(
-        () => abnf(grammar),
-        (err) => err.message === want,
-        `expected: ${want}`,
-      )
-    })
-  }
+// The grammar is rejected, with exactly this message.
+run('alignment-abnf-errors', {
+  parse: (grammar) => abnf(grammar),
+
+  // abnf's `ERROR:` cells hold the whole MESSAGE, compared EXACTLY — not a
+  // code, and not a substring. These rejections are the converter's own
+  // diagnostics, several of them paragraphs that name the offending rule
+  // and say what to write instead, and the wording is the thing under
+  // test: a diagnostic that stops explaining itself is the regression
+  // worth catching.
+  matchError: (err, want) => String(err?.message) === want,
 })

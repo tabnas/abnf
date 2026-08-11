@@ -38,9 +38,16 @@ These fixtures are what keeps `go/` honest against `ts/`. The older
 `go/leftrec_test.go` and `go/rfc3986_test.go` mirror the TS suite by
 hand, which catches nothing when only one side changes.
 
-Tab-separated, one case per line, with a header row. Loaders unescape
-`\n`, `\r`, `\r\n` in **every** column — ABNF grammars are multi-line, so
-the `grammar` column depends on it.
+Tab-separated, one case per line, with a header row, read by the shared
+[`@tabnas/support`](https://github.com/tabnas/support) loader — one
+loader, in two languages written to behave identically.
+
+Escapes (`\n`, `\r`, `\t`, `\\`) are decoded in the columns that hold
+SOURCE: `grammar` always, and `input` where there is one. ABNF grammars
+are multi-line, so `grammar` depends on it. The `expected` column is raw:
+it is JSON, which carries its own escape rules and must not be decoded
+twice. No fixture cell here changes meaning under that rule — it was
+checked, cell by cell, against what the old loaders produced.
 
 Because this package compiles a grammar rather than parsing one fixed
 language, the first column is the ABNF source under test, not the input.
@@ -57,11 +64,19 @@ identical across TS and Go.
 
 ## Who runs what
 
-- TypeScript: `ts/test/parity.test.js`.
-- Go: `go/parity_test.go`.
+- TypeScript: `ts/test/parity.test.js` — a `makeRunner(...)` per fixture.
+- Go: `go/parity_test.go` — a `support.Runner{...}` per fixture.
 
-Both resolve `../test/spec` (Go) / `../../test/spec` (TS) and assert the
-same rows.
+One runner per FILE, because each of the four asserts a different thing
+about the same `grammar` column. Everything else — finding `test/spec`,
+reading the file, decoding escapes, the `ERROR:` contract, the
+comparison, the `<file>:<line>` in a failure message — comes from the
+shared package, so the two loaders cannot drift from each other either.
+
+An `ERROR:` row's message is compared EXACTLY, in both runtimes, through
+the runner's `matchError` hook: these diagnostics are paragraphs that
+name the offending rule and say what to write instead, and the wording is
+the thing under test.
 
 ## Rules
 
