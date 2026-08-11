@@ -56,7 +56,7 @@
     "@tabnas/railroad": "*",
     "@types/node": "25.6.0",
     "typescript": "6.0.3",
-    "@tabnas/bnf": "file:../../bnf/ts"
+    "@tabnas/bnf": "*"
   },
   "engines": {
     "node": ">=24"
