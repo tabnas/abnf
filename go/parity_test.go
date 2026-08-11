@@ -3,78 +3,52 @@
 package tabnasabnf
 
 // parity_test.go — cross-runtime conformance, driven by the shared
-// `test/spec/*.tsv` fixtures at the repo root (see ../test/AGENTS.md), the
-// same convention @tabnas/parser uses.
+// `test/spec/*.tsv` fixtures at the repo root (see ../test/AGENTS.md).
 //
-// ts/test/parity.test.js runs the SAME files, so the two implementations
-// cannot drift without one of them going red. That is the check the repo
-// previously lacked: leftrec_test.go and rfc3986_test.go mirror the TS suite
-// by hand, which catches nothing when only one side changes.
+// The fixture loader, the escape codec, the ERROR: contract and the row
+// loop all come from github.com/tabnas/support/go, whose TypeScript half
+// ts/test/parity.test.js uses to run the SAME files — so the two
+// implementations cannot drift without one of them going red, and neither
+// can the two loaders. That is the check the repo previously lacked:
+// leftrec_test.go and rfc3986_test.go mirror the TS suite by hand, which
+// catches nothing when only one side changes.
+//
+// What is left here is only what is specific to abnf: four fixtures, each
+// asserting a different thing about the same `grammar` column.
 
 import (
-	"bufio"
 	"encoding/json"
-	"os"
+	"fmt"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
 	tabnas "github.com/tabnas/parser/go"
+	support "github.com/tabnas/support/go"
 )
 
-type specRow struct {
-	cols   []string
-	lineNo int
-}
-
-// specUnescape mirrors the loader in @tabnas/parser's ts/test/utility.js.
-// ABNF grammars are multi-line, so the `grammar` column relies on `\n`.
-func specUnescape(s string) string {
-	s = strings.ReplaceAll(s, `\r\n`, "\r\n")
-	s = strings.ReplaceAll(s, `\n`, "\n")
-	s = strings.ReplaceAll(s, `\r`, "\r")
-	return s
-}
-
-func loadSpecTSV(t *testing.T, name string) []specRow {
+// specFile runs one fixture. Every fixture's first column is an ABNF
+// grammar, which is multi-line, so it always needs escape-decoding; where
+// the runner's own input column is something else, the grammar is read
+// explicitly with UnescNamed.
+func specFile(t *testing.T, name string, r support.Runner) {
 	t.Helper()
-	path := filepath.Join("..", "test", "spec", name+".tsv")
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("spec file not found: %s: %v", path, err)
-	}
-	defer f.Close()
 
-	var rows []specRow
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		if lineNo == 1 {
-			continue // header
-		}
-		// Strip the CR of a CRLF line: the TS loader splits on /\r?\n/ and
-		// drops it, so keeping it here would feed the runtimes different bytes.
-		line := strings.TrimSuffix(scanner.Text(), "\r")
-		if line == "" {
-			continue
-		}
-		cols := strings.Split(line, "\t")
-		for i := range cols {
-			cols[i] = specUnescape(cols[i])
-		}
-		rows = append(rows, specRow{cols: cols, lineNo: lineNo})
+	dir, err := support.FindSpecDir("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("read %s: %v", path, err)
+
+	if "" == r.InputName {
+		r.InputName = "grammar"
 	}
-	if len(rows) == 0 {
-		t.Fatalf("%s has no cases", path)
+	r.ExpectedName = "expected"
+	r.CaseName = func(row *support.Row, _ string) string {
+		return fmt.Sprintf("row %d: %s", row.Line, specLabel(row.UnescNamed("grammar")))
 	}
-	return rows
+
+	r.File(t, filepath.Join(dir, name+".tsv"))
 }
 
 // specLabel is the grammar, truncated, so a failure names its case readably.
@@ -86,115 +60,103 @@ func specLabel(g string) string {
 	return one
 }
 
-// jsonRound normalises through JSON so Go's map[string]any and the fixture's
-// decoded shape compare structurally.
-func jsonRound(t *testing.T, v any) any {
-	t.Helper()
-	raw, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	return out
-}
-
+// TestSpecAbnfAST: the grammar parses the input into the expected AST.
 func TestSpecAbnfAST(t *testing.T) {
-	for _, row := range loadSpecTSV(t, "alignment-abnf-ast") {
-		grammar, input, expected := row.cols[0], row.cols[1], row.cols[2]
-		t.Run(specLabel(grammar), func(t *testing.T) {
-			spec, err := Abnf(grammar, nil)
+	specFile(t, "alignment-abnf-ast", support.Runner{
+		InputName: "input",
+		ParseRow: func(input string, row *support.Row) (any, error) {
+			spec, err := Abnf(row.UnescNamed("grammar"), nil)
 			if err != nil {
-				t.Fatalf("Abnf: %v", err)
+				return nil, err
 			}
+
 			rh := 4096
-			j := tabnas.Make(tabnas.Options{Rewind: &tabnas.RewindOptions{History: &rh}})
+			j := tabnas.Make(tabnas.Options{
+				Rewind: &tabnas.RewindOptions{History: &rh},
+			})
 			if err := j.Grammar(spec); err != nil {
-				t.Fatalf("Grammar: %v", err)
+				return nil, err
 			}
-			got, err := j.Parse(input)
-			if err != nil {
-				t.Fatalf("Parse(%q): %v", input, err)
-			}
-			var want any
-			if err := json.Unmarshal([]byte(expected), &want); err != nil {
-				t.Fatalf("bad expected JSON on line %d: %v", row.lineNo, err)
-			}
-			if !reflect.DeepEqual(jsonRound(t, got), want) {
-				t.Errorf("parse %q:\n  got  %v\n  want %v", input, jsonRound(t, got), want)
-			}
-		})
-	}
+			return j.Parse(input)
+		},
+		Normalize: jsonFlatten,
+	})
 }
 
+// TestSpecAbnfTokens: the grammar declares the expected fixed tokens.
 func TestSpecAbnfTokens(t *testing.T) {
-	for _, row := range loadSpecTSV(t, "alignment-abnf-tokens") {
-		grammar, expected := row.cols[0], row.cols[1]
-		t.Run(specLabel(grammar), func(t *testing.T) {
+	specFile(t, "alignment-abnf-tokens", support.Runner{
+		Parse: func(grammar string) (any, error) {
 			spec, err := Abnf(grammar, nil)
 			if err != nil {
-				t.Fatalf("Abnf: %v", err)
+				return nil, err
 			}
-			fixed := map[string]string{}
-			if spec.Options != nil && spec.Options.Fixed != nil {
+
+			fixed := map[string]any{}
+			if nil != spec.Options && nil != spec.Options.Fixed {
 				for k, v := range spec.Options.Fixed.Token {
-					if v != nil {
+					if nil != v {
 						fixed[k] = *v
 					}
 				}
 			}
-			want := map[string]string{}
-			if err := json.Unmarshal([]byte(expected), &want); err != nil {
-				t.Fatalf("bad expected JSON on line %d: %v", row.lineNo, err)
-			}
-			if !reflect.DeepEqual(fixed, want) {
-				t.Errorf("fixed tokens:\n  got  %v\n  want %v", fixed, want)
-			}
-		})
-	}
+			return fixed, nil
+		},
+	})
 }
 
+// TestSpecAbnfRules: the grammar declares the expected rules, by name.
 func TestSpecAbnfRules(t *testing.T) {
-	for _, row := range loadSpecTSV(t, "alignment-abnf-rules") {
-		grammar, expected := row.cols[0], row.cols[1]
-		t.Run(specLabel(grammar), func(t *testing.T) {
+	specFile(t, "alignment-abnf-rules", support.Runner{
+		Parse: func(grammar string) (any, error) {
 			spec, err := Abnf(grammar, nil)
 			if err != nil {
-				t.Fatalf("Abnf: %v", err)
+				return nil, err
 			}
-			rules := []string{}
+
+			rules := []any{}
 			for name := range spec.Rule {
 				rules = append(rules, name)
 			}
-			sort.Strings(rules)
-			var want []string
-			if err := json.Unmarshal([]byte(expected), &want); err != nil {
-				t.Fatalf("bad expected JSON on line %d: %v", row.lineNo, err)
-			}
-			if !reflect.DeepEqual(rules, want) {
-				t.Errorf("rule names:\n  got  %v\n  want %v", rules, want)
-			}
-		})
-	}
+			sort.Slice(rules, func(i, j int) bool {
+				return rules[i].(string) < rules[j].(string)
+			})
+			return rules, nil
+		},
+	})
 }
 
+// TestSpecAbnfErrors: the grammar is rejected, with exactly this message.
 func TestSpecAbnfErrors(t *testing.T) {
-	for _, row := range loadSpecTSV(t, "alignment-abnf-errors") {
-		grammar, expected := row.cols[0], row.cols[1]
-		t.Run(specLabel(grammar), func(t *testing.T) {
-			if !strings.HasPrefix(expected, "ERROR:") {
-				t.Fatalf("expected column must be ERROR:… (line %d)", row.lineNo)
-			}
-			want := strings.TrimPrefix(expected, "ERROR:")
-			_, err := Abnf(grammar, nil)
-			if err == nil {
-				t.Fatalf("expected error %q, got none", want)
-			}
-			if err.Error() != want {
-				t.Errorf("message:\n  got  %q\n  want %q", err.Error(), want)
-			}
-		})
+	specFile(t, "alignment-abnf-errors", support.Runner{
+		Parse: func(grammar string) (any, error) {
+			return Abnf(grammar, nil)
+		},
+
+		// abnf's ERROR: cells hold the whole MESSAGE, compared EXACTLY —
+		// not a code, and not a substring. These rejections are the
+		// converter's own diagnostics, several of them paragraphs that name
+		// the offending rule and say what to write instead, and the wording
+		// is the thing under test: a diagnostic that stops explaining
+		// itself is the regression worth catching.
+		MatchError: func(err error, want string, _ *support.Row) bool {
+			return err.Error() == want
+		},
+	})
+}
+
+// jsonFlatten renders a value as JSON and reads it back as plain
+// map/slice/float64/string/bool/nil. A value that will not marshal is
+// returned as it is: the comparison then fails and prints it, which says
+// more than a panic here would.
+func jsonFlatten(v any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return v
 	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return v
+	}
+	return out
 }
