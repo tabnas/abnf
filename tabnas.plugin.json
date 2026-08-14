@@ -1,0 +1,16 @@
+{
+  "$schema": "https://tabnas.dev/schema/plugin.schema.json",
+  "name": "@tabnas/abnf",
+  "go": "github.com/tabnas/abnf/go",
+  "description": "ABNF (RFC 5234) grammar compiler for the tabnas engine.",
+  "base": "@tabnas/bnf",
+  "engine": "@tabnas/parser",
+  "extensions": [
+    ".abnf"
+  ],
+  "specDir": "test/spec",
+  "errorCodes": [],
+  "docs": "https://tabnas.dev/docs/packages",
+  "repository": "https://github.com/tabnas/abnf",
+  "versionSource": "ts/package.json"
+}
