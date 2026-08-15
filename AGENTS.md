@@ -222,8 +222,8 @@ of tabnas uses until `@tabnas/parser` publishes tagged releases):
   runtime dependency.
 - `engines.node` is `">=24"`; npm ≥ 7 auto-installs the peer.
 
-Clone `https://github.com/tabnas/parser` (and `debug`) as siblings of
-this repo and build `parser/ts` before working here. CI does this for you
+Clone the sibling closure CI uses — `parser support bnf debug` — beside
+this repo and build their TS before working here. CI does this for you
 (see below).
 
 ## Build & test
@@ -235,15 +235,22 @@ cd ts && npm install && npm run build   # tsc --build src
 npm test                                # node --enable-source-maps --test test/**/*.test.js
 ```
 
-Top-level `Makefile` targets:
+Top-level `Makefile` targets. The aggregates run **both** runtimes, not
+just TypeScript:
 
 ```bash
-make build        # cd ts && npm run build
-make test         # cd ts && npm test
-make clean        # rm -rf ts/dist ts/dist-test
+make build        # build-ts + build-go
+make test         # test-ts + test-go   (test-go depends on abnf-corpus)
+make clean        # clean-ts + clean-go
+make abnf-corpus  # sh test/fetch-abnf-corpus.sh — a prerequisite of test-go
 make publish-ts   # test, then npm publish --access public
-make reset        # cd ts && npm run reset  (clean + install + build + test)
+make publish-go V=x.y.z
+make tags-go      # list go/v* tags
+make reset        # rebuilds and retests BOTH sides
 ```
+
+The per-side targets (`build-ts`/`build-go`, `test-ts`/`test-go`,
+`clean-ts`/`clean-go`) exist too, for working on one runtime at a time.
 
 The test suite (`ts/test/*.test.js`, run against the built `dist`):
 
@@ -359,9 +366,14 @@ source. Example: `tabnas-abnf 'greet = "hi" / "hello"' --parse 'hi'`.
 
 ## CI
 
-`.github/workflows/build.yml` runs on `ubuntu`/`windows`/`macos` ×
-Node 24. It sets `core.autocrlf false` (CRLF would corrupt fixtures),
-**clones the sibling closure** `parser debug json railroad` from
-`github.com/tabnas`, builds them plus this repo in topo order
-(`parser debug json abnf railroad`), then runs `npm test` in `abnf/ts`.
-Packages are not published to npm, hence the sibling-checkout strategy.
+`.github/workflows/ci.yml` is a thin caller to the org-standard reusable
+workflow `tabnas/.github/.github/workflows/polyglot-ci.yml@main`, passing
+`deps: "parser support bnf debug"` and
+`build-order: "parser support bnf debug abnf"`. The matrix
+(`ubuntu`/`windows`/`macos`), the `core.autocrlf false` setting (CRLF
+would corrupt fixtures) and the sibling-clone strategy live in that
+reusable workflow rather than in this repo.
+
+A **Go job runs too** (`ubuntu`/`macos`): `run-ts` and `run-go` both
+default to `true` and this repo overrides neither.
+`.github/workflows/release.yml` handles releases.
