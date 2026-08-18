@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	bnf "github.com/tabnas/bnf/go"
 	tabnas "github.com/tabnas/parser/go"
 )
 
@@ -122,7 +123,9 @@ func mergeIncrementals(prods []*abnfProduction) ([]*abnfProduction, error) {
 			base.Alts = append(base.Alts, p.Alts...)
 			continue
 		}
-		clean := &abnfProduction{Name: p.Name, Alts: p.Alts}
+		// Rebuilt field by field, so every field carried on a production
+		// has to be listed here or it is silently dropped — Sp included.
+		clean := &abnfProduction{Name: p.Name, Alts: p.Alts, Sp: p.Sp}
 		if p.NodeKind != "" {
 			clean.NodeKind = p.NodeKind
 		}
@@ -162,6 +165,17 @@ func coreRuleList() []*abnfProduction {
 	}
 	for _, p := range raw {
 		p.NodeKind = "core"
+		// Strip source spans. These are parsed from coreRulesABNF, a
+		// string in THIS FILE, so their offsets index a document the user
+		// never wrote — an editor asked to reveal one would jump to a
+		// position in the user's grammar that has nothing to do with
+		// ALPHA or DIGIT. A missing span means "nowhere to point", which
+		// is exactly right for a rule the library supplied; a wrong one
+		// is worse than none.
+		//
+		// A reference TO a core rule still carries a span: that reference
+		// is in the user's source, and it is what a diagnostic points at.
+		stripSpans(p)
 	}
 	return raw
 }
@@ -209,7 +223,8 @@ func withCoreRules(user []*abnfProduction) []*abnfProduction {
 
 // ---- numeric value -------------------------------------------------
 
-func parseNumericValue(src string) *abnfElement {
+func parseNumericValue(src string, tkn *tabnas.Token) *abnfElement {
+	sp := spanOf(tkn)
 	base := strings.ToLower(string(src[1]))
 	radix := 16
 	if base == "d" {
@@ -258,7 +273,7 @@ func parseNumericValue(src string) *abnfElement {
 		hi := codePoint(parts[1])
 		if lo == hi {
 			return &abnfElement{
-				Kind: kindTerm, Literal: string(rune(lo)), NumErr: NumErr}
+				Kind: kindTerm, Literal: string(rune(lo)), NumErr: NumErr, Sp: sp}
 		}
 		toEsc := func(n int64) string {
 			return fmt.Sprintf("\\x{%04x}", n)
@@ -268,6 +283,7 @@ func parseNumericValue(src string) *abnfElement {
 			Pattern: "[" + toEsc(lo) + "-" + toEsc(hi) + "]",
 			Flags:   "",
 			NumErr:  NumErr,
+			Sp:      sp,
 		}
 	}
 
@@ -276,5 +292,59 @@ func parseNumericValue(src string) *abnfElement {
 	for _, n := range parts {
 		sb.WriteRune(rune(codePoint(n)))
 	}
-	return &abnfElement{Kind: kindTerm, Literal: sb.String(), NumErr: NumErr}
+	return &abnfElement{Kind: kindTerm, Literal: sb.String(), NumErr: NumErr, Sp: sp}
+}
+
+// spanOf is the source span of a token, for the IR (bnf.SrcSpan). Every
+// field is copied straight off the token: the compiler stores whatever
+// units the front-end's own engine tokens use, precisely so that no
+// arithmetic — and so no off-by-one — happens at this boundary. Go
+// tokens carry no length, so the end comes from the matched source.
+func spanOf(tkn *tabnas.Token) *bnf.SrcSpan {
+	if tkn == nil {
+		return nil
+	}
+	return &bnf.SrcSpan{
+		S: tkn.SI, E: tkn.SI + len(tkn.Src), R: tkn.RI, C: tkn.CI,
+	}
+}
+
+// spanTo is one span covering two tokens — a group runs from its `(` to
+// its `)`, a bracketed optional from `[` to `]`. Falls back to whichever
+// end is known when the other is not.
+func spanTo(from, to *tabnas.Token) *bnf.SrcSpan {
+	a := spanOf(from)
+	b := spanOf(to)
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &bnf.SrcSpan{S: a.S, E: b.E, R: a.R, C: a.C}
+}
+
+// stripSpans removes every span from a production and everything under
+// it. Used for the RFC 5234 core rules, which are parsed from a string
+// in this file rather than from the user's grammar.
+func stripSpans(prod *abnfProduction) {
+	prod.Sp = nil
+	var walk func(el *abnfElement)
+	walk = func(el *abnfElement) {
+		if el == nil {
+			return
+		}
+		el.Sp = nil
+		walk(el.Inner)
+		for _, alt := range el.Alts {
+			for _, e := range alt {
+				walk(e)
+			}
+		}
+	}
+	for _, alt := range prod.Alts {
+		for _, el := range alt {
+			walk(el)
+		}
+	}
 }

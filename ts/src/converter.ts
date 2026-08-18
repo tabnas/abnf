@@ -36,6 +36,7 @@ import {
 
 import type {
   ConvertOptions,
+  SrcSpan,
   Element,
   Sequence,
   Production,
@@ -48,6 +49,44 @@ type AbnfElement = Element
 type AbnfSequence = Sequence
 type AbnfProduction = Production
 type AbnfGrammar = Grammar
+
+
+// Source span of a token, for the IR (`@tabnas/bnf` SrcSpan). Every
+// field is copied straight off the token: the compiler stores whatever
+// units the front-end's own engine tokens use, precisely so that no
+// arithmetic — and so no off-by-one — happens at this boundary.
+function spanOf(tkn: any): SrcSpan | undefined {
+  if (null == tkn || null == tkn.sI) return undefined
+  const len = null != tkn.len ? tkn.len : (tkn.src ? String(tkn.src).length : 0)
+  return { s: tkn.sI, e: tkn.sI + len, r: tkn.rI, c: tkn.cI }
+}
+
+
+// Remove every span from a production and everything under it. Used for
+// the RFC 5234 core rules, which are parsed from a string in this file
+// rather than from the user's grammar.
+function stripSpans(prod: AbnfProduction): void {
+  delete (prod as any).sp
+  const walk = (el: any): void => {
+    if (null == el || 'object' !== typeof el) return
+    delete el.sp
+    if (el.inner) walk(el.inner)
+    if (el.alts) for (const alt of el.alts) for (const e of alt) walk(e)
+  }
+  for (const alt of prod.alts) for (const el of alt) walk(el)
+}
+
+
+// One span covering two tokens — a group runs from its `(` to its `)`,
+// a bracketed optional from `[` to `]`. Falls back to whichever end is
+// known when the other is not.
+function spanTo(from: any, to: any): SrcSpan | undefined {
+  const a = spanOf(from)
+  const b = spanOf(to)
+  if (null == a) return b
+  if (null == b) return a
+  return { s: a.s, e: b.e, r: a.r, c: a.c }
+}
 
 
 // Declarative definition of the ABNF grammar itself, expressed as
@@ -119,6 +158,7 @@ const abnfRules: Record<
         s: '#TX #DEF',
         a: (r: Rule) => {
           r.u.name = r.o[0].val
+          r.u.nameTkn = r.o[0]
           r.u.incremental = false
         },
         p: 'alts',
@@ -132,6 +172,7 @@ const abnfRules: Record<
         s: '#PV #DEF',
         a: (r: Rule) => {
           r.u.name = (r.o[0].src as string)
+          r.u.nameTkn = r.o[0]
         },
         p: 'alts',
       },
@@ -141,6 +182,7 @@ const abnfRules: Record<
         s: '#TX #DEFA',
         a: (r: Rule) => {
           r.u.name = r.o[0].val
+          r.u.nameTkn = r.o[0]
           r.u.incremental = true
         },
         p: 'alts',
@@ -157,7 +199,14 @@ const abnfRules: Record<
     ],
     bc: (r) => {
       if (r.child && r.child.node !== undefined) {
-        const prod: any = { name: r.u.name, alts: r.child.node }
+        const prod: any = {
+          name: r.u.name,
+          alts: r.child.node,
+          // The name, not the body: that is what an outline entry,
+          // go-to-definition and a whole-rule diagnostic want, and an
+          // ABNF body can run over many folded lines.
+          sp: spanOf(r.u.nameTkn),
+        }
         if (r.u.incremental) prod.incremental = true
         r.node.push(prod)
       }
@@ -370,6 +419,7 @@ const abnfRules: Record<
             kind: 'term',
             literal: r.o[1].val,
             caseSensitive: true,
+            sp: spanTo(r.o[0], r.o[1]),
           }
         },
       },
@@ -378,20 +428,22 @@ const abnfRules: Record<
       {
         s: '#SI #ST',
         a: (r: Rule) => {
-          r.node = { kind: 'term', literal: r.o[1].val }
+          r.node = {
+            kind: 'term', literal: r.o[1].val, sp: spanTo(r.o[0], r.o[1]),
+          }
         },
       },
       // Bare quoted string — case-insensitive per ABNF default.
       {
         s: '#ST',
         a: (r: Rule) => {
-          r.node = { kind: 'term', literal: r.o[0].val }
+          r.node = { kind: 'term', literal: r.o[0].val, sp: spanOf(r.o[0]) }
         },
       },
       {
         s: '#NV',
         a: (r: Rule) => {
-          r.node = parseNumericValue(r.o[0].src as string)
+          r.node = parseNumericValue(r.o[0].src as string, r.o[0])
         },
       },
       // Prose terminal `<free text>` — carried through as-is; the
@@ -400,23 +452,25 @@ const abnfRules: Record<
         s: '#PV',
         a: (r: Rule) => {
           const src = r.o[0].src as string
-          r.node = { kind: 'prose', text: src.slice(1, -1) }
+          r.node = {
+            kind: 'prose', text: src.slice(1, -1), sp: spanOf(r.o[0]),
+          }
         },
       },
       {
         s: '#TX',
         a: (r: Rule) => {
-          r.node = { kind: 'ref', name: r.o[0].val }
+          r.node = { kind: 'ref', name: r.o[0].val, sp: spanOf(r.o[0]) }
         },
       },
       {
         s: '#LP',
-        a: (r: Rule) => { r.u.groupKind = 'group' },
+        a: (r: Rule) => { r.u.groupKind = 'group'; r.u.open = r.o[0] },
         p: 'alts',
       },
       {
         s: '#OB',
-        a: (r: Rule) => { r.u.groupKind = 'opt' },
+        a: (r: Rule) => { r.u.groupKind = 'opt'; r.u.open = r.o[0] },
         p: 'alts',
       },
     ],
@@ -425,16 +479,20 @@ const abnfRules: Record<
         s: '#RP',
         c: (r: Rule) => r.u.groupKind === 'group',
         a: (r: Rule) => {
-          r.node = { kind: 'group', alts: r.child.node }
+          r.node = {
+            kind: 'group', alts: r.child.node, sp: spanTo(r.u.open, r.c0),
+          }
         },
       },
       {
         s: '#CB',
         c: (r: Rule) => r.u.groupKind === 'opt',
         a: (r: Rule) => {
+          const bracket = spanTo(r.u.open, r.c0)
           r.node = {
             kind: 'opt',
-            inner: { kind: 'group', alts: r.child.node },
+            inner: { kind: 'group', alts: r.child.node, sp: bracket },
+            sp: bracket,
           }
         },
       },
@@ -676,6 +734,22 @@ function getCoreRules(): Map<string, AbnfProduction> {
   // character-class bricks, not structural nodes users want to see
   // one-per-matched-character.
   for (const p of raw) p.nodeKind = 'core'
+
+  // Strip source spans from the core rules. They are parsed from
+  // CORE_RULES_ABNF, a string in THIS FILE, so their spans are offsets
+  // into a document the user never wrote — an editor asked to reveal
+  // one would jump to a position in the user's grammar that has nothing
+  // to do with ALPHA or DIGIT. A missing span means "nowhere to point",
+  // which is exactly right for a rule the library supplied; a wrong one
+  // is worse than none.
+  //
+  // It also removes an aliasing hazard: this map is module-cached and
+  // handed out BY REFERENCE to every grammar compiled in the process,
+  // so any position on it would be shared across unrelated documents.
+  //
+  // A reference TO a core rule still carries a span — that reference is
+  // in the user's source, and it is what a diagnostic points at.
+  for (const p of raw) stripSpans(p)
   _coreRules = new Map(raw.map((p) => [p.name, p]))
   return _coreRules
 }
@@ -735,7 +809,9 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
     }
     // Strip the (absent) flag on a cleanly-written production so
     // downstream code never sees it.
-    const clean: AbnfProduction = { name: p.name, alts: p.alts }
+    // Rebuilt field by field, so every field carried on a production
+    // has to be listed here or it is silently dropped — `sp` included.
+    const clean: AbnfProduction = { name: p.name, alts: p.alts, sp: p.sp }
     if (p.nodeKind) clean.nodeKind = p.nodeKind
     out.push(clean)
     byName.set(p.name, clean)
@@ -754,7 +830,8 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
 // Hex is case-insensitive; decimal and binary accept only digits
 // in their respective ranges. Range endpoints must be the same
 // base as the prefix (RFC 5234 doesn't allow mixing).
-function parseNumericValue(src: string): AbnfElement {
+function parseNumericValue(src: string, tkn?: any): AbnfElement {
+  const sp = spanOf(tkn)
   const base = src[1].toLowerCase()
   const radix = base === 'x' ? 16 : base === 'd' ? 10 : 2
   const body = src.slice(2)
@@ -780,7 +857,7 @@ function parseNumericValue(src: string): AbnfElement {
     const lo = codePoint(loStr)
     const hi = codePoint(hiStr)
     if (lo === hi) {
-      return { kind: 'term', literal: String.fromCodePoint(lo) }
+      return { kind: 'term', literal: String.fromCodePoint(lo), sp }
     }
     // `\uXXXX` only reaches U+FFFF: `%xE000-10FFFF` (JSONPath, TOML)
     // became `[-ჿff]`, which JS reads as the range E000–10FF
@@ -798,12 +875,13 @@ function parseNumericValue(src: string): AbnfElement {
       kind: 'regex',
       pattern: '[' + toEsc(lo) + '-' + toEsc(hi) + ']',
       flags: astral ? 'u' : '',
+      sp,
     }
   }
 
   const parts = body.split('.')
   const chars = parts.map((n) => String.fromCodePoint(codePoint(n)))
-  return { kind: 'term', literal: chars.join('') }
+  return { kind: 'term', literal: chars.join(''), sp }
 }
 
 
