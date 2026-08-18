@@ -62,6 +62,20 @@ function spanOf(tkn: any): SrcSpan | undefined {
 }
 
 
+// Deep-copy a production so a caller cannot reach the shared original.
+// Elements are copied too: they are what a consumer would most likely
+// annotate, and a shallow copy would leave them aliased.
+function cloneProduction(prod: AbnfProduction): AbnfProduction {
+  const el = (e: any): any => {
+    const o: any = { ...e }
+    if (e.inner) o.inner = el(e.inner)
+    if (e.alts) o.alts = e.alts.map((alt: any[]) => alt.map(el))
+    return o
+  }
+  return { ...prod, alts: prod.alts.map((alt) => alt.map(el)) }
+}
+
+
 // Remove every span from a production and everything under it. Used for
 // the RFC 5234 core rules, which are parsed from a string in this file
 // rather than from the user's grammar.
@@ -780,8 +794,18 @@ function withCoreRules(user: AbnfProduction[]): AbnfProduction[] {
       if (defined.has(name)) continue
       if (!needed.has(name)) continue
       defined.add(name)
-      out.push(prod)
-      scan([prod])
+      // A COPY, not the cached production. `getCoreRules` hands back a
+      // module-level map, so pushing `prod` itself would put the same
+      // object into every grammar parsed in this process — and
+      // `parseAbnf` returns it to the caller. A consumer that annotated
+      // an ALPHA node (writing a span onto it, say) would then see that
+      // annotation on unrelated documents, and the "core rules carry no
+      // span" guarantee would hold only until someone broke it for
+      // everyone. Cloning is cheap: these are a dozen small
+      // character-class rules, and only the referenced ones are added.
+      const copy = cloneProduction(prod)
+      out.push(copy)
+      scan([copy])
       added = true
     }
   }

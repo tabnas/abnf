@@ -1265,6 +1265,26 @@ describe('source spans', () => {
     assert.equal(text(prod('ref').alts[0][0].sp), 'ALPHA')
   })
 
+  it('hands out a fresh copy of each core rule', () => {
+    // `getCoreRules` caches its parse at module level, so without a copy
+    // every grammar in the process would share one ALPHA object — and
+    // `parseAbnf` returns it. A consumer annotating that node would see
+    // the annotation on unrelated documents, and the "core rules carry
+    // no span" guarantee above would hold only until someone broke it
+    // for everyone.
+    const first = parseAbnf('doc = ALPHA')
+    const alphaFirst = first.productions.find((p) => 'ALPHA' === p.name)
+    alphaFirst.sp = { s: 999, e: 1000, r: 42, c: 1 }
+    alphaFirst.alts[0][0].sp = { s: 999, e: 1000, r: 42, c: 1 }
+
+    const second = parseAbnf('doc = ALPHA')
+    const alphaSecond = second.productions.find((p) => 'ALPHA' === p.name)
+    assert.notEqual(alphaFirst, alphaSecond, 'core rules must not be shared')
+    assert.equal(alphaSecond.sp, undefined, 'a mutation leaked between parses')
+    assert.equal(alphaSecond.alts[0][0].sp, undefined,
+      'an element mutation leaked between parses')
+  })
+
   it('reports a row and column that agree with the offset', () => {
     for (const p of g().productions) {
       if (null == p.sp) continue  // core rules, deliberately
