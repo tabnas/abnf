@@ -57,9 +57,19 @@ describe('abnf', () => {
       assert.deepEqual(stripActions(spec.rule.__start__.open), [
         { p: 'greet', g: 'abnf' },
       ])
-      assert.deepEqual(stripActions(spec.rule.__start__.close), [
-        { s: '#ZZ', g: 'abnf' },
-      ])
+      // The wrapper closes by consuming end-of-source. `g` carries the
+      // notation tag, and the compiler may additionally stamp a recovery
+      // sync group on this alternate — it is the one end-of-source
+      // anchor every generated grammar has. So check the tag list by
+      // membership, and deep-compare EVERYTHING ELSE: an added tag
+      // passes, but an added parser-control field (`p`, `r`, `b` — the
+      // wrapper no longer merely consuming #ZZ) still fails.
+      const startClose = stripActions(spec.rule.__start__.close)
+      assert.equal(startClose.length, 1)
+      const { g: startCloseTags, ...startCloseRest } = startClose[0]
+      assert.deepEqual(startCloseRest, { s: '#ZZ' })
+      assert.ok(startCloseTags.split(',').includes('abnf'),
+        `__start__ close tags ${startCloseTags} should include 'abnf'`)
       // Case-insensitive ABNF strings emit as match.token regexes
       // (with the `i` flag), not fixed tokens.
       assert.deepEqual(spec.options.fixed.token, {})
