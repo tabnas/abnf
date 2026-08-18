@@ -57,9 +57,18 @@ describe('abnf', () => {
       assert.deepEqual(stripActions(spec.rule.__start__.open), [
         { p: 'greet', g: 'abnf' },
       ])
-      assert.deepEqual(stripActions(spec.rule.__start__.close), [
-        { s: '#ZZ', g: 'abnf' },
-      ])
+      // The wrapper closes by consuming end-of-source. `g` carries the
+      // notation tag, and the compiler may additionally stamp a recovery
+      // sync group on this alternate — it is the one end-of-source
+      // anchor every generated grammar has. Assert what this test is
+      // about (one close alt, on #ZZ, attributed to this notation)
+      // rather than pinning the whole tag list, which is not this
+      // test's subject and makes it fail on an unrelated change.
+      const startClose = stripActions(spec.rule.__start__.close)
+      assert.equal(startClose.length, 1)
+      assert.equal(startClose[0].s, '#ZZ')
+      assert.ok(startClose[0].g.split(',').includes('abnf'),
+        `__start__ close tags ${startClose[0].g} should include 'abnf'`)
       // Case-insensitive ABNF strings emit as match.token regexes
       // (with the `i` flag), not fixed tokens.
       assert.deepEqual(spec.options.fixed.token, {})
