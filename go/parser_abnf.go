@@ -80,9 +80,15 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 		"@prod-bc": tabnas.StateAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			if r.Child != nil && r.Child != tabnas.NoRule && r.Child.Node != nil {
 				if altsPtr, ok := r.Child.Node.(*[]abnfSequence); ok {
+					nameTkn, _ := r.EnsureU()["nameTkn"].(*tabnas.Token)
 					prod := &abnfProduction{
 						Name: asStr(r.EnsureU()["name"]),
 						Alts: *altsPtr,
+						// The name, not the body: that is what an outline
+						// entry, go-to-definition and a whole-rule
+						// diagnostic want, and an ABNF body can run over
+						// many folded lines.
+						Sp: spanOf(nameTkn),
 					}
 					if b, _ := r.EnsureU()["incremental"].(bool); b {
 						prod.Incremental = true
@@ -95,6 +101,7 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 		}),
 		"@prod-name": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			r.EnsureU()["name"] = tokString(r.O[0], r, ctx)
+			r.EnsureU()["nameTkn"] = r.O[0]
 			r.EnsureU()["incremental"] = false
 		}),
 		// `<all> = …`: the production name is the prose token's raw source,
@@ -102,10 +109,12 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 		// rulename. Mirrors the TS `#PV #DEF` prod alternative.
 		"@prod-name-prose": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.EnsureU()["name"] = r.O[0].Src
+			r.EnsureU()["nameTkn"] = r.O[0]
 			r.EnsureU()["incremental"] = false
 		}),
 		"@prod-name-inc": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			r.EnsureU()["name"] = tokString(r.O[0], r, ctx)
+			r.EnsureU()["nameTkn"] = r.O[0]
 			r.EnsureU()["incremental"] = true
 		}),
 
@@ -194,47 +203,66 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			r.Node = &abnfElement{
 				Kind: kindTerm, Literal: tokString(r.O[1], r, ctx),
 				CaseSensitive: true, HasCaseSens: true,
+				Sp: spanTo(r.O[0], r.O[1]),
 			}
 		}),
 		"@atom-si": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &abnfElement{Kind: kindTerm, Literal: tokString(r.O[1], r, ctx)}
+			r.Node = &abnfElement{
+				Kind: kindTerm, Literal: tokString(r.O[1], r, ctx),
+				Sp: spanTo(r.O[0], r.O[1]),
+			}
 		}),
 		"@atom-st": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &abnfElement{Kind: kindTerm, Literal: tokString(r.O[0], r, ctx)}
+			r.Node = &abnfElement{
+				Kind: kindTerm, Literal: tokString(r.O[0], r, ctx),
+				Sp: spanOf(r.O[0]),
+			}
 		}),
 		"@atom-nv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.Node = parseNumericValue(r.O[0].Src)
+			r.Node = parseNumericValue(r.O[0].Src, r.O[0])
 		}),
 		"@atom-pv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			// Strip the surrounding `<` and `>`; the resolveProseTerminals
 			// pass decides what the prose means.
 			src := r.O[0].Src
-			r.Node = &abnfElement{Kind: kindProse, Text: src[1 : len(src)-1]}
+			r.Node = &abnfElement{
+				Kind: kindProse, Text: src[1 : len(src)-1], Sp: spanOf(r.O[0]),
+			}
 		}),
 		"@atom-tx": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			r.Node = &abnfElement{Kind: kindRef, Name: tokString(r.O[0], r, ctx)}
+			r.Node = &abnfElement{
+				Kind: kindRef, Name: tokString(r.O[0], r, ctx), Sp: spanOf(r.O[0]),
+			}
 		}),
 		"@atom-lp": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.EnsureU()["groupKind"] = "group"
+			r.EnsureU()["open"] = r.O[0]
 		}),
 		"@atom-ob": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			r.EnsureU()["groupKind"] = "opt"
+			r.EnsureU()["open"] = r.O[0]
 		}),
 		"@atom-group-c": tabnas.AltCond(func(r *tabnas.Rule, _ *tabnas.Context) bool {
 			return r.EnsureU()["groupKind"] == "group"
 		}),
 		"@atom-group-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			alts := childAlts(r)
-			r.Node = &abnfElement{Kind: kindGroup, Alts: alts}
+			open, _ := r.EnsureU()["open"].(*tabnas.Token)
+			r.Node = &abnfElement{
+				Kind: kindGroup, Alts: alts, Sp: spanTo(open, closeTok(r)),
+			}
 		}),
 		"@atom-opt-c": tabnas.AltCond(func(r *tabnas.Rule, _ *tabnas.Context) bool {
 			return r.EnsureU()["groupKind"] == "opt"
 		}),
 		"@atom-opt-close": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			alts := childAlts(r)
+			open, _ := r.EnsureU()["open"].(*tabnas.Token)
+			bracket := spanTo(open, closeTok(r))
 			r.Node = &abnfElement{
 				Kind:  kindOpt,
-				Inner: &abnfElement{Kind: kindGroup, Alts: alts},
+				Inner: &abnfElement{Kind: kindGroup, Alts: alts, Sp: bracket},
+				Sp:    bracket,
 			}
 		}),
 	}
@@ -614,3 +642,13 @@ func atoi(s string) int {
 }
 
 var _ = fmt.Sprintf
+
+// closeTok is the first token matched in a rule's CLOSE phase — the `)`
+// of a group, the `]` of a bracketed optional. Returns nil when the
+// rule closed without matching one, so a span falls back to its opener.
+func closeTok(r *tabnas.Rule) *tabnas.Token {
+	if 0 < r.CN {
+		return r.C[0]
+	}
+	return nil
+}

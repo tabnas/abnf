@@ -19,6 +19,24 @@ const {
 // ABNF inputs.
 const tn = new Tabnas({ plugins: [abnfPlugin] })
 const J = (src, meta, ctx) => tn.parse(src, meta, ctx)
+
+// Strip source spans from an IR value. The `parseAbnf` tests below are
+// about the SHAPE the front-end builds, not about where in the source
+// each node came from — spans are asserted on their own, by slicing the
+// source and comparing text. Stripping them here keeps a structural
+// assertion from failing on a position it never meant to pin.
+const noSpans = (v) => {
+  if (Array.isArray(v)) return v.map(noSpans)
+  if (v && 'object' === typeof v) {
+    const o = {}
+    for (const k of Object.keys(v)) {
+      if ('sp' === k) continue
+      o[k] = noSpans(v[k])
+    }
+    return o
+  }
+  return v
+}
 const AbnfCli = require('../dist/bin/tabnas-abnf-cli')
 
 
@@ -267,7 +285,7 @@ describe('abnf', () => {
 
     it('parses a single terminal', () => {
       const g = parseAbnf('g = "x"')
-      assert.deepEqual(g, {
+      assert.deepEqual(noSpans(g), {
         productions: [
           { name: 'g', alts: [[{ kind: 'term', literal: 'x' }]] },
         ],
@@ -277,7 +295,7 @@ describe('abnf', () => {
 
     it('parses alternation', () => {
       const g = parseAbnf('g = "a" / "b"')
-      assert.deepEqual(g.productions[0].alts, [
+      assert.deepEqual(noSpans(g.productions[0].alts), [
         [{ kind: 'term', literal: 'a' }],
         [{ kind: 'term', literal: 'b' }],
       ])
@@ -286,7 +304,7 @@ describe('abnf', () => {
 
     it('parses sequences and references (angle and bare)', () => {
       const g = parseAbnf('a = foo bar\nfoo = "x"\nbar = "y"')
-      assert.deepEqual(g.productions[0].alts, [
+      assert.deepEqual(noSpans(g.productions[0].alts), [
         [
           { kind: 'ref', name: 'foo' },
           { kind: 'ref', name: 'bar' },
@@ -298,7 +316,7 @@ describe('abnf', () => {
 
     it('preserves empty alternatives', () => {
       const g = parseAbnf('x = / "y"')
-      assert.deepEqual(g.productions[0].alts, [
+      assert.deepEqual(noSpans(g.productions[0].alts), [
         [],
         [{ kind: 'term', literal: 'y' }],
       ])
@@ -307,7 +325,7 @@ describe('abnf', () => {
 
     it('ignores semicolon comments', () => {
       const g = parseAbnf('; top comment\ngreet = "hi" ; trailing\n')
-      assert.deepEqual(g.productions[0].alts, [
+      assert.deepEqual(noSpans(g.productions[0].alts), [
         [{ kind: 'term', literal: 'hi' }],
       ])
     })
@@ -323,7 +341,7 @@ describe('abnf', () => {
 
     it('parses EBNF postfix operators', () => {
       const g = parseAbnf('g = [ "a" ] *"b" 1*"c"')
-      assert.deepEqual(g.productions[0].alts[0], [
+      assert.deepEqual(noSpans(g.productions[0].alts[0]), [
         // Optional is desugared as opt(group([[term-a]])).
         {
           kind: 'opt',
@@ -1163,3 +1181,147 @@ function makeConsole() {
     error: (...rest) => d.err.push(rest),
   }
 }
+
+
+// Source spans (plan C5). The front-end records where each element and
+// production came from, so a compile failure carries a range and a tool
+// can underline the offending text.
+//
+// Every assertion slices the ORIGINAL SOURCE with the span and compares
+// the text. That is the only check worth making: an offset pair that is
+// self-consistent but points at the wrong characters would satisfy any
+// assertion about the numbers themselves.
+describe('source spans', () => {
+  const SRC = [
+    'doc  = item',
+    'item = "hi" / %s"Yo" / ref / (alt / two) / [opt] / %x41-5A / <free>',
+    'ref  = ALPHA',
+    'alt  = "a"',
+    'two  = "b"',
+    'opt  = "c"',
+  ].join('\n')
+
+  const g = () => parseAbnf(SRC)
+  const text = (sp) => {
+    assert.ok(sp, 'expected a span')
+    return SRC.slice(sp.s, sp.e)
+  }
+  const prod = (name) => {
+    const p = g().productions.find((x) => x.name === name)
+    assert.ok(p, `no production ${name}`)
+    return p
+  }
+  const item = () => prod('item').alts
+
+  it('spans a production with its name', () => {
+    assert.equal(text(prod('item').sp), 'item')
+    assert.equal(prod('item').sp.r, 2, 'row is 1-based, as the engine reports')
+    assert.equal(prod('item').sp.c, 1)
+  })
+
+  it('spans string terminals, including any %s / %i prefix', () => {
+    assert.equal(text(item()[0][0].sp), '"hi"')
+    assert.equal(text(item()[1][0].sp), '%s"Yo"')
+  })
+
+  it('spans a rule reference, a numeric value and a prose terminal', () => {
+    assert.equal(text(item()[2][0].sp), 'ref')
+    assert.equal(text(item()[5][0].sp), '%x41-5A')
+    assert.equal(text(item()[6][0].sp), '<free>')
+  })
+
+  it('spans a group and a bracketed optional across their delimiters', () => {
+    const group = item()[3][0]
+    assert.equal(group.kind, 'group')
+    assert.equal(text(group.sp), '(alt / two)')
+    assert.equal(text(group.alts[0][0].sp), 'alt')
+    assert.equal(text(group.alts[1][0].sp), 'two')
+
+    const optional = item()[4][0]
+    assert.equal(optional.kind, 'opt')
+    assert.equal(text(optional.sp), '[opt]')
+    assert.equal(text(optional.inner.sp), '[opt]')
+  })
+
+  it('gives the RFC 5234 core rules NO span', () => {
+    // They are parsed from a string inside the converter, not from the
+    // user's grammar, so any offset would point into a document the
+    // user never wrote. A missing span means "nowhere to point", which
+    // is right; a wrong one is worse than none. The core-rule map is
+    // also module-cached and shared by reference across every grammar
+    // compiled in the process, so a position on it would leak between
+    // unrelated documents.
+    const alpha = g().productions.find((p) => 'ALPHA' === p.name)
+    assert.ok(alpha, 'ALPHA should have been pulled in')
+    assert.equal(alpha.nodeKind, 'core')
+    assert.equal(alpha.sp, undefined, 'a core rule must carry no span')
+    for (const alt of alpha.alts) {
+      for (const el of alt) {
+        assert.equal(el.sp, undefined, 'core rule elements must carry none')
+      }
+    }
+    // ...but the user's REFERENCE to it does have one: that reference
+    // is in their source, and it is what a diagnostic points at.
+    assert.equal(text(prod('ref').alts[0][0].sp), 'ALPHA')
+  })
+
+  it('hands out a fresh copy of each core rule', () => {
+    // `getCoreRules` caches its parse at module level, so without a copy
+    // every grammar in the process would share one ALPHA object — and
+    // `parseAbnf` returns it. A consumer annotating that node would see
+    // the annotation on unrelated documents, and the "core rules carry
+    // no span" guarantee above would hold only until someone broke it
+    // for everyone.
+    const first = parseAbnf('doc = ALPHA')
+    const alphaFirst = first.productions.find((p) => 'ALPHA' === p.name)
+    alphaFirst.sp = { s: 999, e: 1000, r: 42, c: 1 }
+    alphaFirst.alts[0][0].sp = { s: 999, e: 1000, r: 42, c: 1 }
+
+    const second = parseAbnf('doc = ALPHA')
+    const alphaSecond = second.productions.find((p) => 'ALPHA' === p.name)
+    assert.notEqual(alphaFirst, alphaSecond, 'core rules must not be shared')
+    assert.equal(alphaSecond.sp, undefined, 'a mutation leaked between parses')
+    assert.equal(alphaSecond.alts[0][0].sp, undefined,
+      'an element mutation leaked between parses')
+  })
+
+  it('reports a row and column that agree with the offset', () => {
+    for (const p of g().productions) {
+      if (null == p.sp) continue  // core rules, deliberately
+      const before = SRC.slice(0, p.sp.s)
+      const row = before.split('\n').length
+      const col = p.sp.s - (before.lastIndexOf('\n') + 1) + 1
+      assert.equal(p.sp.r, row, `${p.name}: row disagrees with offset`)
+      assert.equal(p.sp.c, col, `${p.name}: column disagrees with offset`)
+    }
+  })
+
+  it('gives a compile error a range that underlines the offender', () => {
+    const src = 'doc = item\nitem = missing'
+    assert.throws(() => abnf(src), (e) => {
+      const sp = e.sp || (e.cause && e.cause.sp)
+      assert.ok(sp, 'compile error carried no range')
+      assert.equal(src.slice(sp.s, sp.e), 'missing')
+      assert.equal(sp.r, 2)
+      return true
+    })
+  })
+
+  it('ranges a prose-in-expression failure too', () => {
+    // SRC's `<free>` alternative is itself a compile error — prose may
+    // only stand alone. It is one of the five failures given a span, so
+    // it should point at the prose rather than at the whole rule.
+    assert.throws(() => abnf(SRC), (e) => {
+      const sp = e.sp || (e.cause && e.cause.sp)
+      assert.ok(sp, 'prose-in-expression failure carried no range')
+      assert.equal(SRC.slice(sp.s, sp.e), '<free>')
+      return true
+    })
+  })
+
+  it('does not change the grammar a spanned parse compiles to', () => {
+    // A grammar that actually compiles (SRC deliberately does not).
+    const ok = 'doc = item\nitem = "hi" / (a / b)\na = "x"\nb = ALPHA'
+    assert.doesNotMatch(JSON.stringify(abnf(ok).rule), /"sp"/)
+  })
+})
