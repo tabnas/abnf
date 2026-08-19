@@ -102,6 +102,51 @@ func TestAstRefAsChildNode(t *testing.T) {
 	assertParse(t, j, "a bc", node("p", "abc", node("q", "bc")))
 }
 
+// TestLiftBindsProductionNameAsTokenName pins what TestAstRefAsChildNode's
+// comment has always CITED and this port never had.
+//
+// A production whose whole body is a single literal is lifted to a named
+// token: `PL = "+"` becomes the fixed token `#PL`, and no `PL` rule is
+// emitted, because it is lexical rather than syntactic. The TypeScript half
+// has pinned this since it was written —
+// ts/test/roundtrip.test.js, 'single-literal productions lift to named
+// tokens' / 'binds the production name as the token name'. This side had
+// nothing, and the comment naming a Go test made that invisible: a reader
+// checking whether the property was pinned here found the name, and stopped.
+//
+// A documented gate that does not exist is worse than no gate, because a
+// grep for its name returns reassuring hits. Found by
+// admin tasks/ax-phantom-gates.js.
+func TestLiftBindsProductionNameAsTokenName(t *testing.T) {
+	g, err := ParseAbnf("add = NR [ PL add ]\nPL = \"+\"")
+	if err != nil {
+		t.Fatalf("ParseAbnf: %v", err)
+	}
+
+	spec, err := EmitGrammarSpec(g, nil)
+	if err != nil {
+		t.Fatalf("EmitGrammarSpec: %v", err)
+	}
+
+	if spec.Options == nil || spec.Options.Fixed == nil {
+		t.Fatal("no fixed tokens emitted at all")
+	}
+	tok, ok := spec.Options.Fixed.Token["#PL"]
+	if !ok || tok == nil {
+		t.Fatalf("no #PL fixed token; got %v", spec.Options.Fixed.Token)
+	}
+	if "+" != *tok {
+		t.Errorf("fixed token #PL = %q, want \"+\"", *tok)
+	}
+
+	// ...and no PL RULE. Both halves matter: emitting the token while
+	// leaving the rule behind would still satisfy the assertion above while
+	// making PL syntactic, which is the thing lifting exists to prevent.
+	if _, isRule := spec.Rule["PL"]; isRule {
+		t.Error("PL is still a rule: it was not lifted, only copied")
+	}
+}
+
 func TestEmitIsRepeatable(t *testing.T) {
 	// The emit pipeline rewrites the grammar, and lifting *removes* the
 	// production — so without a defensive copy the second emission would find
