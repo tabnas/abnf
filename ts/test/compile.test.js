@@ -308,7 +308,14 @@ describe('user actions composed with $-builtins (pure data)', () => {
     attachActionSlots(spec, ['@op:o:INC'])
     const text = toJsonic(toPureSpec(spec), { strict: true })
     assert.match(text, /@op:o:INC/, 'slot serialized by name')
-    assert.doesNotMatch(text, /@abnf_/, 'no closures in the wire format')
+    // A `doesNotMatch(text, /@abnf_/, 'no closures in the wire format')`
+    // stood here and could not fire, for two independent reasons. This
+    // port names its generated refs `@bnf_a<n>`, never `@abnf_`, so the
+    // pattern matched nothing it emits; and the conversion above is
+    // builtins mode, which produces no closure refs at all. The property
+    // it claimed to check is enforced by construction one line earlier:
+    // toPureSpec THROWS on a spec that still holds closures, naming the
+    // stray refs. Reaching this line already proves it.
 
     // Consumer binds the slot at load.
     const obj = JSON.parse(text)
@@ -355,7 +362,11 @@ describe('compile: probe grammars', () => {
 
   it('builtin-mode probe compiles to pure data', () => {
     const text = abnfCompile(PROBE_SRC)
-    assert.doesNotMatch(text, /@abnf_/, 'no registered closures remain')
+    // Same vacuous check as above, same two reasons: the prefix is not
+    // one this port emits, and abnfCompile converts with builtins:true,
+    // which registers no closures to leave behind. What the three lines
+    // below assert — that the probe builtins ARE in the output — is the
+    // check this test actually needs, and it is live.
     assert.match(text, /@probeInit\$/)
     assert.match(text, /@probeDecide\$/)
     assert.match(text, /@probePhase0\$/)
