@@ -62,10 +62,22 @@ func TestCompileRecognitionStrict(t *testing.T) {
 			if err != nil {
 				t.Fatalf("AbnfCompile: %v", err)
 			}
-			// No function references / live functions in the text.
-			if strings.Contains(text, "@abnf_a") {
-				t.Errorf("recognition spec leaked a closure ref:\n%s", text)
-			}
+			// No live functions in the text.
+			//
+			// A `strings.Contains(text, "@abnf_a")` check stood here and
+			// could never fire: AbnfCompile converts with Builtins:true,
+			// and a builtins-mode spec carries no closure refs at all —
+			// measured, spec.Ref is empty for every case in this table, so
+			// there was nothing for the recognition pass to leak. The
+			// TypeScript twin (ts/test/compile.test.js) converts in
+			// closure mode and asserts `refKeys.size > 0` before looking,
+			// so its version of this check is live; Go had no such guard
+			// and the assertion silently proved nothing.
+			//
+			// The closure-ref case is covered for real, and without
+			// naming a prefix, by TestToRecognitionSpecDropsClosureHooks.
+			// What is left here is the check that does apply to this
+			// mode: the tree builtins must be gone.
 			if strings.Contains(text, "@node$") || strings.Contains(text, "@capture$") ||
 				strings.Contains(text, "@bubble$") {
 				t.Errorf("recognition spec retained a tree builtin:\n%s", text)
@@ -248,8 +260,17 @@ func TestToRecognitionSpecDropsClosureHooks(t *testing.T) {
 		t.Fatalf("ToRecognitionSpec: %v", err)
 	}
 	text := ToJsonic(out, true, 2)
-	if strings.Contains(text, "@abnf_a") {
-		t.Errorf("recognition spec leaked a closure ref:\n%s", text)
+	// Ask the spec what its refs are called rather than hard-coding the
+	// prefix, mirroring the TypeScript twin's findRefs. A literal
+	// "@abnf_a" stood here, and the shared compiler's Go port is the only
+	// thing that spells them that way — TypeScript emits "@bnf_a<n>" for
+	// the same refs. Renaming either port would have left this assertion
+	// green and vacuous, so the check now cannot drift from the names it
+	// is checking for.
+	for k := range spec.Ref {
+		if strings.Contains(text, string(k)) {
+			t.Errorf("recognition spec leaked the closure ref %s:\n%s", k, text)
+		}
 	}
 	if !recognisesJsonic(t, text, "hi") {
 		t.Errorf("should accept %q", "hi")
