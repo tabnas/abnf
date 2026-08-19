@@ -60,6 +60,15 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const { abnfConvert } = require('../dist/abnf')
+const { AbnfParseError } = require('../dist/converter')
+const { EmitError } = require('@tabnas/bnf')
+
+// A REJECTION is the converter saying no: AbnfParseError from this package,
+// EmitError from @tabnas/bnf. Anything else — a TypeError, a RangeError — is
+// the converter falling over, and scoring that as a correct rejection is
+// exactly how a crash hides inside a conformance number.
+const isRejection = (e) =>
+  e instanceof AbnfParseError || e instanceof EmitError
 
 const TS_DIR = path.join(__dirname, '..')
 const REPO = path.join(TS_DIR, '..')
@@ -260,6 +269,7 @@ describe('conformance: third-party ABNF corpus', () => {
   it('invalid: mutants violating a named RFC 5234 production are rejected', () => {
     const bases = VALID.filter((rel) => !overBudget.includes(rel))
     const leaks = mutationLeaks
+    const crashes = []
     for (const [name, append] of mutations) {
       let n = 0
       for (const rel of bases) {
@@ -267,8 +277,15 @@ describe('conformance: third-party ABNF corpus', () => {
         try {
           abnfConvert(src)
           n++
-        } catch {
-          /* rejected: correct */
+        } catch (e) {
+          // Was this a rejection, or a crash wearing a rejection's clothes?
+          // The bare `catch {}` this replaces counted both as correct, and
+          // this loop is the largest compile path in the suite — every
+          // mutation across every base — so a converter crash could sit here
+          // indefinitely while the numbers looked clean.
+          if (!isRejection(e)) {
+            crashes.push(`${name} on ${rel}: ${e && e.constructor && e.constructor.name}: ${e && e.message}`)
+          }
         }
       }
       if (n > 0) {
@@ -280,6 +297,14 @@ describe('conformance: third-party ABNF corpus', () => {
       }
     }
     if (RECORD) return
+    // Crashes are reported BEFORE the leak counts, and are never pinned: a
+    // leak is a known conformance gap with a number attached, while a crash is
+    // a defect. Pinning crashes would re-create the bug this replaced.
+    assert.deepEqual(
+      crashes, [],
+      'the converter CRASHED rather than rejecting. These are internal errors, ' +
+      'not rejections, and were previously counted as correct rejections.',
+    )
     assert.deepEqual(
       leaks, PINNED_MUTATION_LEAKS,
       'the per-class mutation leak counts have changed. Each count is the number ' +

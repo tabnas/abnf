@@ -778,6 +778,32 @@ function withCoreRules(user: AbnfProduction[]): AbnfProduction[] {
   const defined = new Set(user.map((p) => p.name))
   const needed = new Set<string>()
 
+  // A malformed element reaches here as a hole in an alt — an unclosed group
+  // (`( "a" / "b"` with no `)`) pops without ever building its node, leaving
+  // `undefined` in the sequence. bnf's refsIn then reads `.kind` off it and
+  // throws a TypeError, which is a CRASH, not a rejection: the conformance
+  // harness scored it as a correct rejection for every base grammar in the
+  // corpus, and abnf's own record says such input is rejected.
+  //
+  // Reject it here, as the parse error it is. The deeper repair — having the
+  // `elem` rule refuse to close a group on anything but its own `)` — is a
+  // grammar change and is deliberately not attempted in the same commit as the
+  // harness fix that exposed this.
+  const rejectHoles = (prods: AbnfProduction[]) => {
+    for (const p of prods) {
+      for (const alt of p.alts) {
+        for (const el of alt) {
+          if (null == el) {
+            throw new AbnfParseError(
+              `abnf: rule '${p.name}' is malformed — an element could not be ` +
+              `built. The usual cause is an unclosed group or option.`)
+          }
+        }
+      }
+    }
+  }
+  rejectHoles(user)
+
   const scan = (prods: AbnfProduction[]) => {
     for (const p of prods) {
       for (const alt of p.alts) refsIn(alt, needed)
