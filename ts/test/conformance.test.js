@@ -70,6 +70,28 @@ const { EmitError } = require('@tabnas/bnf')
 const isRejection = (e) =>
   e instanceof AbnfParseError || e instanceof EmitError
 
+// A crash is never pinned and never recorded — in EITHER mode. Recording
+// regenerates known-gaps.tsv from the measured numbers, and a crash makes
+// those numbers wrong, so a recording run has to stop as well rather than
+// write a gap row derived from a laundered count. That is why every caller
+// asserts this BEFORE its `if (RECORD) return`.
+function assertNoCrashes(crashes, where) {
+  assert.deepEqual(
+    crashes, [],
+    `the converter CRASHED rather than rejecting, ${where}. These are internal ` +
+      'errors, not rejections. A leak is a known conformance gap with a number ' +
+      'attached; a crash is a defect, so it is never pinned and never recorded.',
+  )
+}
+
+// The out-of-process equivalent of `isRejection`. An Error cannot cross a
+// process boundary, so conformance-compile.js classifies it on the far side
+// and sends the verdict as data; `rejected === false` is a crash. The
+// `undefined` case is a child from before that flag existed — treated as a
+// rejection so an out-of-date build fails loudly on its own version test
+// rather than silently here.
+const isChildCrash = (r) => false === r.rejected
+
 const TS_DIR = path.join(__dirname, '..')
 const REPO = path.join(TS_DIR, '..')
 const CORPUS = path.join(REPO, 'test', 'abnf-corpus')
@@ -194,6 +216,7 @@ describe('conformance: third-party ABNF corpus', () => {
   // --- half 1: valid grammars compile, and yield every declared rule ---
   const validGaps = []
   const overBudget = []
+  const validCrashes = []
 
   it('valid: every declared rule survives into the GrammarSpec', () => {
     for (const rel of VALID) {
@@ -210,6 +233,11 @@ describe('conformance: third-party ABNF corpus', () => {
         continue
       }
       if (!r.ok) {
+        // A crash here is NOT merely a grammar this compiler cannot accept.
+        // Left unclassified it would be pinned as `valid-not-accepted`, which
+        // is the same laundering as scoring it a correct rejection: a defect
+        // filed under a known gap.
+        if (isChildCrash(r)) validCrashes.push(`${rel}: ${r.error}`)
         validGaps.push(rel)
         if (RECORD) record('valid-not-accepted', rel, 1, 'rejected: ' + r.error)
         continue
@@ -224,6 +252,7 @@ describe('conformance: third-party ABNF corpus', () => {
         }
       }
     }
+    assertNoCrashes(validCrashes, 'compiling the valid corpus')
     if (RECORD) return
     assert.deepEqual(
       validGaps.sort(), PINNED_VALID_GAPS,
@@ -243,13 +272,21 @@ describe('conformance: third-party ABNF corpus', () => {
 
   it('invalid: grammars the third-party oracle rejects are rejected', () => {
     const leaked = invalidGaps
+    const crashes = []
     for (const rel of INVALID) {
       const r = compileBudgeted(rel)
       if (r.ok) {
         leaked.push(rel)
         if (RECORD) record('invalid-accepted', rel, 1, 'accepted; oracle rejects it')
+        continue
       }
+      // This half asks only "did it compile?", so before the child started
+      // classifying, ANY throw down there — TypeError included — arrived as
+      // `{ok:false}` and counted as a correct rejection. Same bug as the
+      // in-process loop below, one process boundary away.
+      if (isChildCrash(r)) crashes.push(`${rel}: ${r.error}`)
     }
+    assertNoCrashes(crashes, 'compiling the invalid corpus')
     if (RECORD) return
     assert.deepEqual(
       leaked.sort(), PINNED_INVALID_GAPS,
@@ -296,15 +333,11 @@ describe('conformance: third-party ABNF corpus', () => {
         }
       }
     }
+    // Reported BEFORE the leak counts, and before the recording return: a
+    // recording run that swallowed these would emit mutation-leak rows
+    // measured against crashed compiles.
+    assertNoCrashes(crashes, 'mutating the valid corpus')
     if (RECORD) return
-    // Crashes are reported BEFORE the leak counts, and are never pinned: a
-    // leak is a known conformance gap with a number attached, while a crash is
-    // a defect. Pinning crashes would re-create the bug this replaced.
-    assert.deepEqual(
-      crashes, [],
-      'the converter CRASHED rather than rejecting. These are internal errors, ' +
-      'not rejections, and were previously counted as correct rejections.',
-    )
     assert.deepEqual(
       leaks, PINNED_MUTATION_LEAKS,
       'the per-class mutation leak counts have changed. Each count is the number ' +
