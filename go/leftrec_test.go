@@ -9,7 +9,6 @@
 package tabnasabnf
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -75,20 +74,27 @@ func TestEliminateLeftRecursionMultipleAlts(t *testing.T) {
 }
 
 // TestRejectsPurelyLeftRecursive: a rule with no seed (non-recursive)
-// alternative cannot be eliminated and is rejected. The TS form throws;
-// the Go form panics with the same message. Mirrors the TS
+// alternative cannot be eliminated and is rejected. Mirrors the TS
 // "rejects purely left-recursive productions (no seed)".
+//
+// EACH PORT SIGNALS FAILURE ITS OWN WAY, and that is not a divergence: TS
+// throws, Go returns an error, and the message is the same. This test used
+// to assert a PANIC, because that is what the shared compiler did until
+// tabnas/bnf#28 — "a grammar this compiler cannot compile is invalid user
+// input, and invalid user input is an error return". A panic crossing an
+// API boundary was the defect; recovering one in a test was pinning it.
+//
+// The message is asserted rather than just the failure, because a rule
+// with no seed and a rule that merely fails to compile are different
+// things and only one of them is this test's subject.
 func TestRejectsPurelyLeftRecursive(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected a panic for a purely left-recursive rule, got none")
-		}
-		if msg := fmt.Sprint(r); !strings.Contains(msg, "purely left-recursive") {
-			t.Errorf("panic = %q, want it to mention 'purely left-recursive'", msg)
-		}
-	}()
-	_, _ = Abnf("a = a \"x\"", nil)
+	_, err := Abnf("a = a \"x\"", nil)
+	if err == nil {
+		t.Fatal("expected an error for a purely left-recursive rule, got none")
+	}
+	if !strings.Contains(err.Error(), "purely left-recursive") {
+		t.Errorf("error = %q, want it to mention 'purely left-recursive'", err)
+	}
 }
 
 // TestDropsTrivialSelfRef: a trivial `P = P` alternative adds nothing and
