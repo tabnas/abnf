@@ -232,8 +232,35 @@ From `ts/` (or use the top-level `Makefile`):
 
 ```bash
 cd ts && npm install && npm run build   # tsc --build src
-npm test                                # node --enable-source-maps --test test/**/*.test.js
+npm test                                # test-unit, then test-conformance
+npm run test-unit                       # everything except conformance
+npm run test-conformance                # the corpus dial, on its own
 ```
+
+**`npm test` is two passes on purpose. Do not merge them back into one.**
+
+`conformance.test.js` measures this compiler against 68 grammars from four
+third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
+on an older one — one of its cases alone is 64s. The other 46 suites finish
+in seconds.
+
+Run together with default concurrency, the fast suites drain and Node's
+test runner cancels conformance mid-flight:
+
+    ✖ test/conformance.test.js
+      'Promise resolution is still pending but the event loop has
+       already resolved'
+
+**On a slow machine only.** It passed on fast hardware and in CI, and
+failed on a maintainer's laptop — a test whose result depends on how fast
+your computer is measures the computer, not the compiler. Running
+conformance alone gives it the whole machine and removes the race, at the
+cost of a few seconds of wall clock.
+
+`test-unit` excludes it with `--test-skip-pattern='^conformance'`, which
+matches the suite name. Rename that suite and the pattern stops matching —
+conformance would then run in both passes: slower, still correct, and
+noisy enough to notice.
 
 Top-level `Makefile` targets. The aggregates run **both** runtimes, not
 just TypeScript:

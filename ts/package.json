@@ -21,7 +21,9 @@
   },
   "scripts": {
     "pretest": "sh ../test/fetch-abnf-corpus.sh",
-    "test": "node --enable-source-maps --test test/**/*.test.js",
+    "test": "npm run test-unit && npm run test-conformance",
+    "test-unit": "node --enable-source-maps --test --test-skip-pattern='^conformance' test/**/*.test.js",
+    "test-conformance": "node --enable-source-maps --test test/conformance.test.js",
     "watch": "tsc --build src -w",
     "build": "tsc --build src",
     "clean": "rm -rf node_modules dist dist-test yarn.lock package-lock.json",
