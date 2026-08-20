@@ -118,10 +118,15 @@ because of Go's type system and idioms:
 - **Errors, not exceptions.** `Abnf`, `Install`, `AbnfCompile`,
   `AttachActions`, and `j.Parse` return an `error`. The error *types*
   (`*AbnfParseError`, `*AbnfCompileError`, `*AbnfActionError`) mirror
-  the TS classes; `*AbnfParseError` implements `Unwrap`. The one case
-  the TS code throws that Go *panics* on instead is a purely
-  left-recursive rule with no seed (`a = a "x"`) — an internal
-  invariant violation, not a user-recoverable error.
+  the TS classes; `*AbnfParseError` implements `Unwrap`.
+
+  A purely left-recursive rule with no seed (`a = a "x"`) used to be the
+  one exception, and this text used to call it "an internal invariant
+  violation, not a user-recoverable error". That was the wrong reading:
+  it is invalid *user input*, which is precisely what an error return is
+  for, and `tabnas/bnf#28` changed it to one. Through `bnf v0.1.8` it
+  still panics with an `*EmitError`; from `#28` onward `Abnf` returns
+  that same error. The message is identical either way.
 
 - **`ActionsMap` values are slices.** `map[string][]ActionFn` — each
   ref maps to a slice of actions — whereas TS accepts either a single
