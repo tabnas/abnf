@@ -170,7 +170,30 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 					item = it
 				}
 			}
+			// A HOLE, not a no-op. `bad = ( "a"` runs the atom's bail
+			// alternate at end of source, so the atom pops with no node and
+			// there is nothing to wrap. Returning here DROPPED the element and
+			// the malformed rule compiled clean — Go accepted all four
+			// unclosed-group/option forms that TS rejects, and known-gaps.tsv
+			// pinned two of them at 49 bases each. Record the hole instead and
+			// let the converter reject it by name (see rejectHoles).
+			//
+			// The subtree the atom was building is dropped here too, so rescue
+			// any deferred numeric diagnostic from it on the way past: TS
+			// checks the code point eagerly and reports THAT for
+			// `bad = ( %x110000`, and a rejection naming a different cause in
+			// each runtime is the divergence class this repair closes.
 			if item == nil {
+				hole := &abnfElement{Kind: kindHole}
+				if r.Child != nil && r.Child != tabnas.NoRule &&
+					r.Child.Child != nil && r.Child.Child != tabnas.NoRule {
+					if alts, ok := r.Child.Child.Node.(*[]abnfSequence); ok && nil != alts {
+						hole.NumErr = firstNumErrInAlts(*alts)
+					}
+				}
+				if seqPtr, ok := r.Node.(*abnfSequence); ok {
+					*seqPtr = append(*seqPtr, hole)
+				}
 				return
 			}
 			min := asInt(r.EnsureU()["min"])

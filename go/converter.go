@@ -59,39 +59,127 @@ func parseAbnf(src string) (*abnfGrammar, error) {
 	if merr != nil {
 		return nil, merr
 	}
+	// LAST of the three, deliberately — this is TS's order, and error
+	// precedence is itself part of the contract. TS reports the numeric
+	// diagnostic first (it checks the code point eagerly inside
+	// parseNumericValue), then the incremental-merge error, and only then the
+	// malformed element (its rejectHoles lives in withCoreRules, after the
+	// merge). A rejection naming a different cause in each runtime is exactly
+	// the divergence this repair exists to close, so the order is pinned by
+	// test/spec/alignment-abnf-errors.tsv, which both suites run.
+	if herr := rejectHoles(merged); herr != nil {
+		return nil, herr
+	}
 	withCore := withCoreRules(merged)
 	return &abnfGrammar{Productions: withCore}, nil
+}
+
+// kindHole marks an element the parser could not build. It NEVER escapes the
+// converter: rejectHoles below runs before any other pass and always errors
+// when one is present, so no downstream walker has to know about it. It exists
+// only so a hole can carry the diagnostic rescued from the subtree that was
+// dropped with it — see @elem-close in parser_abnf.go.
+const kindHole = bnf.ElemKind("abnf-hole")
+
+// firstNumErrInAlts finds the first deferred numeric diagnostic in a subtree
+// that is about to be discarded. `bad = ( %x110000` drops the whole group when
+// it never closes, taking the offending element with it — and TS, which checks
+// the code point eagerly inside parseNumericValue, reports the numeric fault
+// rather than the unclosed group. Carrying the message out on the hole is what
+// lets the deferred Go check reach the same verdict.
+func firstNumErrInAlts(alts []abnfSequence) string {
+	for _, alt := range alts {
+		for _, el := range alt {
+			if msg := walkNumErr(el); "" != msg {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
+// rejectHoles refuses a production containing an element the parser could
+// not build. It is the Go counterpart of `rejectHoles` in ts/src/converter.ts
+// and walks the same shape for the same reason: `bad = *( "a"` leaves the hole
+// in a repetition's Inner rather than directly in the sequence, so a top-level
+// scan misses it.
+//
+// The two runtimes reached this from opposite directions. TS left the hole in
+// place and bnf's refsIn nil-dereferenced it — a crash the conformance harness
+// scored as a correct rejection. Go dropped the element silently, so the same
+// input COMPILED. ADR-13: TypeScript defines the language, so Go rejects too,
+// and the `unbalanced-group` / `unbalanced-option` rows come out of
+// known-gaps.tsv.
+func rejectHoles(prods []*abnfProduction) *AbnfParseError {
+	var holeIn func(alt abnfSequence) bool
+	holeIn = func(alt abnfSequence) bool {
+		for _, el := range alt {
+			if nil == el || kindHole == el.Kind {
+				return true
+			}
+			switch el.Kind {
+			case kindOpt, kindStar, kindPlus, kindRep:
+				if holeIn(abnfSequence{el.Inner}) {
+					return true
+				}
+			case kindGroup:
+				for _, a := range el.Alts {
+					if holeIn(a) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	for _, p := range prods {
+		for _, alt := range p.Alts {
+			if holeIn(alt) {
+				return &AbnfParseError{Message: fmt.Sprintf(
+					"abnf: rule '%s' is malformed — an element could not be "+
+						"built. The usual cause is an unclosed group or option.",
+					p.Name)}
+			}
+		}
+	}
+	return nil
 }
 
 // findNumErr returns the first deferred numeric-value diagnostic recorded
 // anywhere in the parsed productions, or "" when every numeric value was a
 // valid Unicode code point. Walks nested groups and repetitions.
 func findNumErr(prods []*abnfProduction) string {
-	var walk func(el *abnfElement) string
-	walk = func(el *abnfElement) string {
-		if el.NumErr != "" {
-			return el.NumErr
-		}
-		switch el.Kind {
-		case kindOpt, kindStar, kindPlus, kindRep:
-			if el.Inner != nil {
-				return walk(el.Inner)
-			}
-		case kindGroup:
-			for _, alt := range el.Alts {
-				for _, inner := range alt {
-					if msg := walk(inner); msg != "" {
-						return msg
-					}
-				}
-			}
-		}
-		return ""
-	}
 	for _, p := range prods {
 		for _, alt := range p.Alts {
 			for _, el := range alt {
-				if msg := walk(el); msg != "" {
+				if msg := walkNumErr(el); "" != msg {
+					return msg
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// walkNumErr is findNumErr for a single element and its descendants.
+func walkNumErr(el *abnfElement) string {
+	// A hole. rejectHoles reports it, but only after this walk, so skip
+	// rather than dereference.
+	if nil == el {
+		return ""
+	}
+	if "" != el.NumErr {
+		return el.NumErr
+	}
+	switch el.Kind {
+	case kindOpt, kindStar, kindPlus, kindRep:
+		if nil != el.Inner {
+			return walkNumErr(el.Inner)
+		}
+	case kindGroup:
+		for _, alt := range el.Alts {
+			for _, inner := range alt {
+				if msg := walkNumErr(inner); "" != msg {
 					return msg
 				}
 			}

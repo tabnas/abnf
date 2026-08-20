@@ -13,15 +13,30 @@
  *  ordinary recorded outcome (`budget`) instead of a dead test process.
  *
  *  usage:  node --max-old-space-size=<MB> conformance-compile.js <file> [append]
- *  stdout: one JSON object — {ok:true,names:[...]} or {ok:false,error:"..."}
+ *  stdout: one JSON object —
+ *    {ok:true,names:[...]}                  compiled
+ *    {ok:false,rejected:true,error:"..."}   the converter said no
+ *    {ok:false,rejected:false,error:"..."}  the converter FELL OVER
  *  A non-zero exit with no JSON means the budget was blown; the parent reads
  *  that as `budget`, which is a FAILURE to accept, never a skip.
+ *
+ *  WHY `rejected` IS ON THE WIRE. The parent's invalid-corpus half asks only
+ *  "did it compile?", so without this flag every internal TypeError in that
+ *  half counts as a correct rejection — the same laundering the in-process
+ *  mutation loop had, one process boundary away. An Error does not survive
+ *  serialisation, so the classification has to happen HERE, where the real
+ *  exception object still exists, and travel as data.
  */
 'use strict'
 
 const fs = require('node:fs')
 
 const { abnfConvert } = require('../dist/abnf')
+const { AbnfParseError } = require('../dist/converter')
+const { EmitError } = require('@tabnas/bnf')
+
+// Must stay in step with `isRejection` in conformance.test.js.
+const isRejection = (e) => e instanceof AbnfParseError || e instanceof EmitError
 
 // Every name the compiled spec can reach: rules, fixed tokens, match tokens.
 function specNames(spec) {
@@ -45,7 +60,13 @@ try {
   const spec = abnfConvert(src)
   process.stdout.write(JSON.stringify({ ok: true, names: specNames(spec) }))
 } catch (e) {
+  const name = (e && e.constructor && e.constructor.name) || 'Error'
+  const msg = String((e && e.message) || e).split('\n')[0].slice(0, 160)
   process.stdout.write(
-    JSON.stringify({ ok: false, error: String((e && e.message) || e).split('\n')[0].slice(0, 160) }),
+    JSON.stringify({
+      ok: false,
+      rejected: isRejection(e),
+      error: isRejection(e) ? msg : name + ': ' + msg,
+    }),
   )
 }

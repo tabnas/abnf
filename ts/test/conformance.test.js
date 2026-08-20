@@ -60,6 +60,37 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const { abnfConvert } = require('../dist/abnf')
+const { AbnfParseError } = require('../dist/converter')
+const { EmitError } = require('@tabnas/bnf')
+
+// A REJECTION is the converter saying no: AbnfParseError from this package,
+// EmitError from @tabnas/bnf. Anything else — a TypeError, a RangeError — is
+// the converter falling over, and scoring that as a correct rejection is
+// exactly how a crash hides inside a conformance number.
+const isRejection = (e) =>
+  e instanceof AbnfParseError || e instanceof EmitError
+
+// A crash is never pinned and never recorded — in EITHER mode. Recording
+// regenerates known-gaps.tsv from the measured numbers, and a crash makes
+// those numbers wrong, so a recording run has to stop as well rather than
+// write a gap row derived from a laundered count. That is why every caller
+// asserts this BEFORE its `if (RECORD) return`.
+function assertNoCrashes(crashes, where) {
+  assert.deepEqual(
+    crashes, [],
+    `the converter CRASHED rather than rejecting, ${where}. These are internal ` +
+      'errors, not rejections. A leak is a known conformance gap with a number ' +
+      'attached; a crash is a defect, so it is never pinned and never recorded.',
+  )
+}
+
+// The out-of-process equivalent of `isRejection`. An Error cannot cross a
+// process boundary, so conformance-compile.js classifies it on the far side
+// and sends the verdict as data; `rejected === false` is a crash. The
+// `undefined` case is a child from before that flag existed — treated as a
+// rejection so an out-of-date build fails loudly on its own version test
+// rather than silently here.
+const isChildCrash = (r) => false === r.rejected
 
 const TS_DIR = path.join(__dirname, '..')
 const REPO = path.join(TS_DIR, '..')
@@ -185,6 +216,7 @@ describe('conformance: third-party ABNF corpus', () => {
   // --- half 1: valid grammars compile, and yield every declared rule ---
   const validGaps = []
   const overBudget = []
+  const validCrashes = []
 
   it('valid: every declared rule survives into the GrammarSpec', () => {
     for (const rel of VALID) {
@@ -201,6 +233,11 @@ describe('conformance: third-party ABNF corpus', () => {
         continue
       }
       if (!r.ok) {
+        // A crash here is NOT merely a grammar this compiler cannot accept.
+        // Left unclassified it would be pinned as `valid-not-accepted`, which
+        // is the same laundering as scoring it a correct rejection: a defect
+        // filed under a known gap.
+        if (isChildCrash(r)) validCrashes.push(`${rel}: ${r.error}`)
         validGaps.push(rel)
         if (RECORD) record('valid-not-accepted', rel, 1, 'rejected: ' + r.error)
         continue
@@ -215,6 +252,7 @@ describe('conformance: third-party ABNF corpus', () => {
         }
       }
     }
+    assertNoCrashes(validCrashes, 'compiling the valid corpus')
     if (RECORD) return
     assert.deepEqual(
       validGaps.sort(), PINNED_VALID_GAPS,
@@ -234,13 +272,21 @@ describe('conformance: third-party ABNF corpus', () => {
 
   it('invalid: grammars the third-party oracle rejects are rejected', () => {
     const leaked = invalidGaps
+    const crashes = []
     for (const rel of INVALID) {
       const r = compileBudgeted(rel)
       if (r.ok) {
         leaked.push(rel)
         if (RECORD) record('invalid-accepted', rel, 1, 'accepted; oracle rejects it')
+        continue
       }
+      // This half asks only "did it compile?", so before the child started
+      // classifying, ANY throw down there — TypeError included — arrived as
+      // `{ok:false}` and counted as a correct rejection. Same bug as the
+      // in-process loop below, one process boundary away.
+      if (isChildCrash(r)) crashes.push(`${rel}: ${r.error}`)
     }
+    assertNoCrashes(crashes, 'compiling the invalid corpus')
     if (RECORD) return
     assert.deepEqual(
       leaked.sort(), PINNED_INVALID_GAPS,
@@ -260,6 +306,7 @@ describe('conformance: third-party ABNF corpus', () => {
   it('invalid: mutants violating a named RFC 5234 production are rejected', () => {
     const bases = VALID.filter((rel) => !overBudget.includes(rel))
     const leaks = mutationLeaks
+    const crashes = []
     for (const [name, append] of mutations) {
       let n = 0
       for (const rel of bases) {
@@ -267,8 +314,15 @@ describe('conformance: third-party ABNF corpus', () => {
         try {
           abnfConvert(src)
           n++
-        } catch {
-          /* rejected: correct */
+        } catch (e) {
+          // Was this a rejection, or a crash wearing a rejection's clothes?
+          // The bare `catch {}` this replaces counted both as correct, and
+          // this loop is the largest compile path in the suite — every
+          // mutation across every base — so a converter crash could sit here
+          // indefinitely while the numbers looked clean.
+          if (!isRejection(e)) {
+            crashes.push(`${name} on ${rel}: ${e && e.constructor && e.constructor.name}: ${e && e.message}`)
+          }
         }
       }
       if (n > 0) {
@@ -279,6 +333,10 @@ describe('conformance: third-party ABNF corpus', () => {
         }
       }
     }
+    // Reported BEFORE the leak counts, and before the recording return: a
+    // recording run that swallowed these would emit mutation-leak rows
+    // measured against crashed compiles.
+    assertNoCrashes(crashes, 'mutating the valid corpus')
     if (RECORD) return
     assert.deepEqual(
       leaks, PINNED_MUTATION_LEAKS,

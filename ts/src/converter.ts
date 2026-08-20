@@ -778,6 +778,58 @@ function withCoreRules(user: AbnfProduction[]): AbnfProduction[] {
   const defined = new Set(user.map((p) => p.name))
   const needed = new Set<string>()
 
+  // A malformed element reaches here as a hole in an alt — an unclosed group
+  // (`( "a" / "b"` with no `)`) pops without ever building its node, leaving
+  // `undefined` in the sequence. bnf's refsIn then reads `.kind` off it and
+  // throws a TypeError, which is a CRASH, not a rejection: the conformance
+  // harness scored it as a correct rejection for every base grammar in the
+  // corpus, and abnf's own record says such input is rejected.
+  //
+  // Reject it here, as the parse error it is. The deeper repair — having the
+  // `elem` rule refuse to close a group on anything but its own `)` — is a
+  // grammar change and is deliberately not attempted in the same commit as the
+  // harness fix that exposed this.
+  //
+  // The walk MIRRORS bnf's `refsIn` exactly, because "where does refsIn
+  // dereference?" is the definition of where a hole crashes. A top-level scan
+  // of the sequence is not enough: when a repetition wraps the unclosed group
+  // — `bad = *( "a"` — `elem.close` builds a perfectly real `star` whose
+  // `inner` is the hole, so the sequence entry is non-null and refsIn walks
+  // into `[undefined]` one level down. `*[`, `1*2(` and a group's `alts` all
+  // reach it the same way.
+  const holeIn = (alt: readonly (AbnfElement | undefined)[] | undefined): boolean => {
+    if (null == alt) return true
+    for (const el of alt) {
+      if (null == el) return true
+      const k = (el as any).kind
+      if ('opt' === k || 'star' === k || 'plus' === k || 'rep' === k) {
+        if (holeIn([(el as any).inner])) return true
+      } else if ('group' === k) {
+        const alts = (el as any).alts
+        if (null == alts) return true
+        for (const a of alts) if (holeIn(a)) return true
+      }
+    }
+    return false
+  }
+
+  const rejectHoles = (prods: AbnfProduction[]) => {
+    for (const p of prods) {
+      if (null == p.alts) {
+        throw new AbnfParseError(
+          `abnf: rule '${p.name}' is malformed — no alternatives were built.`)
+      }
+      for (const alt of p.alts) {
+        if (holeIn(alt)) {
+          throw new AbnfParseError(
+            `abnf: rule '${p.name}' is malformed — an element could not be ` +
+            `built. The usual cause is an unclosed group or option.`)
+        }
+      }
+    }
+  }
+  rejectHoles(user)
+
   const scan = (prods: AbnfProduction[]) => {
     for (const p of prods) {
       for (const alt of p.alts) refsIn(alt, needed)

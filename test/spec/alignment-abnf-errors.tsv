@@ -8,3 +8,10 @@ top = NR\n<everything> = <remove>	ERROR:abnf: '<everything>' is not a removal ta
 top = NR\n<all> = "x"	ERROR:abnf: '<all>' is prose, and prose is only valid as a production name for the removal directive '<all> = <remove>'.
 g = %x110000	ERROR:abnf: parse error: numeric value '%x110000' is 1114112, which is not a Unicode code point (the maximum is %x10FFFF).
 g = %d555864801982	ERROR:abnf: parse error: numeric value '%d555864801982' is 555864801982, which is not a Unicode code point (the maximum is %x10FFFF).
+bad = ( "a"	ERROR:abnf: rule 'bad' is malformed — an element could not be built. The usual cause is an unclosed group or option.
+bad = *( "a"	ERROR:abnf: rule 'bad' is malformed — an element could not be built. The usual cause is an unclosed group or option.
+bad = [ "a"	ERROR:abnf: rule 'bad' is malformed — an element could not be built. The usual cause is an unclosed group or option.
+bad = *[ "a"	ERROR:abnf: rule 'bad' is malformed — an element could not be built. The usual cause is an unclosed group or option.
+bad = 1*2( "a" / "b"	ERROR:abnf: rule 'bad' is malformed — an element could not be built. The usual cause is an unclosed group or option.
+bad = ( %x110000	ERROR:abnf: parse error: numeric value '%x110000' is 1114112, which is not a Unicode code point (the maximum is %x10FFFF).
+bad =/ ( "a"	ERROR:abnf: 'bad =/ …' has no earlier 'bad = …' to extend
