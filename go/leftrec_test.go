@@ -75,20 +75,55 @@ func TestEliminateLeftRecursionMultipleAlts(t *testing.T) {
 }
 
 // TestRejectsPurelyLeftRecursive: a rule with no seed (non-recursive)
-// alternative cannot be eliminated and is rejected. The TS form throws;
-// the Go form panics with the same message. Mirrors the TS
+// alternative cannot be eliminated and is rejected. Mirrors the TS
 // "rejects purely left-recursive productions (no seed)".
+//
+// EACH PORT SIGNALS FAILURE ITS OWN WAY, and that is not a divergence: TS
+// throws, Go rejects, and the message is the same in both.
+//
+// HOW Go rejects depends on which bnf is linked, so this asserts the
+// invariant rather than the mechanism:
+//
+//	bnf <= v0.1.8 (what go.mod pins)   panics with an *EmitError
+//	bnf main (what CI links)           returns it, via the recover that
+//	                                   tabnas/bnf#28 added at emit.go's
+//	                                   boundary — "invalid user input is
+//	                                   an error return"
+//
+// Asserting either one alone fails in the other build. A panic escaping a
+// published API is the defect bnf#28 removes; a test that DEMANDS the
+// panic pins the defect, and one that demands the error cannot run against
+// any released bnf, because #28 is not published yet. So this accepts
+// either and says which it saw. When the release wave bumps the pin past
+// #28, the panic branch stops being reached and can go.
+//
+// The message is asserted either way, because a rule with no seed and a
+// rule that merely fails to compile are different things and only one of
+// them is this test's subject.
 func TestRejectsPurelyLeftRecursive(t *testing.T) {
+	rejected, how := rejectPurelyLeftRecursive(t)
+	if !strings.Contains(rejected, "purely left-recursive") {
+		t.Errorf("%s = %q, want it to mention 'purely left-recursive'",
+			how, rejected)
+	}
+	t.Logf("linked bnf rejects by %s", how)
+}
+
+// rejectPurelyLeftRecursive returns the rejection message and how it
+// arrived, failing the test if the input is not rejected at all.
+func rejectPurelyLeftRecursive(t *testing.T) (msg, how string) {
+	t.Helper()
 	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected a panic for a purely left-recursive rule, got none")
-		}
-		if msg := fmt.Sprint(r); !strings.Contains(msg, "purely left-recursive") {
-			t.Errorf("panic = %q, want it to mention 'purely left-recursive'", msg)
+		if r := recover(); nil != r {
+			msg, how = fmt.Sprint(r), "panic"
 		}
 	}()
-	_, _ = Abnf("a = a \"x\"", nil)
+	_, err := Abnf("a = a \"x\"", nil)
+	if nil == err {
+		t.Fatal("a purely left-recursive rule was not rejected: " +
+			"no error returned and no panic raised")
+	}
+	return err.Error(), "error return"
 }
 
 // TestDropsTrivialSelfRef: a trivial `P = P` alternative adds nothing and
