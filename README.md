@@ -8,12 +8,14 @@
 <!-- /tabnas-badges -->
 
 ABNF grammar compiler for the
-[tabnas](https://github.com/rjrodger/tabnas) parser. Takes ABNF source
+[tabnas](https://github.com/tabnas/parser) parser. Takes ABNF source
 — the RFC 5234 dialect (`=` and `/`, not `::=`) — and emits a tabnas
 `GrammarSpec`. Installed on an engine, the spec parses inputs in that
 grammar and builds a `{rule, src, kids}` AST. It can also emit
 "pure-data" jsonic and supports user actions. Ships the `tabnas-abnf`
 CLI.
+
+Docs, guides, the error reference and the playground: **[tabnas.dev](https://tabnas.dev)**.
 
 **Why you would want this.** The tabnas engine ships no grammar of its
 own — you bring one, normally as a hand-written table of `open`/`close`
