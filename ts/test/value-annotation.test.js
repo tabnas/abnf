@@ -212,10 +212,63 @@ describe('value annotations in comments', () => {
   // not the behaviour anyone wants from `; @array` on the ABNF list
   // idiom, and the guide says so — but it is the behaviour, and pinning
   // it means a change to it has to be deliberate rather than a surprise.
-  it('takes a repetition as a single array element', () => {
+  it('collects a repetition into the array, one element per item', () => {
     const src = 'list = item *( "," item )   ; @array\nitem = 1*DIGIT\n'
-    assert.deepEqual(build(src, '1,2,3', 'list'), ['1', ',2,3'])
-    assert.deepEqual(build(src, '1', 'list'), ['1', ''],
-      'and an empty run is an empty-string element, not an absent one')
+    assert.deepEqual(build(src, '1,2,3', 'list'), ['1', '2', '3'])
+    assert.deepEqual(build(src, '1', 'list'), ['1'],
+      'and an empty run contributes no element, not an empty one')
+  })
+
+  it('collects every ABNF spelling of a list', () => {
+    // The point of collecting: before it, NO spelling of a
+    // variable-length list worked — each one handed back the run's
+    // source text as a single element.
+    const one = '\nitem = DIGIT\n'
+    // This spelling alone leads with `item`, which left-recursion
+    // elimination folds into `list` — and a rule whose body is a bare
+    // terminal stops being a part at all there. `1*DIGIT` keeps it one.
+    assert.deepEqual(
+      build('list = item *( "," item )   ; @array\nitem = 1*DIGIT\n',
+        '1,2,3', 'list'),
+      ['1', '2', '3'], 'separator after')
+    assert.deepEqual(
+      build('list = *( item "," ) item   ; @array' + one, '1,2,3', 'list'),
+      ['1', '2', '3'], 'separator before')
+    assert.deepEqual(
+      build('list = *item   ; @array' + one, '123', 'list'),
+      ['1', '2', '3'], 'bare star')
+    assert.deepEqual(
+      build('list = 1*item   ; @array' + one, '123', 'list'),
+      ['1', '2', '3'], 'bare plus')
+  })
+
+  it('flattens an iteration that produces more than one value', () => {
+    // `@array` names nothing and takes every part that produces a value,
+    // in order. An iteration is not special: two parts in it are two
+    // elements, not a pair.
+    const src = 'list = *( a b )   ; @array\na = ALPHA\nb = DIGIT\n'
+    assert.deepEqual(build(src, 'x1y2', 'list'), ['x', '1', 'y', '2'])
+  })
+
+  it('makes an absent option contribute no element', () => {
+    const src = 'list = a [ "," b ]   ; @array\na = 1*DIGIT\nb = 1*DIGIT\n'
+    assert.deepEqual(build(src, '1,2', 'list'), ['1', '2'])
+    assert.deepEqual(build(src, '1', 'list'), ['1'])
+  })
+
+  it('leaves a member of an object as its matched text', () => {
+    // Arrays name nothing, which is what made the run's text
+    // indefensible there. An object NAMES the part, so "this member is
+    // what the run matched" is a reading the author asked for.
+    const src = 'top = a *( "," a )   ; @object a rest\na = 1*DIGIT\n'
+    assert.deepEqual(build(src, '1,2,3', 'top'), { a: '1', rest: ',2,3' })
+  })
+
+  it('keeps a bare group as one element', () => {
+    // A group is how one element is written out of several pieces, so
+    // it resolves to its text — literals included. Only a repetition
+    // collects; a group does so only as the item of one.
+    const src = 'top = "<" ( "[" p "]" ) ">"   ; @array\np = 1*DIGIT\n'
+    assert.deepEqual(build(src, '<[7]>', 'top'), ['[7]'])
   })
 })

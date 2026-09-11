@@ -39,3 +39,15 @@ top = name "=" inner   ; @object name inner\nname = 1*ALPHA\ninner = maj "." min
 pair = a "," b   ; @array\na = 1*DIGIT\nb = 1*ALPHA	1,xy	["1","xy"]
 top = "<" inner ">"   ; @array\ninner = d   ; @object d\nd = 1*DIGIT	<7>	[{"d":"7"}]
 top = child   ; @object child\nchild = d   ; @object d\nd = 1*DIGIT	7	{"child":{"d":"7"}}
+list = item *( "," item )   ; @array\nitem = 1*DIGIT	1,2,3	["1","2","3"]
+list = item *( "," item )   ; @array\nitem = 1*DIGIT	1	["1"]
+list = *( item "," ) item   ; @array\nitem = DIGIT	1,2,3	["1","2","3"]
+list = *item   ; @array\nitem = DIGIT	123	["1","2","3"]
+list = 1*item   ; @array\nitem = DIGIT	123	["1","2","3"]
+list = *( a b )   ; @array\na = ALPHA\nb = DIGIT	x1y2	["x","1","y","2"]
+list = a [ "," b ]   ; @array\na = 1*DIGIT\nb = 1*DIGIT	1	["1"]
+list = a [ "," b ]   ; @array\na = 1*DIGIT\nb = 1*DIGIT	1,2	["1","2"]
+top = "<" ( "[" p "]" ) ">"   ; @array\np = 1*DIGIT	<[7]>	["[7]"]
+top = "<" *inner ">"   ; @array\ninner = d   ; @object d\nd = DIGIT	<12>	[{"d":"1"},{"d":"2"}]
+top = a *( "," a )   ; @object a rest\na = 1*DIGIT	1,2,3	{"a":"1","rest":",2,3"}
+list = ( item ) *( item )   ; @array\nitem = DIGIT	123	["1","2","3"]

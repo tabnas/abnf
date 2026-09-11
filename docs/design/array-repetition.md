@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | **Decided, and blocked on one engine fix.** Option A′ (§3.A′) is the chosen design: it collects a repetition with NO change to the engine or the spec format, and is implemented and green in TypeScript. The Go half emits a byte-identical spec but builds the wrong value, for the reason in §6. Nothing here is a regression; 0.4.11's behaviour still ships. |
-| **Implementation** | [`array-repetition.patch`](./array-repetition.patch) — complete, both runtimes, not applied. |
+| **Status** | **Done.** Option A′ (§3.A′) is implemented and green in both runtimes. `; @array` collects a repetition, with no new builtin and no change to the spec format. The Go engine defect in §6 is fixed in `tabnas/parser` (PR #167); this repository's change lands after that and the `@tabnas/bnf` emitter half (PR #39) are released. |
+| **Implementation** | `@tabnas/bnf` PR #39 (emitter, both runtimes) + `@tabnas/parser` PR #167 (the §6 fix) + this repository's guide and fixtures. |
 | **Scope** | `@tabnas/bnf` (the emitter) + `@tabnas/abnf` (guide and fixtures), plus one Go-only fix in `@tabnas/parser` — §6 |
 | **Repo** | This document lives in `tabnas/abnf` because that is where the annotation is authored and where a user meets the problem. The emitter half belongs in `tabnas/bnf`, the §6 fix in `tabnas/parser`. |
 | **Measured against** | `@tabnas/parser` 0.9.5, `@tabnas/bnf` 0.1.14, `@tabnas/abnf` 0.4.11 |
@@ -163,7 +163,7 @@ item is what makes the collection visible.)
 | **Engine** | No new builtin, no config, no `BUILTIN_SCHEMA_VERSION` bump, no validator rows, no spec-format change, no TypeScript or Rust work. One Go-only bug fix, which still has to be released before the emitter can be — §6. |
 | **bnf** | `planArrayHelpers`, one flag per part in the annotation plan, and array mode in the three emit paths. ~200 lines per runtime. |
 | **abnf** | No syntax change. `; @array` starts working; guide and fixtures updated. |
-| **Blocked by** | Go builds the wrong value from the identical spec — §6. |
+| **Parser** | One Go-only bug fix — §6. No spec-format or schema change, nothing for TypeScript or Rust. |
 
 A′ also settles three of §5's open questions by construction rather than
 by decision, which is the strongest sign it is the right shape: an empty
@@ -252,10 +252,10 @@ avoid.
 
 ## 4. Recommendation
 
-**A′, once §6 is fixed.** B is no longer worth shipping first. Its case
-was that A was expensive enough to need a holding position; A′ is not,
-and a refusal for a shape that now works would have to be written,
-tested, documented in two runtimes and then deleted.
+**A′.** B was never shipped, and should not be. Its case was that A was
+expensive enough to need a holding position; A′ is not, and a refusal for
+a shape that now works would have had to be written, tested, documented
+in two runtimes and then deleted.
 
 What A′ costs is **no new builtin and no schema revision** — not no
 engine release. The distinction matters, and the first draft of this
@@ -272,9 +272,11 @@ change, and no TypeScript or Rust work — the fix is Go-only, and it is a
 bug fix in the engine rather than a new primitive for grammars to
 target.
 
-**Do not apply the patch before §6 lands.** Today Go answers with the
-run as text — wrong, but whole. Under A′ without the engine fix it drops
-the elements instead, which is a worse answer to the same question.
+The order matters, and is the one thing here that cannot be shortcut:
+`tabnas/parser` #167, then `@tabnas/bnf` #39, then this repository.
+Applying the emitter half against a parser without the §6 fix has Go DROP
+the collected elements rather than blob them — a worse answer to the same
+question than the one being replaced.
 
 ## 5. Questions, answered
 
@@ -312,7 +314,7 @@ One refusal is deliberately kept: a part that reaches the annotated rule
 well-defined — `top`'s own array nests as an element — but nobody
 writing a list means `["1", ["2", ["3"]]]`, so it stays refused.
 
-## 6. What blocks it: Go grows a list the caller cannot see
+## 6. What blocked it: Go grew a list the caller could not see
 
 The emitters agree. Compiling `list = *( a b )   ; @array` with both
 CLIs and diffing the JSON gives the same rules, the same actions and the
@@ -354,13 +356,27 @@ would guess wrong) — and an array starts empty, which is exactly when
 the first push needs to propagate. `ListRef` does not help either; it is
 a value struct too.
 
-So the fix is a representation change in the engine: a list node that is
-a reference, the way `map[string]any` already is, so that appending is
-visible through every holder without a write-back at all. That is a
-`tabnas/parser` change, scoped to Go, and it is what A′ waits on. It
-buys more than this feature — the one-level write-back is a general
-limit on how deep a value grammar may accumulate, and
-`go/doc/differences.md` already records one case of it traded away.
+**Fixed in `tabnas/parser` #167**, and not by the representation change
+this section first proposed. Making the list node a reference would have
+touched all 82 places that handle `[]any`; the write-back only has to
+reach further. `@push$` now walks the SEEDING chain — from the pushing
+rule up through the rules still holding the container they were handed,
+stopping at the rule that allocated it — following, at each hop, the link
+the node actually came from: the replaced rule for an `r:`, the pusher
+otherwise. Following `Parent` alone walks past the replaced rule and out
+of the chain, since `list` replaces itself with `list$step1` before
+pushing the repetition and the replacement is parented ABOVE `list`.
+
+A new unexported `Rule.nodeSeeded` is what makes it decidable, and is why
+it is a separate walk rather than a wider `sameGrownList`: "still holding
+the list I grew" is not a question slice identity can answer, but "was
+handed this container and never allocated one of its own" is. Go-only
+bookkeeping — no API, spec-format or schema change, and nothing for the
+other ports to mirror.
+
+It buys more than this feature: the one-level write-back was a general
+limit on how deep ANY value grammar could accumulate, and it retires the
+case `go/doc/differences.md` recorded as deliberately traded away.
 
 ## 7. Related
 
