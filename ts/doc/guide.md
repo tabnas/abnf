@@ -214,8 +214,8 @@ tn.parse('1,xy') // => ['1', 'xy']
 Elements nest by the same rule as members: an element whose rule is
 annotated is pushed whole.
 
-**A repetition is one element, not many.** `*( "," item )` is a single
-part, so its whole run arrives as one element of source text:
+**A repetition contributes one element per item.** It is collected into
+the array rather than taken whole, so a list comes out as a list:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
@@ -227,13 +227,60 @@ tn.abnf(`
   item = 1*DIGIT
 `)
 
-tn.parse('1,2,3') // => ['1', ',2,3']
+tn.parse('1,2,3') // => ['1', '2', '3']
 ```
 
-That is consistent with "one element per part", and it is almost
-certainly not what you want. Collecting a repetition into one element
-each is not supported yet; until it is, build lists with a user action
-(see the next section) rather than `@array`.
+Every spelling of a variable-length list collects the same way —
+`item *( "," item )`, `*( item "," ) item`, `*item`, `1*item`. The
+separators are literals, and a literal produces no value, so none of
+them becomes an element.
+
+An empty run contributes **nothing**, not an empty element: the same
+grammar on `1` gives `['1']`. An absent `[ option ]` behaves the same
+way.
+
+An iteration that produces more than one value contributes each of
+them, in order — `*( a b )` on `x1y2` gives `['x', '1', 'y', '2']`.
+"@array" names nothing and takes every part that produces a value; an
+iteration is not a special case, and does not become a pair.
+
+**A bare group is still one element.** A group is how a single element
+is written out of several pieces, so it resolves to its matched text,
+literals included:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  top = "<" ( "[" p "]" ) ">"   ; @array
+  p   = 1*DIGIT
+`)
+
+tn.parse('<[7]>') // => ['[7]']
+```
+
+A group written as the item of a repetition — the `( "," item )` above —
+is the repeated item rather than an element, and so collects with it.
+
+**An object's members are not collected.** `@array` names nothing, which
+is what makes taking a run as text indefensible there. An `@object`
+*names* the part, so a member that is a repetition stays the text that
+run matched:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  top = a *( "," a )   ; @object a rest
+  a   = 1*DIGIT
+`)
+
+tn.parse('1,2,3') // => { a: '1', rest: ',2,3' }
+```
 
 ### What is refused
 

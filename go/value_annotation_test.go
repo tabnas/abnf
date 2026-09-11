@@ -244,18 +244,68 @@ func TestAnnotationCompilerRefusals(t *testing.T) {
 	}
 }
 
-// A repetition is ONE part, so its whole run is one element. This is not
-// the behaviour anyone wants from `; @array` on the ABNF list idiom, and
-// ts/doc/guide.md says so — but it is the behaviour, and pinning it means
-// a change to it has to be deliberate rather than a surprise.
-func TestAnnotationTakesARepetitionAsOneElement(t *testing.T) {
+// A repetition is COLLECTED into the array, one element per item, so the
+// ABNF list idiom builds a list. Twin of the TypeScript case.
+func TestAnnotationCollectsARepetition(t *testing.T) {
 	src := "list = item *( \",\" item )   ; @array\nitem = 1*DIGIT\n"
-	if got := annotBuild(t, src, "1,2,3", "list"); !jsonEq(got, []any{"1", ",2,3"}) {
-		t.Errorf("got %#v, want [1 ,2,3]", got)
+	if got := annotBuild(t, src, "1,2,3", "list"); !jsonEq(got, []any{"1", "2", "3"}) {
+		t.Errorf("got %#v, want [1 2 3]", got)
 	}
-	// An empty run is an empty-string element, not an absent one.
-	if got := annotBuild(t, src, "1", "list"); !jsonEq(got, []any{"1", ""}) {
-		t.Errorf("got %#v, want [1 \"\"]", got)
+	// An empty run contributes no element, not an empty one.
+	if got := annotBuild(t, src, "1", "list"); !jsonEq(got, []any{"1"}) {
+		t.Errorf("got %#v, want [1]", got)
+	}
+}
+
+// Every spelling of a variable-length list collects. Before this, none of
+// them did -- each handed back the run's source text as one element. ONE
+// digit per item, since a greedy `1*DIGIT` would swallow the run into a
+// single item and prove nothing.
+func TestAnnotationCollectsEverySpellingOfAList(t *testing.T) {
+	one := "\nitem = DIGIT\n"
+	cases := []struct{ name, src, in string }{
+		// `item` leads here, and left-recursion elimination folds it in --
+		// a rule whose body is a bare terminal stops being a part at all
+		// there, so this spelling keeps `1*DIGIT`.
+		{"separator after", "list = item *( \",\" item )   ; @array\nitem = 1*DIGIT\n", "1,2,3"},
+		{"separator before", "list = *( item \",\" ) item   ; @array" + one, "1,2,3"},
+		{"bare star", "list = *item   ; @array" + one, "123"},
+		{"bare plus", "list = 1*item   ; @array" + one, "123"},
+		{"group then star", "list = ( item ) *( item )   ; @array" + one, "123"},
+	}
+	for _, c := range cases {
+		if got := annotBuild(t, c.src, c.in, "list"); !jsonEq(got, []any{"1", "2", "3"}) {
+			t.Errorf("%s: got %#v, want [1 2 3]", c.name, got)
+		}
+	}
+}
+
+// `; @array` takes every part that produces a value, in order. An
+// iteration is not a special case: two parts in it are two elements.
+func TestAnnotationFlattensAMultiPartIteration(t *testing.T) {
+	src := "list = *( a b )   ; @array\na = ALPHA\nb = DIGIT\n"
+	if got := annotBuild(t, src, "x1y2", "list"); !jsonEq(got, []any{"x", "1", "y", "2"}) {
+		t.Errorf("got %#v, want [x 1 y 2]", got)
+	}
+}
+
+// A bare group is how ONE element is written out of several pieces, so it
+// resolves to its matched text, literals included. Only a repetition
+// collects; a group does so only as the item of one.
+func TestAnnotationKeepsABareGroupAsOneElement(t *testing.T) {
+	src := "top = \"<\" ( \"[\" p \"]\" ) \">\"   ; @array\np = 1*DIGIT\n"
+	if got := annotBuild(t, src, "<[7]>", "top"); !jsonEq(got, []any{"[7]"}) {
+		t.Errorf("got %#v, want [[7]]", got)
+	}
+}
+
+// Arrays name nothing, which is what made a run's text indefensible
+// there. An object NAMES the part, so the member stays that run's text.
+func TestAnnotationLeavesAnObjectMemberAsText(t *testing.T) {
+	src := "top = a *( \",\" a )   ; @object a rest\na = 1*DIGIT\n"
+	got := annotBuild(t, src, "1,2,3", "top")
+	if !jsonEq(got, map[string]any{"a": "1", "rest": ",2,3"}) {
+		t.Errorf("got %#v, want {a:1 rest:,2,3}", got)
 	}
 }
 

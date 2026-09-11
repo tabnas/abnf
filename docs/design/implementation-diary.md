@@ -297,14 +297,29 @@ reload with `gs.ref={'@op:o:INC':r=>{r.node.delta=7}}` → `delta:7`, tree intac
 - Serialized **rule-phase** slots (bo/ao/bc/ac bound at load). Alt-action slots
   work; rule-phase still relies on `fnref` with functions in `gs.ref` keyed
   `@<rule>-<phase>`, which is serializable-by-name but untested here.
-- **Collecting a repetition into an `; @array`.** A repetition is one pushing
-  part, so `list = item *( "," item )` with `; @array` builds
-  `["1", ",2,3"]` — the run's source text as a single element. No ABNF spelling
-  of a variable-length list works today; only fixed arity does. The value
-  builders are missing the splice `@capture$` already has for trees, and the
-  fold `@fold$` already has for same-depth repeats. Options, costs and a
-  recommendation (refuse now, `@push$ {spread}` plus value-mode propagation
-  later) in [`array-repetition.md`](./array-repetition.md).
+- **Collecting a repetition into an `; @array`.** ~~A repetition is one
+  pushing part, so `list = item *( "," item )` with `; @array` builds
+  `["1", ",2,3"]`.~~ **Shipped** — see
+  [`array-repetition.md`](./array-repetition.md). Every ABNF spelling of a
+  variable-length list now collects, one element per item.
+
+  The splice the value builders looked to be missing was never needed:
+  the engine already seeds a pushed child's node from its parent, so a
+  helper that allocates nothing is handed the annotated rule's array and
+  fills it directly. No new builtin, no `BUILTIN_SCHEMA_VERSION` bump, no
+  `@push$ {spread}` — the emitter withholds the tree builders and the one
+  array does the rest.
+
+  What it did cost was a Go engine fix, and not for an emitter reason:
+  both runtimes emitted a byte-identical spec while Go built the wrong
+  value. A Go slice is a value where a JS array is a reference, so
+  `@push$` must re-publish the grown header, and it re-published one
+  level up — while a right-recursive repetition grows the list at every
+  depth. `tabnas/parser` #167 names the owning rule instead, so the growth is
+  one write at any depth, and retires a divergence
+  `go/doc/differences.md` had recorded as traded away. Its first version
+  walked the ancestors and was Θ(n²) in the length of the list — correct,
+  and still wrong; the review caught it.
 
 ---
 
