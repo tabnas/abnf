@@ -10,6 +10,8 @@ package tabnasabnf
 import (
 	"fmt"
 	"math/big"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -70,8 +72,157 @@ func parseAbnf(src string) (*abnfGrammar, error) {
 	if herr := rejectHoles(merged); herr != nil {
 		return nil, herr
 	}
+	if aerr := attachValueAnnotations(src, merged); aerr != nil {
+		return nil, aerr
+	}
 	withCore := withCoreRules(merged)
 	return &abnfGrammar{Productions: withCore}, nil
+}
+
+// A trailing comment claiming a value annotation:
+//
+//	ver = maj "." min "." pat    ; @object maj min pat
+//	tags = tag *("," tag)        ; @array
+//
+// RFC 5234 has nowhere else to put this. A comment is the only place in
+// the notation that carries no meaning of its own, which is exactly why it
+// can carry one here without changing what the grammar accepts: strip
+// every annotation and the same language parses, just into a tree instead
+// of a value.
+//
+// ONLY "@object" and "@array" are claimed. Any other `; @…` comment is
+// left alone — the notation has no directive namespace, so this must not
+// assume one, and a reader's own `; @deprecated` has to keep meaning
+// nothing. Mirrors ts/src/converter.ts.
+var annotationRe = regexp.MustCompile(`^@(object|array)\b\s*(.*)$`)
+var memberNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*$`)
+
+type annotationComment struct {
+	at   int
+	body string
+}
+
+// annotationComments finds every `;` comment in the source that claims an
+// annotation, with the offset it starts at.
+//
+// Quoted strings and prose are skipped: a `;` inside `"a;b"` or `<a;b>` is
+// CONTENT, not a comment, and treating it as one would silently attach an
+// annotation the author did not write.
+func annotationComments(src string) []annotationComment {
+	var out []annotationComment
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '"', '<':
+			// RFC 5234 char-val and prose-val have no escapes, so the next
+			// closing mark ends them.
+			closer := byte('"')
+			if src[i] == '<' {
+				closer = '>'
+			}
+			j := strings.IndexByte(src[i+1:], closer)
+			if j < 0 {
+				return out
+			}
+			i += 1 + j
+			continue
+		case ';':
+			end := strings.IndexByte(src[i:], '\n')
+			if end < 0 {
+				end = len(src)
+			} else {
+				end += i
+			}
+			body := strings.TrimSpace(src[i+1 : end])
+			if strings.HasPrefix(body, "@") {
+				out = append(out, annotationComment{at: i, body: body})
+			}
+			i = end
+		}
+	}
+	return out
+}
+
+// attachValueAnnotations attaches each annotation to the production it
+// FOLLOWS — the last one that begins before it.
+//
+// Not "the production on the same line": a rule may be written across
+// several lines, and an author putting the annotation on the last of them
+// means the same thing. Following the definition is the rule that reads
+// the same either way.
+func attachValueAnnotations(src string, prods []*abnfProduction) error {
+	ordered := make([]*abnfProduction, 0, len(prods))
+	for _, p := range prods {
+		if p.Sp != nil {
+			ordered = append(ordered, p)
+		}
+	}
+	if len(ordered) == 0 {
+		return nil
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].Sp.S < ordered[j].Sp.S
+	})
+
+	for _, c := range annotationComments(src) {
+		m := annotationRe.FindStringSubmatch(c.body)
+		if m == nil {
+			continue
+		}
+
+		var owner *abnfProduction
+		for _, p := range ordered {
+			if p.Sp.S < c.at {
+				owner = p
+			} else {
+				break
+			}
+		}
+		if owner == nil {
+			return &AbnfParseError{Message: fmt.Sprintf(
+				"abnf: '; %s' appears before any rule, so there is nothing for "+
+					"it to annotate. A value annotation goes after the rule it "+
+					"describes.", c.body)}
+		}
+
+		kind := m[1]
+		var members []string
+		for _, w := range strings.FieldsFunc(m[2], func(r rune) bool {
+			return r == ' ' || r == '\t' || r == ','
+		}) {
+			if w != "" {
+				members = append(members, w)
+			}
+		}
+
+		if kind == "array" {
+			if len(members) > 0 {
+				return &AbnfParseError{Message: fmt.Sprintf(
+					"abnf: rule '%s': '@array' names no members — every part "+
+						"that produces a value becomes an element, in order. Got "+
+						"'%s'.", owner.Name, strings.Join(members, " "))}
+			}
+		} else {
+			for _, name := range members {
+				if !memberNameRe.MatchString(name) {
+					return &AbnfParseError{Message: fmt.Sprintf(
+						"abnf: rule '%s': '%s' is not a rule name, so it cannot "+
+							"name a member of '@object'.", owner.Name, name)}
+				}
+			}
+		}
+
+		if owner.Value != nil {
+			return &AbnfParseError{Message: fmt.Sprintf(
+				"abnf: rule '%s' has more than one value annotation. A rule "+
+					"builds one thing.", owner.Name)}
+		}
+		if kind == "array" {
+			owner.Value = &ValueAnnotation{Kind: kind}
+		} else {
+			owner.Value = &ValueAnnotation{Kind: kind, Members: members}
+		}
+	}
+	return nil
 }
 
 // kindHole marks an element the parser could not build. It NEVER escapes the
@@ -216,6 +367,13 @@ func mergeIncrementals(prods []*abnfProduction) ([]*abnfProduction, error) {
 		clean := &abnfProduction{Name: p.Name, Alts: p.Alts, Sp: p.Sp}
 		if p.NodeKind != "" {
 			clean.NodeKind = p.NodeKind
+		}
+		// Annotations are attached AFTER this runs, so nothing to carry
+		// today — but this rebuild is exactly the shape that drops a field
+		// without a word, and the compiler downstream had six of these and
+		// shipped with all six dropping it.
+		if p.Value != nil {
+			clean.Value = p.Value
 		}
 		out = append(out, clean)
 		byName[p.Name] = clean
