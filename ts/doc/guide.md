@@ -274,8 +274,69 @@ tn.parse('v1.2,3') // => { inner: { a: '1', b: '2' }, x: '3' }
 - **A leading member whose rule is not one part.** Same fold, followed
   through aliases: if it resolves to a body with more than one part, the
   boundary you drew would be lost.
+- **A source-text member that reaches a value-building rule.** See the
+  next section.
 
 Each refusal names the rule and says what to change.
+
+### A rule that builds a value produces no text
+
+This is the one rule to carry away, and everything above follows from
+it: a rule with an annotation contributes its **value** to whatever
+contains it, and no **text**. Its object becomes a child; it is not a
+span of characters any more.
+
+Two consequences, with different severity.
+
+Inside a plain (unannotated) grammar this is mild — the value lands
+where you expect, and only the enclosing node's `src` is short of it:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  doc  = head ":" body
+  head = 1*ALPHA
+  body = d        ; @object d
+  d    = 1*DIGIT
+`)
+
+const out = tn.parse('ab:7')
+out.kids[0]  // => ({ d: '7' })
+out.src      // => 'ab:'
+```
+
+`body` built its object and it is right there in `kids` — but `doc.src`
+is `'ab:'`, not `'ab:7'`, because `body` gave a value rather than text.
+Mixing the two like this is supported; just do not read `src` on a node
+that contains an annotated rule.
+
+Inside an **annotated** rule the same loss would be the whole answer, so
+it is refused instead. `top = "<" ( inner ) ">"` with `; @array` and an
+annotated `inner` would have built `[""]` — the element is the text of
+the group, and `inner` contributed none. Making the annotated rule the
+part itself is the fix, since a part that *is* an annotated rule nests
+rather than resolving to text:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  top   = "<" inner ">"   ; @array
+  inner = d               ; @object d
+  d     = 1*DIGIT
+`)
+
+tn.parse('<7>') // => [{ d: '7' }]
+```
+
+The refusal follows plain rule references too, not just groups and
+repetitions — an ordinary intermediate rule loses the text in exactly
+the same way.
 
 ## Attach user actions to build a custom value
 

@@ -271,3 +271,30 @@ func TestAnnotationNestsThroughAPureAlias(t *testing.T) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 }
+
+// A rule that builds a value gives no text to what contains it, so a
+// group or an intermediate rule wrapping one has nothing to resolve to —
+// `"<" ( inner ) ">"` as an array built [""]. And the fix the refusal
+// points at has to work: a part that IS an annotated rule nests.
+func TestAnnotationPartMustBeTheAnnotatedRuleItself(t *testing.T) {
+	for label, c := range map[string]struct{ src, want string }{
+		"a group wrapping an annotated rule": {
+			"top = \"<\" ( inner ) \">\"   ; @array\n" +
+				"inner = d   ; @object d\nd = 1*DIGIT\n",
+			"builds a value of its own"},
+		"a rule that recurses into itself": {
+			"top = 1*DIGIT [ \"+\" top ]   ; @array\n",
+			"reaches 'top' itself"},
+	} {
+		_, err := Abnf(c.src, nil)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want it to mention %q", label, err, c.want)
+		}
+	}
+
+	src := "top = \"<\" inner \">\"   ; @array\ninner = d   ; @object d\nd = 1*DIGIT\n"
+	got := annotBuild(t, src, "<7>", "top")
+	if !jsonEq(got, []any{map[string]any{"d": "7"}}) {
+		t.Errorf("got %#v, want [{d:7}]", got)
+	}
+}

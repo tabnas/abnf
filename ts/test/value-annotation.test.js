@@ -163,6 +163,28 @@ describe('value annotations in comments', () => {
         /erases the value 'leaf' is annotated to build/)
     })
 
+    it('a part that only REACHES an annotated rule', () => {
+      // A rule that builds a value gives no text to what contains it, so
+      // a group or an intermediate rule wrapping one has nothing to
+      // resolve to — `["<" ( inner ) ">"]` built `[""]`.
+      convertFails(
+        'top = "<" ( inner ) ">"   ; @array\n' +
+        'inner = d   ; @object d\nd = 1*DIGIT\n',
+        /builds a value of its own/)
+      convertFails(
+        'top = 1*DIGIT [ "+" top ]   ; @array\n',
+        /reaches 'top' itself/)
+    })
+
+    it('builds it when the annotated rule IS the part', () => {
+      // The fix the refusal above points at has to work: a part that is
+      // an annotated rule nests instead of resolving to text.
+      assert.deepEqual(
+        build('top = "<" inner ">"   ; @array\n' +
+          'inner = d   ; @object d\nd = 1*DIGIT\n', '<7>', 'top'),
+        [{ d: '7' }])
+    })
+
     it('nests through an annotated pure alias instead of refusing', () => {
       // Not a refusal — the opposite. A pure alias is the one caller
       // left-recursion elimination does not substitute into, so this
