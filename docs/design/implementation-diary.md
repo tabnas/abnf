@@ -297,6 +297,14 @@ reload with `gs.ref={'@op:o:INC':r=>{r.node.delta=7}}` → `delta:7`, tree intac
 - Serialized **rule-phase** slots (bo/ao/bc/ac bound at load). Alt-action slots
   work; rule-phase still relies on `fnref` with functions in `gs.ref` keyed
   `@<rule>-<phase>`, which is serializable-by-name but untested here.
+- **Collecting a repetition into an `; @array`.** A repetition is one pushing
+  part, so `list = item *( "," item )` with `; @array` builds
+  `["1", ",2,3"]` — the run's source text as a single element. No ABNF spelling
+  of a variable-length list works today; only fixed arity does. The value
+  builders are missing the splice `@capture$` already has for trees, and the
+  fold `@fold$` already has for same-depth repeats. Options, costs and a
+  recommendation (refuse now, `@push$ {spread}` plus value-mode propagation
+  later) in [`array-repetition.md`](./array-repetition.md).
 
 ---
 
