@@ -159,6 +159,34 @@ that rule inlined — so it does **not** appear as a separate child node.
 `p = q "a"` would inline `q`. If you want a sub-rule to stay visible in
 the tree, don't put its reference at the very start of an alternative.
 
+### Overlapping character classes
+
+Two `%x` ranges can cover the same character — `DIGIT` is `%x30-39`, and
+RFC 3986's `dec-octet` also names `%x31-39`. The lexer produces exactly
+one token per position, so something has to decide which of the two a
+`5` is.
+
+The compiler decides it, by construction. Classes that overlap are laid
+over a shared **partition**: the coarsest set of disjoint spans such
+that every class is an exact union of them. `%x30-39` beside `%x31-39`
+partitions into `[0-0]` and `[1-9]`. Each span gets its own lexer token,
+and a class that spans several of them is emitted as a token *set* over
+those tokens, so `DIGIT` still matches any digit while `%x31-39` matches
+only the second span. No character matches two tokens, so nothing is
+left for the order the classes happen to be allocated in to decide.
+
+This matters because that order used to decide it. Whichever of two
+overlapping classes was allocated first won every character they shared,
+and every alternative keyed on the loser was unreachable — so
+`dec-octet = DIGIT / %x31-39 DIGIT` accepted `5` and rejected `42`,
+while the same rule with its alternatives the other way round did the
+reverse. Allocation order follows the order productions are visited, so
+the same language written two ways compiled to two different parsers.
+
+Classes that overlap nothing are untouched: one token, exactly as
+before. Most grammars have no overlapping classes at all and emit an
+identical token table either way.
+
 ## Multi-segment alternatives and chains
 
 A "single-segment" alternative has at most one rule reference, at the
