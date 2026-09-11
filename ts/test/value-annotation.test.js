@@ -128,5 +128,53 @@ describe('value annotations in comments', () => {
       fails('top = a "." b   ; @object a 9nope\na = 1*DIGIT\nb = 1*DIGIT\n',
         /is not a rule name/)
     })
+
+    // The four above are the front-end's own — they are about the
+    // COMMENT. The two below come from the compiler, and are here
+    // because they are what an ABNF author actually hits, in ABNF's own
+    // words. They reach the author through `abnfConvert`, not
+    // `parseAbnf`: the comment is well-formed, the grammar is not.
+    const convertFails = (src, re) =>
+      assert.throws(() => abnf(src), (e) => {
+        assert.match(e.message, /^abnf: /,
+          'the diagnostic must name ABNF, not the compiler underneath')
+        assert.match(e.message, re)
+        return true
+      })
+
+    it('a leading member whose own rule builds a value', () => {
+      // A rule's first reference is folded into it, which erases that
+      // rule's builders — the member would hold an internal node. The
+      // guide documents the fix (put a literal first); this pins that
+      // the author is TOLD so rather than handed the node.
+      convertFails(
+        'top = inner "," x   ; @object inner x\n' +
+        'inner = a "." b     ; @object a b\n' +
+        'a = 1*DIGIT\nb = 1*DIGIT\nx = 1*DIGIT\n',
+        /erases the value it would have built/)
+    })
+
+    it('a group that is a part but cannot be named', () => {
+      // A group produces a value, so it is a member and must be named —
+      // but a member name has to be a rule name, and a group has none.
+      // The shape is therefore un-annotatable today. Refusing is the
+      // point: naming only `c` used to key the GROUP as `c` and then
+      // overwrite it.
+      convertFails(
+        'top = ( a / b ) c   ; @object c\n' +
+        'a = 1*DIGIT\nb = 1*ALPHA\nc = 1*DIGIT\n',
+        /names 1 member but has 2 parts that produce a value/)
+    })
+  })
+
+  // A repetition is ONE part, so its whole run is one element. This is
+  // not the behaviour anyone wants from `; @array` on the ABNF list
+  // idiom, and the guide says so — but it is the behaviour, and pinning
+  // it means a change to it has to be deliberate rather than a surprise.
+  it('takes a repetition as a single array element', () => {
+    const src = 'list = item *( "," item )   ; @array\nitem = 1*DIGIT\n'
+    assert.deepEqual(build(src, '1,2,3', 'list'), ['1', ',2,3'])
+    assert.deepEqual(build(src, '1', 'list'), ['1', ''],
+      'and an empty run is an empty-string element, not an absent one')
   })
 })

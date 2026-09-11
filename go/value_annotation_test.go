@@ -198,3 +198,57 @@ func TestAnnotationRefusals(t *testing.T) {
 		}
 	}
 }
+
+// The refusals above are the front-end's own — they are about the
+// COMMENT, and ParseAbnf raises them. These come from the compiler
+// underneath, and are here because they are what an ABNF author actually
+// hits: the comment is well-formed, the grammar is not. They must reach
+// the author in ABNF's own words, never as "bnf:". Mirrors
+// ts/test/value-annotation.test.js.
+func TestAnnotationCompilerRefusals(t *testing.T) {
+	cases := map[string]struct{ src, want string }{
+		// A rule's first reference is folded into it, which erases that
+		// rule's builders — the member would hold an internal node.
+		"a leading member that builds a value": {
+			"top = inner \",\" x   ; @object inner x\n" +
+				"inner = a \".\" b     ; @object a b\n" +
+				"a = 1*DIGIT\nb = 1*DIGIT\nx = 1*DIGIT\n",
+			"erases the value it would have built"},
+		// A group produces a value, so it is a member and must be named —
+		// but a member name has to be a rule name, and a group has none.
+		// Naming only `c` used to key the GROUP as `c` and then overwrite
+		// it, which is why refusing is the point.
+		"a group that cannot be named": {
+			"top = ( a / b ) c   ; @object c\n" +
+				"a = 1*DIGIT\nb = 1*ALPHA\nc = 1*DIGIT\n",
+			"names 1 member but has 2 parts that produce a value"},
+	}
+	for label, c := range cases {
+		_, err := Abnf(c.src, nil)
+		if err == nil {
+			t.Errorf("%s: expected a refusal, got none", label)
+			continue
+		}
+		if !strings.HasPrefix(err.Error(), "abnf: ") {
+			t.Errorf("%s: diagnostic must name ABNF, got %q", label, err.Error())
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %q, want it to mention %q", label, err.Error(), c.want)
+		}
+	}
+}
+
+// A repetition is ONE part, so its whole run is one element. This is not
+// the behaviour anyone wants from `; @array` on the ABNF list idiom, and
+// ts/doc/guide.md says so — but it is the behaviour, and pinning it means
+// a change to it has to be deliberate rather than a surprise.
+func TestAnnotationTakesARepetitionAsOneElement(t *testing.T) {
+	src := "list = item *( \",\" item )   ; @array\nitem = 1*DIGIT\n"
+	if got := annotBuild(t, src, "1,2,3", "list"); !jsonEq(got, []any{"1", ",2,3"}) {
+		t.Errorf("got %#v, want [1 ,2,3]", got)
+	}
+	// An empty run is an empty-string element, not an absent one.
+	if got := annotBuild(t, src, "1", "list"); !jsonEq(got, []any{"1", ""}) {
+		t.Errorf("got %#v, want [1 \"\"]", got)
+	}
+}
