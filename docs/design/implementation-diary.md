@@ -315,9 +315,11 @@ reload with `gs.ref={'@op:o:INC':r=>{r.node.delta=7}}` → `delta:7`, tree intac
   value. A Go slice is a value where a JS array is a reference, so
   `@push$` must re-publish the grown header, and it re-published one
   level up — while a right-recursive repetition grows the list at every
-  depth. `tabnas/parser` #167 walks the seeding chain instead, which also
-  retires a divergence `go/doc/differences.md` had recorded as traded
-  away.
+  depth. `tabnas/parser` #167 names the owning rule instead, so the growth is
+  one write at any depth, and retires a divergence
+  `go/doc/differences.md` had recorded as traded away. Its first version
+  walked the ancestors and was Θ(n²) in the length of the list — correct,
+  and still wrong; the review caught it.
 
 ---
 

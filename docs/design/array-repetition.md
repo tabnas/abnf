@@ -358,25 +358,35 @@ a value struct too.
 
 **Fixed in `tabnas/parser` #167**, and not by the representation change
 this section first proposed. Making the list node a reference would have
-touched all 82 places that handle `[]any`; the write-back only has to
-reach further. `@push$` now walks the SEEDING chain — from the pushing
-rule up through the rules still holding the container they were handed,
-stopping at the rule that allocated it — following, at each hop, the link
-the node actually came from: the replaced rule for an `r:`, the pusher
-otherwise. Following `Parent` alone walks past the replaced rule and out
-of the chain, since `list` replaces itself with `list$step1` before
-pushing the repetition and the replacement is parented ABOVE `list`.
+touched all 82 places that handle `[]any`. Instead every rule now knows
+which rule holds the authoritative copy of the container it is building
+into — a new unexported `Rule.nodeOwner`, seeded down from the parent on
+a push and from the REPLACED rule on an `r:`. `@push$` grows that rule's
+list and writes it back there: one write, whatever the depth.
 
-A new unexported `Rule.nodeSeeded` is what makes it decidable, and is why
-it is a separate walk rather than a wider `sameGrownList`: "still holding
-the list I grew" is not a question slice identity can answer, but "was
-handed this container and never allocated one of its own" is. Go-only
-bookkeeping — no API, spec-format or schema change, and nothing for the
-other ports to mirror.
+The second seeding link is load-bearing. `list` replaces itself with
+`list$step1` before pushing the repetition, and the replacement is
+parented ABOVE `list`, so inheriting through `Parent` alone would skip
+the owner — the list would reach everything except the rule whose value
+is read.
 
-It buys more than this feature: the one-level write-back was a general
-limit on how deep ANY value grammar could accumulate, and it retires the
-case `go/doc/differences.md` recorded as deliberately traded away.
+Naming the owner rather than searching for it is also what keeps it
+linear. The first version of the fix walked the ancestors on each append,
+which is Θ(n²) in the length of the list and reachable from untrusted
+input: 1600 elements took 32.8 ms walking against 4.0 ms with the owner.
+Caught in review, and worth recording because the walk *worked* — it was
+correct and quadratic, which is the kind of fix that passes every test
+and is still wrong.
+
+Slice identity could never have answered "who still holds this?" — two
+distinct empty slices share a data pointer, and a list is empty exactly
+when the first push happens. Naming the owner removes the question rather
+than answering it, and retires the case `go/doc/differences.md` recorded
+as deliberately traded away. Go-only bookkeeping: no API, spec-format or
+schema change, and nothing for the other ports to mirror.
+
+It buys more than this feature — the one-level write-back was a general
+limit on how deep ANY value grammar could accumulate.
 
 ## 7. Related
 
