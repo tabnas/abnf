@@ -57,6 +57,17 @@ func parseAbnf(src string) (*abnfGrammar, error) {
 		return nil, &AbnfParseError{
 			Message: "abnf: parse error: " + msg}
 	}
+	// BEFORE merging, not after. mergeIncrementals drops each `=/`
+	// production, keeping only the base's span — so an annotation on an
+	// incremental line was resolved against a production list that no
+	// longer contained the line it followed, and attached to whatever rule
+	// happened to be declared before it instead. `a = "a"`, `b = 1*DIGIT`,
+	// `a =/ "c" ; @object` silently annotated **b**. TS moved first; this
+	// mirrors it, which also puts an annotation diagnostic ahead of the
+	// incremental-merge one in both runtimes.
+	if aerr := attachValueAnnotations(src, productions); aerr != nil {
+		return nil, aerr
+	}
 	merged, merr := mergeIncrementals(productions)
 	if merr != nil {
 		return nil, merr
@@ -71,9 +82,6 @@ func parseAbnf(src string) (*abnfGrammar, error) {
 	// test/spec/alignment-abnf-errors.tsv, which both suites run.
 	if herr := rejectHoles(merged); herr != nil {
 		return nil, herr
-	}
-	if aerr := attachValueAnnotations(src, merged); aerr != nil {
-		return nil, aerr
 	}
 	withCore := withCoreRules(merged)
 	return &abnfGrammar{Productions: withCore}, nil
@@ -163,19 +171,24 @@ func attachValueAnnotations(src string, prods []*abnfProduction) error {
 		return ordered[i].Sp.S < ordered[j].Sp.S
 	})
 
+	idx := 0
 	for _, c := range annotationComments(src) {
 		m := annotationRe.FindStringSubmatch(c.body)
 		if m == nil {
 			continue
 		}
 
+		// Both `ordered` and the comments are in source order, so the
+		// search only ever moves FORWARD — idx is not reset per comment.
+		// Restarting it made attachment quadratic in the number of
+		// annotated rules, which a generated grammar can make expensive
+		// for nothing.
+		for idx < len(ordered) && ordered[idx].Sp.S < c.at {
+			idx++
+		}
 		var owner *abnfProduction
-		for _, p := range ordered {
-			if p.Sp.S < c.at {
-				owner = p
-			} else {
-				break
-			}
+		if idx > 0 {
+			owner = ordered[idx-1]
 		}
 		if owner == nil {
 			return &AbnfParseError{Message: fmt.Sprintf(
@@ -202,12 +215,24 @@ func attachValueAnnotations(src string, prods []*abnfProduction) error {
 						"'%s'.", owner.Name, strings.Join(members, " "))}
 			}
 		} else {
+			seen := map[string]bool{}
 			for _, name := range members {
 				if !memberNameRe.MatchString(name) {
 					return &AbnfParseError{Message: fmt.Sprintf(
 						"abnf: rule '%s': '%s' is not a rule name, so it cannot "+
 							"name a member of '@object'.", owner.Name, name)}
 				}
+				// Each member is a separate KEY. Two parts named the same
+				// thing both write to it, so the second silently overwrites
+				// the first and that much of the input is gone.
+				if seen[name] {
+					return &AbnfParseError{Message: fmt.Sprintf(
+						"abnf: rule '%s': '@object' names '%s' twice. Each "+
+							"member is a separate key, so the second part would "+
+							"overwrite the first. Give them different names.",
+						owner.Name, name)}
+				}
+				seen[name] = true
 			}
 		}
 
@@ -360,6 +385,18 @@ func mergeIncrementals(prods []*abnfProduction) ([]*abnfProduction, error) {
 					"abnf: '%s =/ …' has no earlier '%s = …' to extend", p.Name, p.Name)}
 			}
 			base.Alts = append(base.Alts, p.Alts...)
+			// This production is about to be dropped, and annotations are
+			// now attached before that happens — so an annotation on the
+			// `=/` line has to move to the base, which IS the rule it
+			// describes.
+			if p.Value != nil {
+				if base.Value != nil {
+					return nil, &AbnfParseError{Message: fmt.Sprintf(
+						"abnf: rule '%s' has more than one value annotation. A "+
+							"rule builds one thing.", p.Name)}
+				}
+				base.Value = p.Value
+			}
 			continue
 		}
 		// Rebuilt field by field, so every field carried on a production
@@ -368,9 +405,10 @@ func mergeIncrementals(prods []*abnfProduction) ([]*abnfProduction, error) {
 		if p.NodeKind != "" {
 			clean.NodeKind = p.NodeKind
 		}
-		// Annotations are attached AFTER this runs, so nothing to carry
-		// today — but this rebuild is exactly the shape that drops a field
-		// without a word, and the compiler downstream had six of these and
+		// Annotations are attached BEFORE this runs, so this carry is live:
+		// without it every annotation in the grammar would vanish here
+		// without a word. This rebuild is exactly the shape that drops a
+		// field silently, and the compiler downstream had six of them and
 		// shipped with all six dropping it.
 		if p.Value != nil {
 			clean.Value = p.Value

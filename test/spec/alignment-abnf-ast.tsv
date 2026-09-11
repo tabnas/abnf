@@ -34,3 +34,8 @@ x = "0" [ *d t ]\nd = %x31-39\nt = %x61-7A	0123a	{"rule":"x","src":"0123a","kids
 s = p *d [ t ]\np = %x31-39\nd = %x30-39\nt = %x61-7A	12a	{"rule":"s","src":"12a","kids":[{"rule":"d","src":"2","kids":[]},{"rule":"t","src":"a","kids":[]}]}
 s = p *d [ t ]\np = %x31-39\nd = %x30-39\nt = %x61-7A	120	{"rule":"s","src":"120","kids":[{"rule":"d","src":"2","kids":[]},{"rule":"d","src":"0","kids":[]}]}
 s = 1*DIGIT ALPHA	123a	{"rule":"s","src":"123a","kids":[]}
+ver = maj "." min "." pat   ; @object maj min pat\nmaj = 1*DIGIT\nmin = 1*DIGIT\npat = 1*DIGIT	1.2.30	{"maj":"1","min":"2","pat":"30"}
+top = name "=" inner   ; @object name inner\nname = 1*ALPHA\ninner = maj "." min   ; @object maj min\nmaj = 1*DIGIT\nmin = 1*DIGIT	ab=1.2	{"name":"ab","inner":{"maj":"1","min":"2"}}
+pair = a "," b   ; @array\na = 1*DIGIT\nb = 1*ALPHA	1,xy	["1","xy"]
+top = "<" inner ">"   ; @array\ninner = d   ; @object d\nd = 1*DIGIT	<7>	[{"d":"7"}]
+top = child   ; @object child\nchild = d   ; @object d\nd = 1*DIGIT	7	{"child":{"d":"7"}}

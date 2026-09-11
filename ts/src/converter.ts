@@ -711,8 +711,14 @@ function parseAbnf(src: string): AbnfGrammar {
   if (!Array.isArray(productions) || productions.length === 0) {
     throw new AbnfParseError('abnf: no productions found')
   }
+  // BEFORE merging, not after. `mergeIncrementals` drops each `=/`
+  // production, keeping only the base's span — so an annotation on an
+  // incremental line was resolved against a production list that no
+  // longer contained the line it followed, and attached to whatever rule
+  // happened to be declared before it instead. `a = "a"`, `b = 1*DIGIT`,
+  // `a =/ "c" ; @object` silently annotated **b**.
+  attachValueAnnotations(src, productions)
   const merged = mergeIncrementals(productions)
-  attachValueAnnotations(src, merged)
   return { productions: withCoreRules(merged) }
 }
 
@@ -781,15 +787,18 @@ function attachValueAnnotations(
     .sort((a, b) => (a.sp as SrcSpan).s - (b.sp as SrcSpan).s)
   if (0 === ordered.length) return
 
+  let idx = 0
   for (const { at, body } of annotationComments(src)) {
     const m = ANNOTATION.exec(body)
     if (null == m) continue
 
-    let owner: AbnfProduction | undefined
-    for (const p of ordered) {
-      if ((p.sp as SrcSpan).s < at) owner = p
-      else break
-    }
+    // Both `ordered` and the comments are in source order, so the search
+    // only ever moves FORWARD — `idx` is not reset per comment. Restarting
+    // it made attachment quadratic in the number of annotated rules, which
+    // a generated grammar can make expensive for nothing.
+    while (idx < ordered.length && (ordered[idx].sp as SrcSpan).s < at) idx++
+    const owner: AbnfProduction | undefined =
+      0 < idx ? ordered[idx - 1] : undefined
     if (null == owner) {
       throw new AbnfParseError(
         `abnf: '; ${body}' appears before any rule, so there is nothing ` +
@@ -810,6 +819,7 @@ function attachValueAnnotations(
         )
       }
     } else {
+      const seen = new Set<string>()
       for (const name of members) {
         if (!MEMBER_NAME.test(name)) {
           throw new AbnfParseError(
@@ -817,6 +827,17 @@ function attachValueAnnotations(
             `it cannot name a member of '@object'.`,
           )
         }
+        // Each member is a separate KEY. Two parts named the same thing
+        // both write to it, so the second silently overwrites the first
+        // and that much of the input is gone from the result.
+        if (seen.has(name)) {
+          throw new AbnfParseError(
+            `abnf: rule '${owner.name}': '@object' names '${name}' twice. ` +
+            `Each member is a separate key, so the second part would ` +
+            `overwrite the first. Give them different names.`,
+          )
+        }
+        seen.add(name)
       }
     }
 
@@ -996,6 +1017,18 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
         )
       }
       base.alts.push(...p.alts)
+      // This production is about to be dropped, and annotations are now
+      // attached before that happens — so an annotation on the `=/` line
+      // has to move to the base, which IS the rule it describes.
+      if (p.value) {
+        if (base.value) {
+          throw new AbnfParseError(
+            `abnf: rule '${p.name}' has more than one value annotation. A ` +
+            `rule builds one thing.`,
+          )
+        }
+        base.value = p.value
+      }
       continue
     }
     // Strip the (absent) flag on a cleanly-written production so
@@ -1004,11 +1037,10 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
     // has to be listed here or it is silently dropped — `sp` included.
     const clean: AbnfProduction = { name: p.name, alts: p.alts, sp: p.sp }
     if (p.nodeKind) clean.nodeKind = p.nodeKind
-    // Annotations are attached AFTER this runs, so nothing to carry
-    // today — but this rebuild is the reason the note above exists, and
-    // an annotation set earlier would vanish here without a word. The
-    // compiler downstream had six of these and shipped with all six
-    // dropping it.
+    // Annotations are attached BEFORE this runs, so this carry is live:
+    // without it every annotation in the grammar would vanish here
+    // without a word. The compiler downstream had six rebuilds like this
+    // one and shipped with all six dropping it.
     if (p.value) clean.value = p.value
     out.push(clean)
     byName.set(p.name, clean)
