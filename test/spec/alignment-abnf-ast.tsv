@@ -51,3 +51,6 @@ top = "<" ( "[" p "]" ) ">"   ; @array\np = 1*DIGIT	<[7]>	["[7]"]
 top = "<" *inner ">"   ; @array\ninner = d   ; @object d\nd = DIGIT	<12>	[{"d":"1"},{"d":"2"}]
 top = a *( "," a )   ; @object a rest\na = 1*DIGIT	1,2,3	{"a":"1","rest":",2,3"}
 list = ( item ) *( item )   ; @array\nitem = DIGIT	123	["1","2","3"]
+top = *( "," )   ; @array	,,	[",,"]
+top = *item   ; @array\nitem = "x"	xxx	["xxx"]
+top = *DIGIT   ; @array	123	["1","2","3"]
