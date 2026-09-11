@@ -1,7 +1,10 @@
 package tabnasabnf
 
 import (
+	"reflect"
+	"regexp"
 	"sort"
+	"strconv"
 	"testing"
 
 	tabnas "github.com/tabnas/parser/go"
@@ -93,10 +96,33 @@ func TestClassOverlapDecOctet(t *testing.T) {
 	}
 }
 
+// classSpan reads the single character span an emitted class matcher
+// covers, or ok=false when the pattern is not one. The port spells a
+// span `[\x{0030}-\x{0039}]` where TypeScript spells it `[0-…]`, so
+// the two suites cannot share a pattern assertion — they assert the same
+// SPANS instead, which is the thing that has to agree.
+var classSpanRe = regexp.MustCompile(`^\^?\[\\x\{([0-9a-fA-F]+)\}-\\x\{([0-9a-fA-F]+)\}\]$`)
+
+func classSpan(re *regexp.Regexp) (lo, hi int64, ok bool) {
+	m := classSpanRe.FindStringSubmatch(re.String())
+	if m == nil {
+		return 0, 0, false
+	}
+	lo, err1 := strconv.ParseInt(m[1], 16, 32)
+	hi, err2 := strconv.ParseInt(m[2], 16, 32)
+	return lo, hi, err1 == nil && err2 == nil
+}
+
 // %x30-39 and %x31-39 overlap, so the atoms are [0-0] and [1-9]. Only
 // %x30-39 spans more than one of them and so becomes a set; %x31-39 IS
 // an atom and points straight at that token, and ALPHA overlaps nothing
 // and keeps the tokens it has always had.
+//
+// This asserts the emitted PARTITION, not just that a set exists. The
+// two ports are separate implementations of the same algorithm, so a
+// Go-only regression could leave one set in place while its atoms were
+// wrong or overlapping, and a test that only counted sets would stay
+// green through it.
 func TestClassOverlapEmitsSets(t *testing.T) {
 	spec, err := Abnf("top = c\nc = DIGIT / %x31-39 DIGIT / ALPHA\n", nil)
 	if err != nil {
@@ -105,6 +131,11 @@ func TestClassOverlapEmitsSets(t *testing.T) {
 	if spec.Options == nil || spec.Options.TokenSet == nil {
 		t.Fatal("no token sets emitted")
 	}
+	if spec.Options.Match == nil || spec.Options.Match.Token == nil {
+		t.Fatal("no match tokens emitted")
+	}
+	tokens := spec.Options.Match.Token
+
 	var names []string
 	for n := range spec.Options.TokenSet {
 		names = append(names, n)
@@ -118,6 +149,43 @@ func TestClassOverlapEmitsSets(t *testing.T) {
 	sort.Strings(names)
 	if len(names) != 1 {
 		t.Fatalf("expected one set (a class spanning several atoms), got %v", names)
+	}
+
+	// The set's members are the two atoms DIGIT is built from, [0-0] and
+	// [1-9], and nothing else.
+	members := spec.Options.TokenSet[names[0]]
+	var spans [][2]int64
+	for _, m := range members {
+		re, ok := tokens[m]
+		if !ok || re == nil {
+			t.Fatalf("set member %q is not a match token", m)
+		}
+		lo, hi, ok := classSpan(re)
+		if !ok {
+			t.Fatalf("set member %q is not a single-span class: %s", m, re)
+		}
+		spans = append(spans, [2]int64{lo, hi})
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+	want := [][2]int64{{'0', '0'}, {'1', '9'}}
+	if !reflect.DeepEqual(spans, want) {
+		t.Errorf("set %q covers %v, want %v", names[0], spans, want)
+	}
+
+	// Every class token in the grammar, not only this set's members: the
+	// partition is only a partition if nothing overlaps.
+	var all [][2]int64
+	for _, re := range tokens {
+		if lo, hi, ok := classSpan(re); ok {
+			all = append(all, [2]int64{lo, hi})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i][0] < all[j][0] })
+	for i := 1; i < len(all); i++ {
+		if all[i-1][1] >= all[i][0] {
+			t.Errorf("class token spans overlap: %v", all)
+			break
+		}
 	}
 }
 
