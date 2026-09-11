@@ -213,7 +213,13 @@ func TestAnnotationCompilerRefusals(t *testing.T) {
 			"top = inner \",\" x   ; @object inner x\n" +
 				"inner = a \".\" b     ; @object a b\n" +
 				"a = 1*DIGIT\nb = 1*DIGIT\nx = 1*DIGIT\n",
-			"erases the value it would have built"},
+			"erases the value 'inner' is annotated to build"},
+		// The erasure needs a LEADING reference, not an annotated caller.
+		// `top` names nothing, so nothing looked at it, and the grammar
+		// compiled to an ordinary AST with `leaf`'s value nowhere in it.
+		"an unannotated rule that inlines an annotated one": {
+			"top = leaf \",\"\nleaf = d   ; @object d\nd = 1*DIGIT\n",
+			"erases the value 'leaf' is annotated to build"},
 		// A group produces a value, so it is a member and must be named —
 		// but a member name has to be a rule name, and a group has none.
 		// Naming only `c` used to key the GROUP as `c` and then overwrite
@@ -250,5 +256,18 @@ func TestAnnotationTakesARepetitionAsOneElement(t *testing.T) {
 	// An empty run is an empty-string element, not an absent one.
 	if got := annotBuild(t, src, "1", "list"); !jsonEq(got, []any{"1", ""}) {
 		t.Errorf("got %#v, want [1 \"\"]", got)
+	}
+}
+
+// Not a refusal — the opposite. A pure alias is the one caller
+// left-recursion elimination does not substitute into, so an annotated
+// alias of an annotated rule works and must not be caught by the
+// leading-reference rule above.
+func TestAnnotationNestsThroughAPureAlias(t *testing.T) {
+	src := "top = child   ; @object child\nchild = d   ; @object d\nd = 1*DIGIT\n"
+	got := annotBuild(t, src, "7", "top")
+	want := map[string]any{"child": map[string]any{"d": "7"}}
+	if !jsonEq(got, want) {
+		t.Errorf("got %#v, want %#v", got, want)
 	}
 }

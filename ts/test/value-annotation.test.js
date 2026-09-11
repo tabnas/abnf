@@ -151,7 +151,26 @@ describe('value annotations in comments', () => {
         'top = inner "," x   ; @object inner x\n' +
         'inner = a "." b     ; @object a b\n' +
         'a = 1*DIGIT\nb = 1*DIGIT\nx = 1*DIGIT\n',
-        /erases the value it would have built/)
+        /erases the value 'inner' is annotated to build/)
+    })
+
+    it('an UNANNOTATED rule that inlines an annotated one', () => {
+      // The erasure needs a LEADING reference, not an annotated caller.
+      // `top` names nothing, so nothing looked at it, and the grammar
+      // compiled to an ordinary AST with `leaf`'s value nowhere in it.
+      convertFails(
+        'top = leaf ","\nleaf = d   ; @object d\nd = 1*DIGIT\n',
+        /erases the value 'leaf' is annotated to build/)
+    })
+
+    it('nests through an annotated pure alias instead of refusing', () => {
+      // Not a refusal — the opposite. A pure alias is the one caller
+      // left-recursion elimination does not substitute into, so this
+      // shape works and must not be caught by the rule above.
+      assert.deepEqual(
+        build('top = child   ; @object child\n' +
+          'child = d   ; @object d\nd = 1*DIGIT\n', '7', 'top'),
+        { child: { d: '7' } })
     })
 
     it('a group that is a part but cannot be named', () => {
