@@ -134,6 +134,210 @@ tn.parse('135').rule // => 'number'
 Here `number` accepts only odd digits, because the local `DIGIT`
 shadows the core one.
 
+## Build a value instead of a tree
+
+By default a grammar produces a parse tree — a `rule`/`src`/`kids` node
+per rule. A trailing comment can say what a rule should build instead:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  ver = maj "." min "." pat   ; @object maj min pat
+  maj = 1*DIGIT
+  min = 1*DIGIT
+  pat = 1*DIGIT
+`)
+
+tn.parse('1.2.30') // => { maj: '1', min: '2', pat: '30' }
+```
+
+The keys are the names in the annotation. Nothing in the input spells
+them — `1.2.30` contains no `maj` — so they can only come from the
+comment.
+
+A comment is the only place in RFC 5234 that carries no meaning of its
+own, which is why the annotation can live there without changing what
+the grammar accepts. Delete every annotation and the same inputs parse;
+you get the tree back. That property is worth relying on: the annotation
+is about the OUTPUT, never about the language.
+
+`@object` names one member per part of the rule that produces a value. A
+part is a rule reference, a group, or a repetition; a literal produces
+nothing and is not named. So `"."` above is not a member, and
+`; @object maj min pat` names three parts for three references.
+
+### Nesting
+
+A member whose own rule is annotated is assigned whole, so values nest:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  top   = name "=" inner   ; @object name inner
+  name  = 1*ALPHA
+  inner = maj "." min      ; @object maj min
+  maj   = 1*DIGIT
+  min   = 1*DIGIT
+`)
+
+tn.parse('ab=1.2') // => { name: 'ab', inner: { maj: '1', min: '2' } }
+```
+
+Every other member is the source text the part matched. There is no
+third case: annotated means nested, unannotated means text.
+
+### Arrays
+
+`@array` names nothing. Every part that produces a value becomes an
+element, in order:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  pair = a "," b   ; @array
+  a    = 1*DIGIT
+  b    = 1*ALPHA
+`)
+
+tn.parse('1,xy') // => ['1', 'xy']
+```
+
+Elements nest by the same rule as members: an element whose rule is
+annotated is pushed whole.
+
+**A repetition is one element, not many.** `*( "," item )` is a single
+part, so its whole run arrives as one element of source text:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  list = item *( "," item )   ; @array
+  item = 1*DIGIT
+`)
+
+tn.parse('1,2,3') // => ['1', ',2,3']
+```
+
+That is consistent with "one element per part", and it is almost
+certainly not what you want. Collecting a repetition into one element
+each is not supported yet; until it is, build lists with a user action
+(see the next section) rather than `@array`.
+
+### What is refused
+
+The annotation describes the rule the author wrote, and several rewrites
+happen between that and the emitted parser. Where a rewrite would make
+the annotation describe something else, the conversion fails rather than
+building a differently-shaped value:
+
+- **More than one alternative.** One list of names cannot describe two
+  alternatives' parts. Split the rule, or annotate the alternatives' own
+  rules.
+- **A member count that does not match the parts.** Including the case
+  where a part stops being one: a rule whose whole body is a single
+  literal (`PL = "+"`) becomes a lexer token, so it is no longer a part.
+  Give it a body that is not a bare terminal to keep it nameable.
+- **A leading member whose own rule builds a value.** A rule's first
+  reference is folded into it by left-recursion elimination, which
+  erases that rule's builders — the member would hold an internal node
+  instead of the value you asked for. Putting a literal before it stops
+  the fold:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  top   = "v" inner "," x   ; @object inner x
+  inner = a "." b           ; @object a b
+  a     = 1*DIGIT
+  b     = 1*DIGIT
+  x     = 1*DIGIT
+`)
+
+tn.parse('v1.2,3') // => { inner: { a: '1', b: '2' }, x: '3' }
+```
+
+- **A leading member whose rule is not one part.** Same fold, followed
+  through aliases: if it resolves to a body with more than one part, the
+  boundary you drew would be lost.
+- **A source-text member that reaches a value-building rule.** See the
+  next section.
+
+Each refusal names the rule and says what to change.
+
+### A rule that builds a value produces no text
+
+This is the one rule to carry away, and everything above follows from
+it: a rule with an annotation contributes its **value** to whatever
+contains it, and no **text**. Its object becomes a child; it is not a
+span of characters any more.
+
+Two consequences, with different severity.
+
+Inside a plain (unannotated) grammar this is mild — the value lands
+where you expect, and only the enclosing node's `src` is short of it:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  doc  = head ":" body
+  head = 1*ALPHA
+  body = d        ; @object d
+  d    = 1*DIGIT
+`)
+
+const out = tn.parse('ab:7')
+out.kids[0]  // => ({ d: '7' })
+out.src      // => 'ab:'
+```
+
+`body` built its object and it is right there in `kids` — but `doc.src`
+is `'ab:'`, not `'ab:7'`, because `body` gave a value rather than text.
+Mixing the two like this is supported; just do not read `src` on a node
+that contains an annotated rule.
+
+Inside an **annotated** rule the same loss would be the whole answer, so
+it is refused instead. `top = "<" ( inner ) ">"` with `; @array` and an
+annotated `inner` would have built `[""]` — the element is the text of
+the group, and `inner` contributed none. Making the annotated rule the
+part itself is the fix, since a part that *is* an annotated rule nests
+rather than resolving to text:
+
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { abnf } = require('@tabnas/abnf')
+
+const tn = new Tabnas({ plugins: [abnf] })
+tn.abnf(`
+  top   = "<" inner ">"   ; @array
+  inner = d               ; @object d
+  d     = 1*DIGIT
+`)
+
+tn.parse('<7>') // => [{ d: '7' }]
+```
+
+The refusal follows plain rule references too, not just groups and
+repetitions — an ordinary intermediate rule loses the text in exactly
+the same way.
+
 ## Attach user actions to build a custom value
 
 Pass `actions` to the plugin call to run your own code on a matched

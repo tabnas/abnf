@@ -32,6 +32,11 @@ type probeDispatchSpec = bnf.ProbeDispatchSpec
 type probeHelperSpec = bnf.ProbeHelperSpec
 type tailRepeatSpec = bnf.TailRepeatSpec
 
+// ValueAnnotation is EXPORTED, unlike the aliases above: it is what a
+// caller reads off a production to see what the grammar says it builds,
+// and what a test asserts against. The rest of the IR stays internal.
+type ValueAnnotation = bnf.ValueAnnotation
+
 const maxInfinity = bnf.MaxInfinity
 
 const (

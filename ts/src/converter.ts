@@ -711,8 +711,144 @@ function parseAbnf(src: string): AbnfGrammar {
   if (!Array.isArray(productions) || productions.length === 0) {
     throw new AbnfParseError('abnf: no productions found')
   }
+  // BEFORE merging, not after. `mergeIncrementals` drops each `=/`
+  // production, keeping only the base's span — so an annotation on an
+  // incremental line was resolved against a production list that no
+  // longer contained the line it followed, and attached to whatever rule
+  // happened to be declared before it instead. `a = "a"`, `b = 1*DIGIT`,
+  // `a =/ "c" ; @object` silently annotated **b**.
+  attachValueAnnotations(src, productions)
   const merged = mergeIncrementals(productions)
   return { productions: withCoreRules(merged) }
+}
+
+
+// A trailing comment claiming a value annotation:
+//
+//   ver = maj "." min "." pat    ; @object maj min pat
+//   tags = tag *("," tag)        ; @array
+//
+// RFC 5234 has nowhere else to put this. A comment is the only place in
+// the notation that carries no meaning of its own, which is exactly why
+// it can carry one here without changing what the grammar accepts: strip
+// every annotation and the same language parses, just into a tree
+// instead of a value.
+//
+// ONLY `@object` and `@array` are claimed. Any other `; @…` comment is
+// left alone — the notation has no directive namespace, so this must not
+// assume one, and a reader's own `; @deprecated` has to keep meaning
+// nothing.
+const ANNOTATION = /^@(object|array)\b\s*(.*)$/
+const MEMBER_NAME = /^[A-Za-z][A-Za-z0-9-]*$/
+
+
+// Every `;` comment in the source that claims an annotation, with the
+// offset it starts at.
+//
+// Quoted strings and prose are skipped: a `;` inside `"a;b"` or
+// `<a;b>` is CONTENT, not a comment, and treating it as one would
+// silently attach an annotation that the author did not write.
+function* annotationComments(
+  src: string,
+): Generator<{ at: number; body: string }> {
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]
+    if ('"' === ch || '<' === ch) {
+      // RFC 5234 char-val and prose-val have no escapes, so the next
+      // closing mark ends them.
+      const close = src.indexOf('"' === ch ? '"' : '>', i + 1)
+      i = close < 0 ? src.length : close
+      continue
+    }
+    if (';' !== ch) continue
+    let end = src.indexOf('\n', i)
+    if (end < 0) end = src.length
+    const body = src.slice(i + 1, end).trim()
+    if (body.startsWith('@')) yield { at: i, body }
+    i = end
+  }
+}
+
+
+// Attach each annotation to the production it FOLLOWS — the last one
+// that begins before it.
+//
+// Not "the production on the same line": a rule may be written across
+// several lines, and an author putting the annotation on the last of
+// them means the same thing. Following the definition is the rule that
+// reads the same either way.
+function attachValueAnnotations(
+  src: string,
+  prods: AbnfProduction[],
+): void {
+  const ordered = prods
+    .filter((p) => null != p.sp)
+    .slice()
+    .sort((a, b) => (a.sp as SrcSpan).s - (b.sp as SrcSpan).s)
+  if (0 === ordered.length) return
+
+  let idx = 0
+  for (const { at, body } of annotationComments(src)) {
+    const m = ANNOTATION.exec(body)
+    if (null == m) continue
+
+    // Both `ordered` and the comments are in source order, so the search
+    // only ever moves FORWARD — `idx` is not reset per comment. Restarting
+    // it made attachment quadratic in the number of annotated rules, which
+    // a generated grammar can make expensive for nothing.
+    while (idx < ordered.length && (ordered[idx].sp as SrcSpan).s < at) idx++
+    const owner: AbnfProduction | undefined =
+      0 < idx ? ordered[idx - 1] : undefined
+    if (null == owner) {
+      throw new AbnfParseError(
+        `abnf: '; ${body}' appears before any rule, so there is nothing ` +
+        `for it to annotate. A value annotation goes after the rule it ` +
+        `describes.`,
+      )
+    }
+
+    const kind = m[1] as 'object' | 'array'
+    const members = m[2].split(/[\s,]+/).filter((w) => '' !== w)
+
+    if ('array' === kind) {
+      if (0 < members.length) {
+        throw new AbnfParseError(
+          `abnf: rule '${owner.name}': '@array' names no members — every ` +
+          `part that produces a value becomes an element, in order. Got ` +
+          `'${members.join(' ')}'.`,
+        )
+      }
+    } else {
+      const seen = new Set<string>()
+      for (const name of members) {
+        if (!MEMBER_NAME.test(name)) {
+          throw new AbnfParseError(
+            `abnf: rule '${owner.name}': '${name}' is not a rule name, so ` +
+            `it cannot name a member of '@object'.`,
+          )
+        }
+        // Each member is a separate KEY. Two parts named the same thing
+        // both write to it, so the second silently overwrites the first
+        // and that much of the input is gone from the result.
+        if (seen.has(name)) {
+          throw new AbnfParseError(
+            `abnf: rule '${owner.name}': '@object' names '${name}' twice. ` +
+            `Each member is a separate key, so the second part would ` +
+            `overwrite the first. Give them different names.`,
+          )
+        }
+        seen.add(name)
+      }
+    }
+
+    if (null != owner.value) {
+      throw new AbnfParseError(
+        `abnf: rule '${owner.name}' has more than one value annotation. A ` +
+        `rule builds one thing.`,
+      )
+    }
+    owner.value = 'array' === kind ? { kind } : { kind, members }
+  }
 }
 
 
@@ -881,6 +1017,18 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
         )
       }
       base.alts.push(...p.alts)
+      // This production is about to be dropped, and annotations are now
+      // attached before that happens — so an annotation on the `=/` line
+      // has to move to the base, which IS the rule it describes.
+      if (p.value) {
+        if (base.value) {
+          throw new AbnfParseError(
+            `abnf: rule '${p.name}' has more than one value annotation. A ` +
+            `rule builds one thing.`,
+          )
+        }
+        base.value = p.value
+      }
       continue
     }
     // Strip the (absent) flag on a cleanly-written production so
@@ -889,6 +1037,11 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
     // has to be listed here or it is silently dropped — `sp` included.
     const clean: AbnfProduction = { name: p.name, alts: p.alts, sp: p.sp }
     if (p.nodeKind) clean.nodeKind = p.nodeKind
+    // Annotations are attached BEFORE this runs, so this carry is live:
+    // without it every annotation in the grammar would vanish here
+    // without a word. The compiler downstream had six rebuilds like this
+    // one and shipped with all six dropping it.
+    if (p.value) clean.value = p.value
     out.push(clean)
     byName.set(p.name, clean)
   }
