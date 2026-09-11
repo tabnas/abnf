@@ -54,11 +54,15 @@ spelling of a variable-length list is handled today**, which means the half of
 the feature arrays exist for is unreachable. That is the argument for treating
 this as more than a rough edge.
 
-(The two `*item` rows need a footnote. `item = 1*DIGIT` is greedy, so on
-`123` there really is one item and `["123"]` is the right answer — they
-are not blobs. Re-measured with `item = DIGIT`, where three items are
-what the grammar means, 0.4.11 still answers `["123"]`, and those are
-blobs. The point stands; the original rows overstated it.)
+(Three rows need a footnote, because `item = 1*DIGIT` is **greedy**. On
+`123` it matches all three digits, so there genuinely is one item and
+`["123"]` is the right answer: `*item` and `1*item` are not blobs as
+written, and `( item ) *( item )`'s `["123", ""]` is one correct element
+plus a spurious empty one, not a blob either. Re-measured with
+`item = DIGIT`, where three items are what the grammar means, 0.4.11
+answers `["123"]`, `["123"]` and `["1", "23"]` — and those are blobs.
+The point stands, and the last of them is the sharpest illustration of
+it in the table; the rows as originally written overstated it.)
 
 ## 2. Why
 
@@ -141,18 +145,22 @@ Measured, not reasoned about — every row of §1.1, re-run:
 | `*( item "," ) item` | `1,2,3` | `["1,2,", "3"]` | `["1","2","3"]` |
 | `*item` | `123` | `["123"]` | `["1","2","3"]` |
 | `1*item` | `123` | `["123"]` | `["1","2","3"]` |
-| `( item ) *( item )` | `123` | `["123", ""]` | `["1","2","3"]` |
+| `( item ) *( item )` | `123` | `["1", "23"]` | `["1","2","3"]` |
 | `*( a b )` | `x1y2` | — | `["x","1","y","2"]` |
 | `a [ "," b ]` | `1` | `["1", ""]` | `["1"]` |
 
-(The `*item` and `1*item` rows are measured with `item = DIGIT`. With
-`item = 1*DIGIT` both runtimes answer `["123"]` and always did: the item
-is greedy, so there genuinely is one. The original table recorded that
-row as a blob, which overstated it.)
+(The last four rows are measured with `item = DIGIT`, `a = ALPHA`,
+`b = DIGIT` — one character each. With `item = 1*DIGIT` the item is
+greedy and swallows the run, so `*item`, `1*item` and
+`( item ) *( item )` all answer `["123"]` under A′ and always answered
+`["123"]`/`["123", ""]` before: there genuinely is one item, and no
+value-building change can alter what the lexer consumed. The original
+table recorded those as blobs, which overstated them. A one-character
+item is what makes the collection visible.)
 
 | | |
 |---|---|
-| **Engine** | **None.** No new builtin, no config, no `BUILTIN_SCHEMA_VERSION` bump, no validator rows, no three-port release. |
+| **Engine** | No new builtin, no config, no `BUILTIN_SCHEMA_VERSION` bump, no validator rows, no spec-format change, no TypeScript or Rust work. One Go-only bug fix, which still has to be released before the emitter can be — §6. |
 | **bnf** | `planArrayHelpers`, one flag per part in the annotation plan, and array mode in the three emit paths. ~200 lines per runtime. |
 | **abnf** | No syntax change. `; @array` starts working; guide and fixtures updated. |
 | **Blocked by** | Go builds the wrong value from the identical spec — §6. |
@@ -249,10 +257,20 @@ was that A was expensive enough to need a holding position; A′ is not,
 and a refusal for a shape that now works would have to be written,
 tested, documented in two runtimes and then deleted.
 
-A′ costs no engine change and no release chain. What it does cost is the
-Go engine fix in §6, which is a smaller and better-scoped change than
-the `@push$ spread` A was going to need: no spec-format change, no
-schema version, no validator rows, no TypeScript or Rust change.
+What A′ costs is **no new builtin and no schema revision** — not no
+engine release. The distinction matters, and the first draft of this
+section blurred it. The §6 fix has to ship in `@tabnas/parser` first,
+then be picked up by `@tabnas/bnf` and `@tabnas/abnf` (which pin
+`parser/go v0.9.5` and `>=0.9.5` today) before the shared fixtures can
+pass in both runtimes. That is a release chain, and publishing the
+emitter against a parser without the fix is exactly the order not to do
+it in.
+
+What A′ does save is the part that made A expensive: no `@push$ spread`,
+no `BUILTIN_SCHEMA_VERSION` 5 → 6, no validator rows, no spec-format
+change, and no TypeScript or Rust work — the fix is Go-only, and it is a
+bug fix in the engine rather than a new primitive for grammars to
+target.
 
 **Do not apply the patch before §6 lands.** Today Go answers with the
 run as text — wrong, but whole. Under A′ without the engine fix it drops
