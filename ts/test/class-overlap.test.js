@@ -85,21 +85,23 @@ describe('overlapping character classes', () => {
   })
 
   it('lays overlapping classes over disjoint atoms, and leaves the rest alone', () => {
-    // %x30-39 and %x31-39 overlap, so the atoms are [0-0] and [1-9].
-    // Only %x30-39 spans more than one of them and so becomes a set;
-    // %x31-39 IS an atom and points straight at that token, and ALPHA
-    // overlaps nothing and keeps the tokens it has always had.
+    // %x30-39 and %x31-39 overlap, so the atoms are [0-0] and [1-9] and
+    // both classes become sets over them — the second a one-member set,
+    // so that its own token name (and every mark derived from it) stays
+    // put whatever the partition does underneath. ALPHA overlaps nothing
+    // and keeps the tokens it has always had.
     const spec = abnf('top = c\nc = DIGIT / %x31-39 DIGIT / ALPHA\n')
     const sets = spec.options.tokenSet ?? {}
     assert.deepEqual(
       Object.keys(sets).sort(),
-      ['RX___U0030__U0039'],
-      'only a class spanning several atoms becomes a set',
+      ['RX___U0030__U0039', 'RX___U0031__U0039'],
+      'each overlapping class becomes a set over the atoms it covers',
     )
     assert.deepEqual(
       sets.RX___U0030__U0039,
-      ['#RX___U0030__U0030', '#RX___U0031__U0039'],
+      ['#RXA___U0030__U0030', '#RXA___U0031__U0039'],
     )
+    assert.deepEqual(sets.RX___U0031__U0039, ['#RXA___U0031__U0039'])
     // Keyed WITHOUT the leading `#`: that is the only form both engines
     // resolve (TS falls back to the stripped name, Go trims it outright).
     for (const k of Object.keys(sets)) {
@@ -109,7 +111,7 @@ describe('overlapping character classes', () => {
     // rather than trusting the names.
     const src = (p) => String(p).replace(/^\/\^?|\/$/g, '')
     const spans = Object.entries(spec.options.match.token)
-      .filter(([n]) => n.startsWith('#RX'))
+      .filter(([n]) => n.startsWith('#RXA'))
       .map(([, re]) => /\[\\u([0-9A-F]{4})-\\u([0-9A-F]{4})\]/.exec(src(re)))
       .filter(Boolean)
       .map((m) => [parseInt(m[1], 16), parseInt(m[2], 16)])

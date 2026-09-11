@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 
 	tabnas "github.com/tabnas/parser/go"
@@ -113,10 +114,11 @@ func classSpan(re *regexp.Regexp) (lo, hi int64, ok bool) {
 	return lo, hi, err1 == nil && err2 == nil
 }
 
-// %x30-39 and %x31-39 overlap, so the atoms are [0-0] and [1-9]. Only
-// %x30-39 spans more than one of them and so becomes a set; %x31-39 IS
-// an atom and points straight at that token, and ALPHA overlaps nothing
-// and keeps the tokens it has always had.
+// %x30-39 and %x31-39 overlap, so the atoms are [0-0] and [1-9] and both
+// classes become sets over them — the second a one-member set, so that
+// its own token name (and every mark derived from it) stays put whatever
+// the partition does underneath. ALPHA overlaps nothing and keeps the
+// tokens it has always had.
 //
 // This asserts the emitted PARTITION, not just that a set exists. The
 // two ports are separate implementations of the same algorithm, so a
@@ -147,35 +149,45 @@ func TestClassOverlapEmitsSets(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 1 {
-		t.Fatalf("expected one set (a class spanning several atoms), got %v", names)
+	if len(names) != 2 {
+		t.Fatalf("expected two sets, one per overlapping class, got %v", names)
 	}
 
-	// The set's members are the two atoms DIGIT is built from, [0-0] and
-	// [1-9], and nothing else.
-	members := spec.Options.TokenSet[names[0]]
-	var spans [][2]int64
-	for _, m := range members {
-		re, ok := tokens[m]
-		if !ok || re == nil {
-			t.Fatalf("set member %q is not a match token", m)
+	// Each set covers exactly the atoms of the class it was minted for:
+	// DIGIT spans both, %x31-39 spans the second alone.
+	spansOf := func(setName string) [][2]int64 {
+		var spans [][2]int64
+		for _, m := range spec.Options.TokenSet[setName] {
+			re, ok := tokens[m]
+			if !ok || re == nil {
+				t.Fatalf("set member %q is not a match token", m)
+			}
+			lo, hi, ok := classSpan(re)
+			if !ok {
+				t.Fatalf("set member %q is not a single-span class: %s", m, re)
+			}
+			spans = append(spans, [2]int64{lo, hi})
 		}
-		lo, hi, ok := classSpan(re)
-		if !ok {
-			t.Fatalf("set member %q is not a single-span class: %s", m, re)
-		}
-		spans = append(spans, [2]int64{lo, hi})
+		sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+		return spans
 	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
-	want := [][2]int64{{'0', '0'}, {'1', '9'}}
-	if !reflect.DeepEqual(spans, want) {
-		t.Errorf("set %q covers %v, want %v", names[0], spans, want)
+	if got, want := spansOf(names[0]), ([][2]int64{{'0', '0'}, {'1', '9'}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("set %q covers %v, want %v", names[0], got, want)
+	}
+	if got, want := spansOf(names[1]), ([][2]int64{{'1', '9'}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("set %q covers %v, want %v", names[1], got, want)
 	}
 
-	// Every class token in the grammar, not only this set's members: the
-	// partition is only a partition if nothing overlaps.
+	// Every ATOM in the grammar, not only one set's members: the
+	// partition is only a partition if nothing overlaps. Atoms carry the
+	// `#RXA` prefix — a class that was left out of the partition keeps
+	// its own single-span token, and two of those may legitimately
+	// overlap.
 	var all [][2]int64
-	for _, re := range tokens {
+	for n, re := range tokens {
+		if !strings.HasPrefix(n, "#RXA") {
+			continue
+		}
 		if lo, hi, ok := classSpan(re); ok {
 			all = append(all, [2]int64{lo, hi})
 		}
@@ -183,7 +195,7 @@ func TestClassOverlapEmitsSets(t *testing.T) {
 	sort.Slice(all, func(i, j int) bool { return all[i][0] < all[j][0] })
 	for i := 1; i < len(all); i++ {
 		if all[i-1][1] >= all[i][0] {
-			t.Errorf("class token spans overlap: %v", all)
+			t.Errorf("atom spans overlap: %v", all)
 			break
 		}
 	}
