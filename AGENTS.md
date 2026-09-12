@@ -133,19 +133,27 @@ resolves a matched token to its native value — is emitted by
 leaf is the text the rule matched, so a grammar that has just proved a
 token is a number cannot say so.
 
-**A NESTED `; @array` is not in TS/Go parity** — an `@array` rule used
-as a member of an `@object`, or as an element of another `@array`. Go
-drops the member, adds a spurious leading element, or answers a list
-where a map was asked for, depending on the shape; `@object` nests
-correctly either way. Tracked as
+**A NESTED `; @array` was not in TS/Go parity, and the fix is upstream**
+— an `@array` rule used as a member of an `@object`, or as an element of
+another `@array`. Go dropped the member, added a spurious leading
+element, or answered a list where a map was asked for, depending on the
+shape; `@object` nested correctly either way. Tracked as
 [#63](https://github.com/tabnas/abnf/issues/63), with the three
-reproducers and both runtimes' answers. It is the next step out from the
-Go slice-versus-reference problem
-[`docs/design/array-repetition.md`](docs/design/array-repetition.md) §6
-records: `Rule.nodeOwner` makes a list grow correctly at any depth
-WITHIN one annotated rule, and a nested array is a finished list that
-has to be handed to the ENCLOSING builder's container. No fixture covers
-it yet — adding one under `test/spec/` is part of the fix.
+reproducers and both runtimes' answers.
+
+Nothing in this repository was wrong: the emitters agree, and both emit
+the same `@object$`/`@array$`/`@push$` spec. The defect was in
+`@tabnas/parser`'s Go `@push$`, which re-published a grown slice header
+to `r.Parent` unconditionally and so overwrote whatever the parent was
+holding — the enclosing map, or the enclosing list. Fixed in
+[tabnas/parser#169](https://github.com/tabnas/parser/pull/169) by writing
+back only to a parent building into the same container.
+
+**What is left here** is to raise the `@tabnas/parser` floor once that
+releases, and to land shared rows pinning the three shapes in
+`test/spec/alignment-abnf-ast.tsv` — they would have caught this, and
+they cannot go green until the bumped parser is in. Landing them earlier
+puts red rows in the suite.
 
 ## Repository map
 
