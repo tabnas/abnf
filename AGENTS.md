@@ -449,23 +449,34 @@ itself, atomically, *after* npm accepts the publish.
    is a recovery path, not the normal one: CI still gates it, but nothing
    reviews it, and step 5 then publishes that unreviewed commit
    immutably. If you take it, say so.
-4. **Wait for `main` CI to go green on the bump commit.** The release
+4. **Wait for the bump commit's CI to go green.** The release
    workflow runs no tests: it reads `main`, publishes it and tags it. An npm
-   version and a Go module tag are both immutable.
+   version and a Go module tag are both immutable. Two workflows gate the
+   bump PR, not one: `ci.yml`, and `clib.yml`, which triggers on any
+   `go/**` change and so runs on every version bump.
 5. Dispatch `release.yml` on `main` with `go: true`.
 6. Confirm `npm view @tabnas/abnf@$V version`, and **query both tags
    exactly**:
 
    ```bash
    V=x.y.z
-   n=$(git ls-remote --tags origin "refs/tags/ts/v$V" "refs/tags/go/v$V" | wc -l)
-   [ "$n" = 2 ] || { echo "incomplete release: $n/2 tags"; exit 1; }
+   REL=$(git rev-parse origin/main)   # capture BEFORE dispatching
+   for T in "ts/v$V" "go/v$V"; do
+     S=$(git ls-remote origin "refs/tags/$T" | cut -f1)
+     [ -n "$S" ] || { echo "missing tag $T"; exit 1; }
+     [ "$S" = "$REL" ] || { echo "$T is $S, expected $REL"; exit 1; }
+   done
    ```
 
    `git ls-remote --tags origin | grep v$V` is not a check. `grep` exits 0
    if *either* ref matches, so it reports success in precisely the
    half-finished state — npm tag written, Go tag not — that `release.yml`
-   documents repairing by re-dispatching.
+   documents repairing by re-dispatching. Counting the two refs is not
+   enough either: an anchor fallback writes *both* tags on a commit npm
+   never served, and two wrong tags count as two. Comparing each against
+   the commit you released is what catches that. The refs carry the commit
+   directly — `release.yml` uses `git tag "$T" "$ANCHOR"`, so they are
+   lightweight and there is no `^{}` to peel.
 
 ### This repo is last in the chain
 
