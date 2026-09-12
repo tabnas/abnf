@@ -444,14 +444,27 @@ itself, atomically, *after* npm accepts the publish.
    `dist/` and does not compile, so a bumped `ts/src/abnf.ts` is otherwise
    checked as stale output — or fails outright on a fresh checkout. Same
    reason the "Verify your work" section builds first.
-3. Commit and push to `main`. House convention is to bump in a reviewed PR;
-   a direct push works but is a deviation — say so if you take it.
+3. **Merge the bump through a reviewed PR.** That is the house convention
+   and what `release.yml`'s own header describes. A direct push to `main`
+   is a recovery path, not the normal one: CI still gates it, but nothing
+   reviews it, and step 5 then publishes that unreviewed commit
+   immutably. If you take it, say so.
 4. **Wait for `main` CI to go green on the bump commit.** The release
    workflow runs no tests: it reads `main`, publishes it and tags it. An npm
    version and a Go module tag are both immutable.
 5. Dispatch `release.yml` on `main` with `go: true`.
-6. Confirm with `npm view @tabnas/abnf@<version> version` and
-   `git ls-remote --tags origin | grep v<version>`.
+6. Confirm `npm view @tabnas/abnf@$V version`, and **query both tags
+   exactly**:
+
+   ```bash
+   V=x.y.z
+   git ls-remote --tags origin "refs/tags/ts/v$V" "refs/tags/go/v$V" | wc -l   # want 2
+   ```
+
+   `git ls-remote --tags origin | grep v$V` is not a check. `grep` exits 0
+   if *either* ref matches, so it reports success in precisely the
+   half-finished state — npm tag written, Go tag not — that `release.yml`
+   documents repairing by re-dispatching.
 
 ### This repo is last in the chain
 
@@ -475,8 +488,26 @@ verify against the **published** packages, not local checkouts:
 
 - Go: `(cd go && GOWORK=off go test ./...)` — from the repo root it fails
   with `directory prefix . does not contain main module`, since the module
-  is rooted in `go/`. `GOWORK=off` is what makes `go.mod` resolve rather
-  than a `go.work` or a `replace`.
+  is rooted in `go/`.
+
+  **`GOWORK=off` disables the workspace and nothing else.** It does *not*
+  neutralise a `replace` in `go.mod`: a replacement with no version on the
+  left applies to every version, so the `require` still resolves to the
+  sibling directory and the run goes green against the checkout you were
+  trying to stop using. Measured, with the published engine required:
+
+  ```
+  $ GOWORK=off go list -m github.com/tabnas/parser/go
+  github.com/tabnas/parser/go v0.9.6 => /…/parser/go
+  ```
+
+  So assert the absence first, and only then believe the run:
+
+  ```bash
+  cd go
+  go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod still has a replace'; exit 1; }
+  GOWORK=off go test ./...
+  ```
 - TypeScript: **delete `ts/package-lock.json` first.** It is gitignored, it
   pins the previous versions, and `npm install` will keep them — the suite
   then passes against the very packages you were replacing.
@@ -495,8 +526,9 @@ workspace. None of it may reach a commit, and `git add -A` is how it does:
   `missing go.sum entry`. Revert both and diff against the last release
   commit.
 - A `go.work` belongs *outside* every repo. It also **never consults
-  `go.sum`**, so it cannot tell you whether a declared version is sound —
-  re-check with `GOWORK=off`.
+  `go.sum`**, so it cannot tell you whether a declared version is sound.
+  Re-check with `GOWORK=off` **and** a `go.mod` with no `replace` left in
+  it — either alone still resolves to the sibling.
 - Scratch files under `ts/`.
 
 Stage deliberately and read `git status --short` before committing. The
