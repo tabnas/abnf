@@ -270,14 +270,30 @@ make build        # build-ts + build-go
 make test         # test-ts + test-go   (test-go depends on abnf-corpus)
 make clean        # clean-ts + clean-go
 make abnf-corpus  # sh test/fetch-abnf-corpus.sh — a prerequisite of test-go
-make publish-ts   # test, then npm publish --access public
-make publish-go V=x.y.z
+make publish-ts   # NOT the release path — see "Releasing"
+make publish-go V=x.y.z   # NOT the release path — see "Releasing"
 make tags-go      # list go/v* tags
 make reset        # rebuilds and retests BOTH sides
 ```
 
 The per-side targets (`build-ts`/`build-go`, `test-ts`/`test-go`,
 `clean-ts`/`clean-go`) exist too, for working on one runtime at a time.
+
+**Do not release with `make publish-ts` or `make publish-go`** — by
+anyone, not just an agent. They predate
+`.github/workflows/release.yml` and neither is a safe path to a release:
+
+- `publish-ts` runs a local `npm publish`, which goes out over a token and
+  bypasses the OIDC trusted publishing the workflow uses.
+- `publish-go` **breaks the three-version invariant.** It `sed`s only
+  `const VERSION` in `go/abnf.go`, then commits, tags and pushes — leaving
+  `ts/package.json` and `ts/src/abnf.ts` on the previous version, which
+  `ts/test/version.test.js` and `go/version_test.go` exist to reject. It
+  also runs `test-go` *before* the bump, so what it verifies is not what it
+  ships. And it pushes a tag, which a session cannot do at all.
+
+Use the workflow. These targets are left in place because removing them is
+a separate change, not because they still work.
 
 The test suite (`ts/test/*.test.js`, run against the built `dist`):
 
@@ -403,7 +419,127 @@ reusable workflow rather than in this repo.
 
 A **Go job runs too** (`ubuntu`/`macos`): `run-ts` and `run-go` both
 default to `true` and this repo overrides neither.
-`.github/workflows/release.yml` handles releases.
+
+## Releasing
+
+`.github/workflows/release.yml` handles releases: it publishes
+`@tabnas/abnf` to npm over GitHub OIDC trusted publishing (no token,
+provenance attached) and tags the Go module. Not the Makefile — see the
+warning under "Build & test".
+
+### Dispatch it; do not push the tag
+
+**Run the workflow with `workflow_dispatch` on `main`, `go` input true.**
+That is the path the workflow's header calls normal, and the only one an
+agent can take: **a session's credentials cannot push tag refs —
+`git push origin ts/v…` fails with HTTP 403** while branch pushes from the
+same credentials succeed. No loss, because the workflow creates both tags
+itself, atomically, *after* npm accepts the publish.
+
+1. Bump all **three** version sites — `ts/package.json`, `VERSION` in
+   `ts/src/abnf.ts`, `const VERSION` in `go/abnf.go`. `ts/test/version.test.js`
+   and `go/version_test.go` fail the build if they drift.
+2. Verify both runtimes, including conformance: **`make build && make
+   test`**, not `make test` alone. `npm test` runs against the compiled
+   `dist/` and does not compile, so a bumped `ts/src/abnf.ts` is otherwise
+   checked as stale output — or fails outright on a fresh checkout. Same
+   reason the "Verify your work" section builds first.
+3. **Merge the bump through a reviewed PR.** That is the house convention
+   and what `release.yml`'s own header describes. A direct push to `main`
+   is a recovery path, not the normal one: CI still gates it, but nothing
+   reviews it, and step 5 then publishes that unreviewed commit
+   immutably. If you take it, say so.
+4. **Wait for `main` CI to go green on the bump commit.** The release
+   workflow runs no tests: it reads `main`, publishes it and tags it. An npm
+   version and a Go module tag are both immutable.
+5. Dispatch `release.yml` on `main` with `go: true`.
+6. Confirm `npm view @tabnas/abnf@$V version`, and **query both tags
+   exactly**:
+
+   ```bash
+   V=x.y.z
+   n=$(git ls-remote --tags origin "refs/tags/ts/v$V" "refs/tags/go/v$V" | wc -l)
+   [ "$n" = 2 ] || { echo "incomplete release: $n/2 tags"; exit 1; }
+   ```
+
+   `git ls-remote --tags origin | grep v$V` is not a check. `grep` exits 0
+   if *either* ref matches, so it reports success in precisely the
+   half-finished state — npm tag written, Go tag not — that `release.yml`
+   documents repairing by re-dispatching.
+
+### This repo is last in the chain
+
+A change that needs new behaviour from the compiler or the engine releases
+in dependency order, and this repo is the end of it:
+
+```
+parser  merge -> release          (@tabnas/parser@X)
+bnf     bump go.mod to X -> merge -> release   (@tabnas/bnf@Y)
+abnf    bump both -> merge -> release
+```
+
+Until the first two land, this repo's CI is **legitimately red**, and the
+failure signature says which half is missing: the *old emitter* hands back a
+repetition's run as one element (`["1", ",2,3"]`), while a *missing engine
+fix* drops elements entirely (`[]`). Read the log before acting — neither is
+fixable from inside this diff.
+
+Bump both `go/go.mod` and the `peerDependencies` in `ts/package.json`, and
+verify against the **published** packages, not local checkouts:
+
+- Go: `(cd go && GOWORK=off go test ./...)` — from the repo root it fails
+  with `directory prefix . does not contain main module`, since the module
+  is rooted in `go/`.
+
+  **`GOWORK=off` disables the workspace and nothing else.** It does *not*
+  neutralise a `replace` in `go.mod`: a replacement with no version on the
+  left applies to every version, so the `require` still resolves to the
+  sibling directory and the run goes green against the checkout you were
+  trying to stop using. Measured, with the published engine required:
+
+  ```
+  $ GOWORK=off go list -m github.com/tabnas/parser/go
+  github.com/tabnas/parser/go v0.9.6 => /…/parser/go
+  ```
+
+  So assert the absence first, and only then believe the run:
+
+  ```bash
+  cd go
+  go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod still has a replace'; exit 1; }
+  GOWORK=off go test ./...
+  ```
+- TypeScript: **delete `ts/package-lock.json` and `ts/node_modules`, then
+  reinstall.** The lockfile is gitignored and pins the previous versions, but
+  removing it alone changes nothing about what is already installed —
+  symlinked siblings survive it. Only the reinstall reproduces the release
+  runner: `(cd ts && rm -f package-lock.json && rm -rf node_modules && npm install)`.
+
+Both have silently produced a green local run against the wrong version.
+
+### Never commit the local wiring
+
+Testing against unreleased siblings means `replace` directives and a
+workspace. None of it may reach a commit, and `git add -A` is how it does:
+
+- `go mod edit -replace …=/abs/path` — CI reports it as
+  `replacement directory /… does not exist`.
+- **`go.sum`, after the replace comes out.** A `replace` makes the siblings'
+  sums unused, so `go mod tidy` drops them; reverting `go.mod` alone leaves
+  `missing go.sum entry`. Revert both and diff against the last release
+  commit.
+- A `go.work` belongs *outside* every repo. It also **does not validate the
+  declared version of a module it replaces** with a local one, so it cannot
+  tell you whether that version is sound. (It does still consult its members'
+  `go.sum` files, writing any missing sums to `go.work.sum`.)
+  Re-check with `GOWORK=off` **and** a `go.mod` with no `replace` left in
+  it — either alone still resolves to the sibling.
+- Scratch files under `ts/`.
+
+Stage deliberately and read `git status --short` before committing. The
+`clib` job is the one that catches this: every other job is already red on
+the chain dependency, so a fresh breakage hides inside an expected failure,
+while `clib` resolves the modules directly and reports it as itself.
 
 ## Agent tooling
 
