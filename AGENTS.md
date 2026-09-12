@@ -535,9 +535,11 @@ verify against the **published** packages, not local checkouts:
   So assert the absence first, and only then believe the run:
 
   ```bash
-  cd go
-  go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod still has a replace'; exit 1; }
-  GOWORK=off go test ./...
+  (
+    cd go
+    go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod still has a replace'; exit 1; }
+    GOWORK=off go test ./...
+  )
   ```
 - TypeScript: **delete `ts/package-lock.json` and `ts/node_modules`, then
   reinstall.** The lockfile is gitignored and pins the previous versions, but
