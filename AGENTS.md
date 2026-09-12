@@ -80,9 +80,16 @@ list = item *( "," item )   ; @array
 names nothing and takes every such part as an element, in order. A
 literal produces no value and is never a member. Values **nest**: a part
 whose own rule is annotated is assigned whole, and every other part is
-the source text it matched. A repetition collects into an `@array` (one
-element per item) and stays text in an `@object` (the author named it,
-so "the text of the run" is a reading they asked for).
+the source text it matched.
+
+A repetition in an `@array` collects one element per item **where the
+repeated item produces a value**. Where it does not there is nothing to
+collect, and the whole run falls back to one element holding its text:
+`top = *( "," )` on `,,` is `[",,"]`, and `top = *item` with
+`item = "x"` is `["xxx"]`, because a rule whose whole body is a literal
+becomes a lexer token and stops being a part at all. In an `@object` a
+repetition always stays the text of the run — the author named it, so
+that is a reading they asked for.
 
 Four things an agent should know before touching this:
 
