@@ -458,7 +458,8 @@ itself, atomically, *after* npm accepts the publish.
 
    ```bash
    V=x.y.z
-   git ls-remote --tags origin "refs/tags/ts/v$V" "refs/tags/go/v$V" | wc -l   # want 2
+   n=$(git ls-remote --tags origin "refs/tags/ts/v$V" "refs/tags/go/v$V" | wc -l)
+   [ "$n" = 2 ] || { echo "incomplete release: $n/2 tags"; exit 1; }
    ```
 
    `git ls-remote --tags origin | grep v$V` is not a check. `grep` exits 0
@@ -508,9 +509,11 @@ verify against the **published** packages, not local checkouts:
   go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod still has a replace'; exit 1; }
   GOWORK=off go test ./...
   ```
-- TypeScript: **delete `ts/package-lock.json` first.** It is gitignored, it
-  pins the previous versions, and `npm install` will keep them — the suite
-  then passes against the very packages you were replacing.
+- TypeScript: **delete `ts/package-lock.json` and `ts/node_modules`, then
+  reinstall.** The lockfile is gitignored and pins the previous versions, but
+  removing it alone changes nothing about what is already installed —
+  symlinked siblings survive it. Only the reinstall reproduces the release
+  runner: `(cd ts && rm -f package-lock.json && rm -rf node_modules && npm install)`.
 
 Both have silently produced a green local run against the wrong version.
 
@@ -525,8 +528,10 @@ workspace. None of it may reach a commit, and `git add -A` is how it does:
   sums unused, so `go mod tidy` drops them; reverting `go.mod` alone leaves
   `missing go.sum entry`. Revert both and diff against the last release
   commit.
-- A `go.work` belongs *outside* every repo. It also **never consults
-  `go.sum`**, so it cannot tell you whether a declared version is sound.
+- A `go.work` belongs *outside* every repo. It also **does not validate the
+  declared version of a module it replaces** with a local one, so it cannot
+  tell you whether that version is sound. (It does still consult its members'
+  `go.sum` files, writing any missing sums to `go.work.sum`.)
   Re-check with `GOWORK=off` **and** a `go.mod` with no `replace` left in
   it — either alone still resolves to the sibling.
 - Scratch files under `ts/`.
