@@ -452,8 +452,11 @@ itself, atomically, *after* npm accepts the publish.
 4. **Wait for the bump commit's CI to go green.** The release
    workflow runs no tests: it reads `main`, publishes it and tags it. An npm
    version and a Go module tag are both immutable. Two workflows gate the
-   bump PR, not one: `ci.yml`, and `clib.yml`, which triggers on any
-   `go/**` change and so runs on every version bump.
+   bump PR, not one: `ci.yml`, and `clib.yml`, which triggers on
+   `pull_request` for `go/**` and so runs on every version bump. Note the
+   asymmetry: `clib.yml` has no `push` trigger, so it runs on the PR and
+   never on the merged commit — require it green *before* merging, and a
+   direct push to `main` skips it entirely.
 5. **Record the release commit, then dispatch.** The confirmation
    below compares each tag against the commit you released, and a run
    that publishes and then fails to tag can be followed by `main`
@@ -465,6 +468,13 @@ itself, atomically, *after* npm accepts the publish.
    ```
 
    Then dispatch `release.yml` on `main` with `go: true`.
+
+   Keep that SHA. If a later run has to repair this release, the comparison
+   must still be against the commit npm actually served — re-reading `main`
+   at repair time gives you whatever it has become, which is exactly the
+   value the faulty anchor would also produce, so the check would agree with
+   itself and pass. If you no longer have it, recover it from the original
+   run: the `head_sha` of that `release.yml` run is the commit it published.
 6. Confirm `npm view @tabnas/abnf@$V version`, and **query both tags
    exactly**:
 
