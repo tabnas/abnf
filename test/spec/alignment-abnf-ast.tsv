@@ -54,3 +54,6 @@ list = ( item ) *( item )   ; @array\nitem = DIGIT	123	["1","2","3"]
 top = *( "," )   ; @array	,,	[",,"]
 top = *item   ; @array\nitem = "x"	xxx	["xxx"]
 top = *DIGIT   ; @array	123	["1","2","3"]
+top = "@" a b   ; @object a b\na = 1*ALPHA\nb = "[" x *( "," x ) "]"   ; @array\nx = 1*DIGIT	@ab[1,2]	{"a":"ab","b":["1","2"]}
+top = "<" b *( ";" b ) ">"   ; @array\nb = "[" x *( "," x ) "]"   ; @array\nx = 1*DIGIT	<[1,2];[3]>	[["1","2"],["3"]]
+top = "@" b   ; @object b\nb = "[" x *( "," x ) "]"   ; @array\nx = 1*DIGIT	@[1,2]	{"b":["1","2"]}

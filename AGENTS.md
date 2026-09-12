@@ -110,7 +110,7 @@ Four things an agent should know before touching this:
   member that reaches a value-building rule. Seventeen of them are
   pinned byte for byte in both runtimes by
   [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
-  against twenty positive rows in
+  against twenty-three positive rows in
   [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
 - **An unknown annotation word is NOT refused.** The checks above run
   only once `@object` or `@array` has matched, so `; @objekt a b` and
@@ -133,27 +133,24 @@ resolves a matched token to its native value — is emitted by
 leaf is the text the rule matched, so a grammar that has just proved a
 token is a number cannot say so.
 
-**A NESTED `; @array` was not in TS/Go parity, and the fix is upstream**
-— an `@array` rule used as a member of an `@object`, or as an element of
-another `@array`. Go dropped the member, added a spurious leading
-element, or answered a list where a map was asked for, depending on the
-shape; `@object` nested correctly either way. Tracked as
-[#63](https://github.com/tabnas/abnf/issues/63), with the three
-reproducers and both runtimes' answers.
-
-Nothing in this repository was wrong: the emitters agree, and both emit
-the same `@object$`/`@array$`/`@push$` spec. The defect was in
-`@tabnas/parser`'s Go `@push$`, which re-published a grown slice header
-to `r.Parent` unconditionally and so overwrote whatever the parent was
-holding — the enclosing map, or the enclosing list. Fixed in
+**A NESTED `; @array` nests correctly, and needs `@tabnas/parser`
+0.9.7.** An `@array` rule used as a member of an `@object`, or as an
+element of another `@array`, was out of TS/Go parity until that release:
+Go dropped the member, added a spurious leading element, or answered a
+list where a map was asked for, depending on the shape. Nothing in this
+repository was wrong — the emitters agree, and both emit the same
+`@object$`/`@array$`/`@push$` spec. The defect was in `@tabnas/parser`'s
+Go `@push$`, which re-published a grown slice header to `r.Parent`
+unconditionally and so overwrote whatever the parent was holding, the
+enclosing map or the enclosing list. Fixed in
 [tabnas/parser#169](https://github.com/tabnas/parser/pull/169) by writing
-back only to a parent building into the same container.
+back only to a parent building into the same container, and the floor
+here is `>=0.9.7` because of it.
 
-**What is left here** is to raise the `@tabnas/parser` floor once that
-releases, and to land shared rows pinning the three shapes in
-`test/spec/alignment-abnf-ast.tsv` — they would have caught this, and
-they cannot go green until the bumped parser is in. Landing them earlier
-puts red rows in the suite.
+The last three rows of
+[`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv)
+are the three shapes, and they go red against an older parser. That is
+the point: they are what would have caught this.
 
 ## Repository map
 
