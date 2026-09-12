@@ -35,7 +35,10 @@ Rules are RFC 5234 ABNF, **not** the `<x> ::= a | b` style:
   with. `"\n"` is two characters, not a newline. (The parser sets
   `string.escapeChar` to DEL, which no legal `char-val` can contain, to
   turn the engine's JSON-style escaping off.)
-- `;` starts a line comment.
+- `;` starts a line comment. A comment *trailing a rule* may also carry
+  a **value annotation** saying what that rule builds — the one place in
+  the dialect where a comment is not inert. See "Value annotations"
+  below.
 - Repetition / option / group: `*A`, `1*A`, `m*nA`, `*nA`, `nA`,
   `[ A ]`, `( A / B )`. Every form works after any element, including
   after a bare rulename (`a 1*b`, `simple-key 1*( dot-sep simple-key )`).
@@ -61,6 +64,96 @@ Rules are RFC 5234 ABNF, **not** the `<x> ::= a | b` style:
 Classic-BNF `::=` / `|` does **not** parse. (Some stale comments in
 `src/converter.ts` and a CLI example in `ts/README.md` still show `::=` —
 ignore those; the parser only accepts the ABNF forms above.)
+
+## Value annotations: a rule can say what it builds
+
+By default a grammar builds a parse tree — a `rule`/`src`/`kids` node
+per rule. A **trailing comment** can say what a rule builds instead, and
+there are exactly two words:
+
+```abnf
+ver = maj "." min "." pat   ; @object maj min pat
+list = item *( "," item )   ; @array
+```
+
+`@object` names one member per part that produces a value; `@array`
+names nothing and takes every such part as an element, in order. A
+literal produces no value and is never a member. Values **nest**: a part
+whose own rule is annotated is assigned whole, and every other part is
+the source text it matched.
+
+A repetition in an `@array` collects one element per item **where the
+repeated item produces a value**. Where it does not there is nothing to
+collect, and the whole run falls back to one element holding its text:
+`top = *( "," )` on `,,` is `[",,"]`, and `top = *item` with
+`item = "x"` is `["xxx"]`, because a rule whose whole body is a literal
+becomes a lexer token and stops being a part at all. In an `@object` a
+repetition always stays the text of the run — the author named it, so
+that is a reading they asked for.
+
+Four things an agent should know before touching this:
+
+- **It is opt-in and it is not in the language.** A comment is the one
+  place in RFC 5234 that carries no meaning of its own, so delete every
+  annotation and the same inputs parse. An annotation is about the
+  OUTPUT, never about what the grammar accepts.
+- **The output is pure data.** `abnfConvert(src, {builtins: true})` on
+  an annotated grammar emits an EMPTY `ref` map and no closures — the
+  builders are `@tabnas/bnf`'s named `@object$` / `@array$` / `@key$` /
+  `@setval$` / `@push$`, resolved by the engine at load. A serialized
+  annotated grammar loads standalone.
+- **The refusals are the design.** Where a rewrite between what the
+  author wrote and what the emitter sees would make the annotation
+  describe something else, the conversion FAILS with a diagnostic naming
+  the rule: more than one alternative, a member count that does not
+  match the parts, a leading member the fold erases, and a source-text
+  member that reaches a value-building rule. Seventeen of them are
+  pinned byte for byte in both runtimes by
+  [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
+  against twenty positive rows in
+  [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
+- **An unknown annotation word is NOT refused.** The checks above run
+  only once `@object` or `@array` has matched, so `; @objekt a b` and
+  `; @ARRAY` compile silently and answer the tree. That is deliberate to
+  the extent that an ordinary comment may legitimately open with an
+  `@`-word, and it is the one mistake in this feature with no feedback.
+  Worth knowing before debugging a grammar that "ignores" its
+  annotation.
+
+The user-facing documentation is `ts/doc/guide.md`, "Build a value
+instead of a tree". The design record is
+[`docs/design/array-repetition.md`](docs/design/array-repetition.md)
+(how a repetition collects, and the Go engine defect that blocked it)
+on top of [`docs/design/alt-action-refs.md`](docs/design/alt-action-refs.md)
+(the `$`-builtin mechanism underneath).
+
+**There is no scalar annotation.** `@value$` — the engine builder that
+resolves a matched token to its native value — is emitted by
+`@tabnas/bnf` and unreachable from ABNF, because no word names it. Every
+leaf is the text the rule matched, so a grammar that has just proved a
+token is a number cannot say so.
+
+**A NESTED `; @array` was not in TS/Go parity, and the fix is upstream**
+— an `@array` rule used as a member of an `@object`, or as an element of
+another `@array`. Go dropped the member, added a spurious leading
+element, or answered a list where a map was asked for, depending on the
+shape; `@object` nested correctly either way. Tracked as
+[#63](https://github.com/tabnas/abnf/issues/63), with the three
+reproducers and both runtimes' answers.
+
+Nothing in this repository was wrong: the emitters agree, and both emit
+the same `@object$`/`@array$`/`@push$` spec. The defect was in
+`@tabnas/parser`'s Go `@push$`, which re-published a grown slice header
+to `r.Parent` unconditionally and so overwrote whatever the parent was
+holding — the enclosing map, or the enclosing list. Fixed in
+[tabnas/parser#169](https://github.com/tabnas/parser/pull/169) by writing
+back only to a parent building into the same container.
+
+**What is left here** is to raise the `@tabnas/parser` floor once that
+releases, and to land shared rows pinning the three shapes in
+`test/spec/alignment-abnf-ast.tsv` — they would have caught this, and
+they cannot go green until the bumped parser is in. Landing them earlier
+puts red rows in the suite.
 
 ## Repository map
 
