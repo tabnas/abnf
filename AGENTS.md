@@ -279,12 +279,21 @@ make reset        # rebuilds and retests BOTH sides
 The per-side targets (`build-ts`/`build-go`, `test-ts`/`test-go`,
 `clean-ts`/`clean-go`) exist too, for working on one runtime at a time.
 
-**Do not release with `make publish-ts` or `make publish-go`.** They
-predate `.github/workflows/release.yml`: `publish-ts` runs a local
-`npm publish`, which goes out over a token and bypasses the OIDC trusted
-publishing the workflow uses, and `publish-go` pushes a tag, which a
-session cannot do anyway (see "Releasing"). They are kept for a maintainer
-publishing by hand from a trusted machine.
+**Do not release with `make publish-ts` or `make publish-go`** — by
+anyone, not just an agent. They predate
+`.github/workflows/release.yml` and neither is a safe path to a release:
+
+- `publish-ts` runs a local `npm publish`, which goes out over a token and
+  bypasses the OIDC trusted publishing the workflow uses.
+- `publish-go` **breaks the three-version invariant.** It `sed`s only
+  `const VERSION` in `go/abnf.go`, then commits, tags and pushes — leaving
+  `ts/package.json` and `ts/src/abnf.ts` on the previous version, which
+  `ts/test/version.test.js` and `go/version_test.go` exist to reject. It
+  also runs `test-go` *before* the bump, so what it verifies is not what it
+  ships. And it pushes a tag, which a session cannot do at all.
+
+Use the workflow. These targets are left in place because removing them is
+a separate change, not because they still work.
 
 The test suite (`ts/test/*.test.js`, run against the built `dist`):
 
@@ -430,7 +439,11 @@ itself, atomically, *after* npm accepts the publish.
 1. Bump all **three** version sites — `ts/package.json`, `VERSION` in
    `ts/src/abnf.ts`, `const VERSION` in `go/abnf.go`. `ts/test/version.test.js`
    and `go/version_test.go` fail the build if they drift.
-2. Verify both runtimes, including conformance (`make test`).
+2. Verify both runtimes, including conformance: **`make build && make
+   test`**, not `make test` alone. `npm test` runs against the compiled
+   `dist/` and does not compile, so a bumped `ts/src/abnf.ts` is otherwise
+   checked as stale output — or fails outright on a fresh checkout. Same
+   reason the "Verify your work" section builds first.
 3. Commit and push to `main`. House convention is to bump in a reviewed PR;
    a direct push works but is a deviation — say so if you take it.
 4. **Wait for `main` CI to go green on the bump commit.** The release
@@ -460,8 +473,10 @@ fixable from inside this diff.
 Bump both `go/go.mod` and the `peerDependencies` in `ts/package.json`, and
 verify against the **published** packages, not local checkouts:
 
-- Go: `GOWORK=off go test ./...`, so `go.mod` is what resolves rather than a
-  `go.work` or a `replace`.
+- Go: `(cd go && GOWORK=off go test ./...)` — from the repo root it fails
+  with `directory prefix . does not contain main module`, since the module
+  is rooted in `go/`. `GOWORK=off` is what makes `go.mod` resolve rather
+  than a `go.work` or a `replace`.
 - TypeScript: **delete `ts/package-lock.json` first.** It is gitignored, it
   pins the previous versions, and `npm install` will keep them — the suite
   then passes against the very packages you were replacing.
