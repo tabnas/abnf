@@ -287,7 +287,7 @@ tn.parse('1,2,3') // => { a: '1', rest: ',2,3' }
 The annotation describes the rule the author wrote, and several rewrites
 happen between that and the emitted parser. Where a rewrite would make
 the annotation describe something else, the conversion fails rather than
-building a differently-shaped value:
+building a differently shaped value:
 
 - **More than one alternative.** One list of names cannot describe two
   alternatives' parts. Split the rule, or annotate the alternatives' own
