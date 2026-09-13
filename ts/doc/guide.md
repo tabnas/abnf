@@ -6,7 +6,7 @@ you need. For the full API see [reference.md](reference.md); for the
 
 ## Convert a grammar without installing it
 
-Use `abnfConvert` when you want the `GrammarSpec` in hand — to install it
+Use `abnfConvert` when you want the `GrammarSpec` in hand: to install it
 later, inspect it, or pass it around.
 
 ```js
@@ -55,7 +55,7 @@ tn.parse('1+2-3').rule // => 'expr'
 ```
 
 A production that is *only* left-recursive (no non-recursive seed
-alternative, e.g. `a = a "x"`) cannot be eliminated and throws at
+alternative, for example `a = a "x"`) cannot be eliminated and throws at
 convert time. Give every recursive rule a base case.
 
 ## Match case-sensitively
@@ -136,7 +136,7 @@ shadows the core one.
 
 ## Build a value instead of a tree
 
-By default a grammar produces a parse tree — a `rule`/`src`/`kids` node
+By default a grammar produces a parse tree: a `rule`/`src`/`kids` node
 per rule. A trailing comment can say what a rule should build instead:
 
 ```js
@@ -155,7 +155,7 @@ tn.parse('1.2.30') // => { maj: '1', min: '2', pat: '30' }
 ```
 
 The keys are the names in the annotation. Nothing in the input spells
-them — `1.2.30` contains no `maj` — so they can only come from the
+them (`1.2.30` contains no `maj`) so they can only come from the
 comment.
 
 A comment is the only place in RFC 5234 that carries no meaning of its
@@ -230,7 +230,7 @@ tn.abnf(`
 tn.parse('1,2,3') // => ['1', '2', '3']
 ```
 
-Every spelling of a variable-length list collects the same way —
+Every spelling of a variable-length list collects the same way:
 `item *( "," item )`, `*( item "," ) item`, `*item`, `1*item`. The
 separators are literals, and a literal produces no value, so none of
 them becomes an element.
@@ -240,7 +240,7 @@ grammar on `1` gives `['1']`. An absent `[ option ]` behaves the same
 way.
 
 An iteration that produces more than one value contributes each of
-them, in order — `*( a b )` on `x1y2` gives `['x', '1', 'y', '2']`.
+them, in order, so `*( a b )` on `x1y2` gives `['x', '1', 'y', '2']`.
 "@array" names nothing and takes every part that produces a value; an
 iteration is not a special case, and does not become a pair.
 
@@ -261,7 +261,7 @@ tn.abnf(`
 tn.parse('<[7]>') // => ['[7]']
 ```
 
-A group written as the item of a repetition — the `( "," item )` above —
+A group written as the item of a repetition (the `( "," item )` above)
 is the repeated item rather than an element, and so collects with it.
 
 **An object's members are not collected.** `@array` names nothing, which
@@ -298,7 +298,7 @@ building a differently-shaped value:
   Give it a body that is not a bare terminal to keep it nameable.
 - **A leading member whose own rule builds a value.** A rule's first
   reference is folded into it by left-recursion elimination, which
-  erases that rule's builders — the member would hold an internal node
+  erases that rule's builders, so the member would hold an internal node
   instead of the value you asked for. Putting a literal before it stops
   the fold:
 
@@ -335,7 +335,7 @@ span of characters any more.
 
 Two consequences, with different severity.
 
-Inside a plain (unannotated) grammar this is mild — the value lands
+Inside a plain (unannotated) grammar this is mild: the value lands
 where you expect, and only the enclosing node's `src` is short of it:
 
 ```js
@@ -355,14 +355,14 @@ out.kids[0]  // => ({ d: '7' })
 out.src      // => 'ab:'
 ```
 
-`body` built its object and it is right there in `kids` — but `doc.src`
+`body` built its object and it is right there in `kids`, but `doc.src`
 is `'ab:'`, not `'ab:7'`, because `body` gave a value rather than text.
 Mixing the two like this is supported; just do not read `src` on a node
 that contains an annotated rule.
 
 Inside an **annotated** rule the same loss would be the whole answer, so
 it is refused instead. `top = "<" ( inner ) ">"` with `; @array` and an
-annotated `inner` would have built `[""]` — the element is the text of
+annotated `inner` would have built `[""]`, because the element is the text of
 the group, and `inner` contributed none. Making the annotated rule the
 part itself is the fix, since a part that *is* an annotated rule nests
 rather than resolving to text:
@@ -381,8 +381,8 @@ tn.abnf(`
 tn.parse('<7>') // => [{ d: '7' }]
 ```
 
-The refusal follows plain rule references too, not just groups and
-repetitions — an ordinary intermediate rule loses the text in exactly
+The refusal follows plain rule references as well as groups and
+repetitions; an ordinary intermediate rule loses the text in exactly
 the same way.
 
 ## Attach user actions to build a custom value
@@ -418,14 +418,14 @@ markListing(abnfConvert('op = "inc" / "dec"', { marks: true }))
 // => 'op  o:INC  s:#INC\nop  o:DEC  s:#DEC'
 ```
 
-The mark is the alternative's leading discriminator — the token name
+The mark is the alternative's leading discriminator: the token name
 (without the `#`), the pushed rule name, or `_` for an empty alt.
 Same-leading-token alternatives get a `~N` suffix to keep marks unique.
 
 ## Accumulate a value across a whole parse
 
-For state that spans the parse — a running total, a counter, a collected
-list — keep it on a wrapping rule's node and let the repeating rule write
+For state that spans the parse (a running total, a counter, a collected
+list) keep it on a wrapping rule's node and let the repeating rule write
 to `r.parent.node`. The compiler turns a tail self-reference
 (`add = NR [ PL add ]`) into a same-depth repeat, so **every** repetition
 shares the same parent:
@@ -454,7 +454,7 @@ tn.parse('1+2+3').value // => 6
 ```
 
 Both actions are a single expression, and the total lives on the node
-rather than in a variable outside the parse — so `parse` returns it, the
+rather than in a variable outside the parse, so `parse` returns it, the
 instance holds no state between calls, and two parses cannot interfere.
 
 The tail-repeat compilation also flattens the tree: `1+2+3` yields three
@@ -465,7 +465,7 @@ mark (`@add:c:PL`), and the run's last iteration closes through
 
 ## Compile a grammar to portable pure data
 
-`abnfCompile` emits the grammar as **jsonic text** with no closures —
+`abnfCompile` emits the grammar as **jsonic text** with no closures:
 just data and engine-builtin references. It is the way to ship a
 compiled grammar to another process or language. By default it emits a
 *recognition-only* grammar (tree building dropped); pass
@@ -499,7 +499,7 @@ Use `strict: true` to emit valid JSON (double quotes, commas);
 the relaxed default emits jsonic (bare keys, single quotes). In the
 default *recognition* mode the reloaded grammar still accepts/rejects
 the same inputs, but `parse` returns no tagged tree (tree building is
-dropped) — use `recognition: false` when you need the AST back.
+dropped); use `recognition: false` when you need the AST back.
 
 Note: a grammar that needs the probe dispatcher (optional-prefix
 ambiguity like `[ A "@" ] A`) can only be compiled as *recognition*

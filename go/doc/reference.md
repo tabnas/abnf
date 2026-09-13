@@ -70,9 +70,9 @@ type ActionsMap map[string][]ActionFn
 
 Each map value is a *slice* of actions (run in order). Action-ref grammar:
 
-- `@<rule>:<phase>` — a rule-phase hook (`bo`, `ao`, `bc`, `ac`).
-- `@<rule>:o:<mark>` — open alt(s) in `<rule>` carrying `<mark>`.
-- `@<rule>:c:<mark>` — close alt(s) carrying `<mark>`.
+- `@<rule>:<phase>`. A rule-phase hook (`bo`, `ao`, `bc`, `ac`).
+- `@<rule>:o:<mark>`. Open alt(s) in `<rule>` carrying `<mark>`.
+- `@<rule>:c:<mark>`. Close alt(s) carrying `<mark>`.
 
 ### `AttachActions(spec *tabnas.GrammarSpec, actions ActionsMap) error`
 
@@ -131,7 +131,7 @@ default spec-dump.
 
 ### `SpecToJSON(spec *tabnas.GrammarSpec, indent int) string`
 
-Render a spec as JSON text (the CLI default output) — `ToJsonic` in
+Render a spec as JSON text (the CLI default output); `ToJsonic` in
 strict mode.
 
 ## Errors

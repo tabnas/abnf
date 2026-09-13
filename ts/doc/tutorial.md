@@ -10,7 +10,7 @@ tabnas `GrammarSpec`. You install that spec on a tabnas engine, and the
 engine parses inputs in your grammar and hands you back an AST.
 
 > One dialect note up front: this ABNF uses `=` to define a rule and `/`
-> to separate alternatives — *not* `::=` or `|`. That is genuine
+> to separate alternatives, *not* `::=` or `|`. That is genuine
 > RFC 5234 ABNF, not EBNF.
 
 ## Step 0: install
@@ -47,9 +47,9 @@ tn.parse('hello').rule // => 'greet'
 
 Every rule produces a `{rule, src, kids}` node:
 
-- `rule` — the grammar rule's name.
-- `src` — the source text this rule matched.
-- `kids` — child nodes, one per *referenced* sub-rule.
+- `rule`. The grammar rule's name.
+- `src`. The source text this rule matched.
+- `kids`. Child nodes, one per *referenced* sub-rule.
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
@@ -61,7 +61,7 @@ tn.abnf(`greet = "hi" / "hello"`)
 tn.parse('hi') // => ({ rule: 'greet', src: 'hi', kids: [] })
 ```
 
-`greet` matched only a literal, so it has no children — `kids` is empty.
+`greet` matched only a literal, so it has no children: `kids` is empty.
 
 ## Step 3: sequences and sub-rules
 
@@ -85,7 +85,7 @@ tn.parse('xfoo=42') // => ({ rule: 'x', src: 'xfoo=42', kids: [{ rule: 'name', s
 
 Two things to notice:
 
-- `name` and `value` appear as `kids` — referenced rules become child
+- `name` and `value` appear as `kids`. Referenced rules become child
   nodes.
 - `1*ALPHA` and `1*DIGIT` use **core rules** (`ALPHA`, `DIGIT`) you never
   defined. They come from RFC 5234 Appendix B.1 and are spliced in
@@ -136,7 +136,7 @@ You still get your own rule's node back from `parse`.
 
 ## Where to go next
 
-- **[guide.md](guide.md)** — recipes for real tasks: left recursion,
+- **[guide.md](guide.md)**. Recipes for real tasks: left recursion,
   case sensitivity, user actions, compiling to pure data.
-- **[reference.md](reference.md)** — the exact API and CLI flags.
-- **[concepts.md](concepts.md)** — how the compiler works and why.
+- **[reference.md](reference.md)**. The exact API and CLI flags.
+- **[concepts.md](concepts.md)**. How the compiler works and why.

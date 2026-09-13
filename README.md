@@ -9,7 +9,7 @@
 
 ABNF grammar compiler for the
 [tabnas](https://github.com/tabnas/parser) parser. Takes ABNF source
-— the RFC 5234 dialect (`=` and `/`, not `::=`) — and emits a tabnas
+(the RFC 5234 dialect: `=` and `/`, not `::=`) and emits a tabnas
 `GrammarSpec`. Installed on an engine, the spec parses inputs in that
 grammar and builds a `{rule, src, kids}` AST. It can also emit
 "pure-data" jsonic and supports user actions. Ships the `tabnas-abnf`
@@ -18,7 +18,7 @@ CLI.
 Docs, guides, the error reference and the playground: **[tabnas.dev](https://tabnas.dev)**.
 
 **Why you would want this.** The tabnas engine ships no grammar of its
-own — you bring one, normally as a hand-written table of `open`/`close`
+own; you bring one, normally as a hand-written table of `open`/`close`
 rule alternatives. That table is precise but verbose, and it is not the
 notation the specification you are implementing is written in. RFC
 specifications, from URIs to media types to protocol headers, publish
@@ -46,10 +46,10 @@ tn.parse('hi') // => ({ rule: 'greet', src: 'hi', kids: [] })
 
 Every rule that matches produces one AST node with three fields:
 
-- **`rule`** — the production's name, so you can navigate the tree by the
+- **`rule`**. The production's name, so you can walk the tree by the
   names you wrote.
-- **`src`** — the source text the rule matched.
-- **`kids`** — child nodes, one per sub-rule the production referenced.
+- **`src`**. The source text the rule matched.
+- **`kids`**. Child nodes, one per sub-rule the production referenced.
 
 `greet` matches a single terminal, so it has no children.
 
@@ -84,7 +84,7 @@ was matched, not a slice of the original input.
 
 ## Repetition, optionals, and groups
 
-The usual ABNF operators all work — `*x` (zero or more), `1*x` (one or
+The usual ABNF operators all work: `*x` (zero or more), `1*x` (one or
 more), `m*nx` (bounded), `[ x ]` (optional), and `( … )` for grouping:
 
 ```js
@@ -113,21 +113,21 @@ tn.parse('log').src       // => 'log'
 
 There are three ways to say "a terminal goes here".
 
-**A quoted literal** is matched verbatim — case-insensitively, per RFC
+**A quoted literal** is matched verbatim, case-insensitively per RFC
 5234, unless you write `%s"…"`. A production whose *whole* body is a
 single literal is a lexical definition rather than a rule, so it compiles
 to a named lexer token instead of a rule (`PL = "+"` becomes `#PL`).
 
 There are **no escape sequences inside a literal**. RFC 5234 defines
 `char-val` as `DQUOTE *(%x20-21 / %x23-7E) DQUOTE`, so a backslash is an
-ordinary character: `"\"` is a one-character literal — the way every RFC
-that defines `quoted-pair` writes it — and `"\n"` is the two characters
+ordinary character: `"\"` is a one-character literal (the way every RFC
+that defines `quoted-pair` writes it) and `"\n"` is the two characters
 `\` and `n`, not a newline. Write control characters as numeric values
 (`%x0A`, or the `LF` core rule) and an embedded double quote as `DQUOTE`
 or `%x22`, since `char-val` cannot contain one.
 
-**A built-in lexer token** — `TX` (bareword), `NR` (number), `ST`
-(quoted string), `VL` (`true`/`false`/`null`) — matches whole tokens the
+**A built-in lexer token** (`TX` for a bareword, `NR` a number, `ST` a
+quoted string, `VL` `true`/`false`/`null`) matches whole tokens the
 engine's lexer already produces. Prefer these over deriving text
 character by character: because whitespace between tokens is skipped,
 a char-level `1*ALPHA` would happily run two space-separated words
@@ -154,7 +154,7 @@ place: as the whole body of a production naming a built-in token, where
 it documents what the lexer already provides.
 
 ```
-NR = <number>     ; informational — compiles to nothing
+NR = <number>     ; informational, compiles to nothing
 ```
 
 ## The same grammar, two ways
@@ -176,13 +176,13 @@ the engine README builds by hand:
 
 - **`PL = "+"` compiles to a token, not a rule.** A production whose
   whole body is a single string literal is a lexical definition, so the
-  compiler binds it to a named fixed token `#PL` — exactly what the
+  compiler binds it to a named fixed token `#PL`, exactly what the
   hand-written grammar spells `fixed: { token: { '#PL': '+' } }`.
   Multi-alternative productions (`sign = "+" / "-"`) are real choices and
   stay rules.
 - **`NR = <number>` is informational.** RFC 5234 `prose-val` describes a
   terminal in English rather than defining one. For a built-in lexer
-  token that is exactly right — the lexer already supplies `NR` — so the
+  token that is exactly right (the lexer already supplies `NR`) so the
   line documents the terminal and compiles to nothing. Prose anywhere
   else is an error, because there would be no definition behind it.
 
@@ -205,11 +205,11 @@ const tn = new Tabnas({ plugins: [abnf] })
 tn.abnf(GRAMMAR)
 tn.use(Debug, { print: false })
 
-// Rendered back out, character for character — and re-compilable.
+// Rendered back out, character for character, and re-compilable.
 tn.debug.model().abnf === GRAMMAR // => true
 ```
 
-Add actions to accumulate a total on the `val` node — the same two
+Add actions to accumulate a total on the `val` node, using the same two
 actions, on the same two rules, as the hand-written grammar above:
 
 ```js
@@ -237,8 +237,8 @@ tn.parse('12+3+45').value // => 60
 ```
 
 `r.parent` is `val` for **every** repetition, because the compiler turns
-the tail self-reference `[ PL add ]` into a same-depth repeat — the same
-`r: 'add'` close alternate the hand-written grammar declares — rather
+the tail self-reference `[ PL add ]` into a same-depth repeat (the same
+`r: 'add'` close alternate the hand-written grammar declares) rather
 than a nested push. One consequence is a flat tree: `1+2+3` yields three
 sibling `add` kids under `val`, each spanning its own number.
 
@@ -246,17 +246,17 @@ sibling `add` kids under `val`, each spanning its own number.
 named by its leading discriminator (the pushed rule for `val`, the `NR`
 token for `add`). `r.o` holds the tokens that alternate matched, so
 `r.o[0].val` is the number just read, already numeric. Rule-phase hooks
-(`bo`, `ao`, `bc`, `ac` — before/after open and close) are also
-available, e.g. `@add:c:PL` fires on the repeat itself.
+(`bo`, `ao`, `bc`, `ac`, for before and after open and close) are also
+available, for example `@add:c:PL` fires on the repeat itself.
 
 Mark names are assigned by the compiler, not chosen by you. Ask for them
-rather than guessing — `tabnas-abnf --marks -f grammar.abnf` lists every
+rather than guessing: `tabnas-abnf --marks -f grammar.abnf` lists every
 mark a grammar has, and attaching an action to one that doesn't exist is a
 compile error rather than a silent no-op.
 
 ## Left recursion
 
-ABNF grammars are often clearest written left-recursively — an additive
+ABNF grammars are often clearest written left-recursively: an additive
 expression is "an expression, a `+`, then a term". The compiler accepts
 that directly: a left-recursion pass (Paull's algorithm) rewrites both
 **direct** (`P = P a / b`) and **indirect** (`P = Q a`, `Q = P b`)
@@ -284,7 +284,7 @@ tn.parse('1+2+3').kids.map((k) => k.rule) // => ['term', 'term']
 ```
 
 (`PL = "+"` is a single-literal production, so it compiles to the token
-`#PL` rather than a rule — which is why the operators do not appear among
+`#PL` rather than a rule, which is why the operators do not appear among
 the children. Only `term` does.)
 
 ### Details and caveats
@@ -295,7 +295,7 @@ the children. Only `term` does.)
   - **The tree is flat, not left-nested.** There is no `expr` nested inside
     `expr`. The repeated `(PL term)` pairs become direct children, and the
     *leading* operand (`1` above) is folded into `expr` itself rather than
-    surfacing as its own `term` child — so `1+2+3` yields
+    surfacing as its own `term` child, so `1+2+3` yields
     `['term','term']`, and a lone `1` parses to an `expr` with no
     children at all. Left-associativity is a fact you apply in an action,
     not a shape you read off the AST.
@@ -312,13 +312,13 @@ the children. Only `term` does.)
   form (like the addition grammar above) round-trip exactly.
 - **A purely left-recursive rule is an error.** `loop = loop PL`, with no
   base (seed) alternative, throws `abnf: rule 'loop' is purely
-  left-recursive (no seed alternative); cannot eliminate` — there is
+  left-recursive (no seed alternative); cannot eliminate`: there is
   nothing to anchor the iteration on. Always give the recursive rule a
   non-recursive branch (`/ term`).
 - **Indirect recursion works, but can enlarge the grammar.** Paull's
   algorithm inlines earlier rules' alternatives to expose hidden recursion,
   which can duplicate branches; pathological grammars grow. This is a
-  first-step converter, not a full grammar toolchain — keep grammars
+  first-step converter, not a full grammar toolchain, so keep grammars
   reasonably small.
 
 This repository contains two implementations. `ts/` is canonical; `go/`

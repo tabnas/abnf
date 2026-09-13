@@ -11,7 +11,7 @@ from your input.
 parses inputs in your grammar and hands you back an AST.
 
 > Dialect note: this ABNF uses `=` to define a rule and `/` to separate
-> alternatives — *not* `::=` or `|`. That is genuine RFC 5234 ABNF.
+> alternatives, *not* `::=` or `|`. That is genuine RFC 5234 ABNF.
 
 The Go port tracks the canonical TypeScript implementation in `../ts`;
 both compile the same `.abnf` fixtures and produce the same parse trees.
@@ -61,9 +61,9 @@ func main() {
 Every rule produces a node, returned as a `map[string]any` with three
 keys:
 
-- `rule` — the grammar rule's name.
-- `src` — the source text this rule matched.
-- `kids` — a `[]any` of child node maps, one per *referenced* sub-rule.
+- `rule`. The grammar rule's name.
+- `src`. The source text this rule matched.
+- `kids`. A `[]any` of child node maps, one per *referenced* sub-rule.
 
 A leaf rule that matched only a literal has an empty `kids`, as above.
 
@@ -146,8 +146,8 @@ func main() {
 
 ## Where to go next
 
-- **[guide.md](guide.md)** — recipes: left recursion, case sensitivity,
+- **[guide.md](guide.md)**. Recipes: left recursion, case sensitivity,
   user actions, compiling to pure data.
-- **[reference.md](reference.md)** — the exact Go API and CLI flags.
-- **[concepts.md](concepts.md)** — how it works, plus differences from
+- **[reference.md](reference.md)**. The exact Go API and CLI flags.
+- **[concepts.md](concepts.md)**. How it works, plus differences from
   the TS version.

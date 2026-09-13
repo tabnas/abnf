@@ -1,9 +1,9 @@
 # github.com/tabnas/abnf/go
 
-Go port of [`@tabnas/abnf`](../ts) — an ABNF grammar compiler for the
+Go port of [`@tabnas/abnf`](../ts), an ABNF grammar compiler for the
 [`tabnas`](https://github.com/tabnas/parser) parsing engine.
 
-Takes ABNF source — the RFC 5234 dialect (`=` and `/`, not `::=`) — and
+Takes ABNF source (the RFC 5234 dialect (`=` and `/`, not `::=`)) and
 emits a tabnas `GrammarSpec` that, installed on an engine, parses inputs
 in that grammar and builds a `{rule, src, kids}` AST. Also emits
 "pure-data" jsonic (recognition / full-AST specs), supports user
@@ -44,11 +44,11 @@ func main() {
 
 Four-quadrant [Diátaxis](https://diataxis.fr) docs:
 
-- [tutorial.md](doc/tutorial.md) — learning-oriented: zero to a working
+- [tutorial.md](doc/tutorial.md). Learning-oriented: zero to a working
   parser, step by step.
-- [guide.md](doc/guide.md) — task-oriented recipes for real problems.
-- [reference.md](doc/reference.md) — the exact exported API and CLI flags.
-- [concepts.md](doc/concepts.md) — how it works, plus differences from
+- [guide.md](doc/guide.md). Task-oriented recipes for real problems.
+- [reference.md](doc/reference.md). The exact exported API and CLI flags.
+- [concepts.md](doc/concepts.md). How it works, plus differences from
   the TS version.
 
 ## CLI

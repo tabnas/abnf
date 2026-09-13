@@ -8,7 +8,7 @@ Go. For the API see [reference.md](reference.md).
 ## What the compiler is, and what the engine is
 
 `tabnasabnf` is a **compiler**, not a parser. `Abnf(src, opts)` reads
-ABNF source and emits a tabnas `*GrammarSpec` — a declarative
+ABNF source and emits a tabnas `*GrammarSpec`: a declarative
 description of rules, tokens, and AST-building actions. The actual
 parsing is done by the **tabnas engine** (`github.com/tabnas/parser/go`),
 a push-down recursive-descent parser:
@@ -20,7 +20,7 @@ ABNF source ──Abnf──▶ *GrammarSpec ──j.Grammar──▶ engine ─
 The compiler decides *what* grammar the engine runs; the engine decides
 *whether an input matches* and *what tree to build*. That separation is
 what lets a compiled grammar be serialised to data (via `AbnfCompile`)
-and re-loaded on a bare engine — in Go, in TS, or in another process.
+and re-loaded on a bare engine, in Go, in TS, or in another process.
 
 ## The ABNF dialect: `=` and `/`
 
@@ -34,7 +34,7 @@ match-token regex); `%s"GET"` is case-sensitive (a fixed token);
 ## The meta-grammar bootstrap
 
 ABNF source is parsed by a tabnas instance whose grammar is itself
-written as tabnas rules — the compiler bootstraps on the engine it
+written as tabnas rules; the compiler bootstraps on the engine it
 targets, with the JSON-oriented default tokens remapped to ABNF
 operators. There is no separate hand-rolled ABNF lexer.
 
@@ -50,14 +50,14 @@ tabnas rules.
 
 ## The output AST: `{rule, src, kids}`
 
-Every rule emits a node — in Go a `map[string]any` with keys `rule`,
+Every rule emits a node, in Go a `map[string]any` with keys `rule`,
 `src`, and `kids` (a `[]any` of child maps). Productions carry a
 `nodeKind`:
 
-- **user** — your rules, tagged `{rule, src, kids}`.
-- **core** — RFC 5234 char-class bricks (`ALPHA`, `DIGIT`); their `src`
+- **user**. Your rules, tagged `{rule, src, kids}`.
+- **core**. RFC 5234 char-class bricks (`ALPHA`, `DIGIT`); their `src`
   flattens into the enclosing user rule, adding no child nodes.
-- **helper** — synthetic desugar/dispatcher/chain rules; also flatten.
+- **helper**. Synthetic desugar/dispatcher/chain rules; also flatten.
 
 Because Paull's substitution inlines a *leading* reference, a rule whose
 alternative begins with a reference to another user rule loses that
@@ -66,7 +66,7 @@ rule's own node. `p = "a" q` keeps `q` as a child; `p = q "a"` inlines
 
 ## The probe dispatcher: unbounded lookahead
 
-Some ABNF grammars aren't LL(k) for any bounded k — canonically RFC
+Some ABNF grammars aren't LL(k) for any bounded k, canonically RFC
 3986's `[ userinfo "@" ] host`, where the optional prefix and the tail
 share a character vocabulary and the disambiguating `@` may be
 arbitrarily far away. For the pattern `[X D] Y`, the compiler emits a
@@ -78,14 +78,14 @@ retry, `k:` config, `c:` guards, `ctx` mark/rewind/peek).
 ## Recognition vs. tree-building, and pure-data emission
 
 A spec carries two kinds of behaviour: **recognition** (whether input
-matches — fully structural, no functions) and **tree-building**
-(constructing the AST — by default closures in `spec.Ref`).
+matches, fully structural, with no functions) and **tree-building**
+(constructing the AST, by default closures in `spec.Ref`).
 `AbnfCompile` exploits the split to emit pure data:
 
 - recognition mode (default) drops all tree-building, keeping the same
   accepted language but a generic tree;
 - full mode (`Recognition = &false`) keeps tree-building as engine
-  `$`-builtin refs (`@node$`, `@capture$`, `@bubble$`) plus `k` config —
+  `$`-builtin refs (`@node$`, `@capture$`, `@bubble$`) plus `k` config,
   still pure data, rebuilding the exact tree on load.
 
 The converter's `Builtins: true` emits both control and tree logic as
@@ -97,7 +97,7 @@ recognition data, so compilation refuses it (`*AbnfCompileError`).
 ## User actions and marks
 
 With `Marks: true`, every user-rule alternative is stamped with a
-stable mark — its leading discriminator (token name, pushed-rule name,
+stable mark: its leading discriminator (token name, pushed-rule name,
 or `_`), with `~N` suffixes for collisions. Bind a function to
 `@<rule>:o:<mark>` / `@<rule>:c:<mark>` or a rule-phase hook
 `@<rule>:<bo|ao|bc|ac>`. Your action is injected *after* the compiler's
@@ -107,8 +107,8 @@ the serialisable variant: named slots bound by the consumer at load.
 
 ## Differences from the TS version
 
-The Go port tracks `../ts` (the canonical implementation) closely —
-same pipeline, same fixtures, same parse trees — but a few things differ
+The Go port tracks `../ts` (the canonical implementation) closely
+(same pipeline, same fixtures, same parse trees) but a few things differ
 because of Go's type system and idioms:
 
 - **AST node type.** The tree is a `map[string]any` (`rule`, `src`,
@@ -128,8 +128,8 @@ because of Go's type system and idioms:
   still panics with an `*EmitError`; from `#28` onward `Abnf` returns
   that same error. The message is identical either way.
 
-- **`ActionsMap` values are slices.** `map[string][]ActionFn` — each
-  ref maps to a slice of actions — whereas TS accepts either a single
+- **`ActionsMap` values are slices.** `map[string][]ActionFn`, so each
+  ref maps to a slice of actions, whereas TS accepts either a single
   function or an array. Action functions take `(*tabnas.Rule,
   *tabnas.Context)` (no third `alt` argument).
 
@@ -152,8 +152,8 @@ because of Go's type system and idioms:
   for shape parity and is a no-op.
 
 - **Engine construction.** You build the engine with `tabnas.Make(...)`
-  and may pass `tabnas.Options` (e.g. a larger rewind history for
-  probe-heavy grammars, as the tests do) — there is no JS-style
+  and may pass `tabnas.Options` (for example a larger rewind history for
+  probe-heavy grammars, as the tests do); there is no JS-style
   `new Tabnas({ plugins: [...] })` constructor.
 
 ## Design trade-offs

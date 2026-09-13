@@ -56,15 +56,14 @@ out, _ := j.Parse("1+2-3")
 _ = out // node with rule == "expr"
 ```
 
-A production that is *only* left-recursive (no non-recursive seed, e.g.
-`a = a "x"`) cannot be eliminated. Give every recursive rule a base case.
+A production that is *only* left-recursive (no non-recursive seed, for example `a = a "x"`) cannot be eliminated. Give every recursive rule a base case.
 
 How the rejection reaches you depends on which `tabnas/bnf` is linked, and
 that is changing: through `v0.1.8` it **panics** with an `*EmitError`; from
 `bnf#28` onward `Abnf` **returns** that error like every other failure
 here. Both carry the same message. Code that must work against either can
 `recover` and check the returned error, but the direction of travel is the
-error return — a panic crossing a published API was the defect `bnf#28`
+error return; a panic crossing a published API was the defect `bnf#28`
 removes, not a contract to rely on.
 
 ## Match case-sensitively
@@ -79,7 +78,7 @@ ci.Parse("get") // accepts
 
 cs := tabnas.Make()
 abnf.Install(cs, `g = %s"GET"`, nil, nil)
-_, err := cs.Parse("get") // err != nil — case-sensitive
+_, err := cs.Parse("get") // err != nil (case-sensitive)
 ```
 
 ## Match by code point with numeric values

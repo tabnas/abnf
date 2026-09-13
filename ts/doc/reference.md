@@ -22,11 +22,11 @@ const {
 
 Take ABNF source and return a tabnas `GrammarSpec` (with a `ref` map of
 action closures, an `options` block, and a `rule` table). This is the
-primary entry point. (Also exported as `abnf` — the bare function, not
+primary entry point. (Also exported as `abnf`, the bare function, not
 to be confused with the plugin of the same name below.)
 
-- `src: string` — the ABNF source.
-- `opts?: AbnfConvertOptions` — see below.
+- `src: string`. The ABNF source.
+- `opts?: AbnfConvertOptions`. See below.
 
 ### `parseAbnf(src) => AbnfGrammar`
 
@@ -97,10 +97,10 @@ for a ref that matches no rule, hook, or marked alt, or that contains
 
 Action-ref grammar:
 
-- `@<rule>:<phase>` — a rule-phase hook, where `<phase>` is `bo`, `ao`,
+- `@<rule>:<phase>`. A rule-phase hook, where `<phase>` is `bo`, `ao`,
   `bc`, or `ac` (before/after open/close).
-- `@<rule>:o:<mark>` — the open alt(s) in `<rule>` carrying `<mark>`.
-- `@<rule>:c:<mark>` — the close alt(s) carrying `<mark>`.
+- `@<rule>:o:<mark>`. The open alt(s) in `<rule>` carrying `<mark>`.
+- `@<rule>:c:<mark>`. The close alt(s) carrying `<mark>`.
 
 ### `attachActionSlots(spec, refNames) => spec`
 
@@ -113,7 +113,7 @@ alt actions only) or an unknown target.
 ### `markListing(spec) => string`
 
 Human-readable, newline-separated listing of the marks the compiler
-assigned — one line per marked alt: `<rule>  <o|c>:<mark>  <what>`,
+assigned, one line per marked alt: `<rule>  <o|c>:<mark>  <what>`,
 where `<what>` is `s:<tokens>`, `p:<rule>`, or `(empty)`. The spec must
 have been converted with `marks: true`.
 
@@ -166,7 +166,7 @@ engine's `resolveFuncRefs` reconstructs on load.
 |---|---|---|
 | `AbnfParseError` | `parseAbnf` / `abnfConvert` on bad source | `line?`, `column?`, `cause?` |
 | `AbnfCompileError` | `toRecognitionSpec` / `toPureSpec` / `abnfCompile` | `rules: string[]` (offending rule names) |
-| `AbnfActionError` | `attachActions` / `attachActionSlots` | — |
+| `AbnfActionError` | `attachActions` / `attachActionSlots` | (none) |
 
 ## CLI: `tabnas-abnf`
 
@@ -230,7 +230,7 @@ The line documents that `NR` is the engine's number token; the lexer
 already supplies it, so the production compiles to nothing and every `NR`
 reference binds to `#NR`. The recognised names are `TX`, `NR`, `ST` and
 `VL`. Prose for any other name, or prose used inside a larger
-expression, is an error — there would be no definition behind it.
+expression, is an error, since there would be no definition behind it.
 
 ### Single-literal productions
 
@@ -246,7 +246,7 @@ out as `PL = "+"` rather than as a rule wrapping an anonymously-named
 token. Four cases are deliberately excluded, and stay rules: the start
 rule (the grammar needs an entry point), multi-alternative productions
 (`sign = "+" / "-"` is a choice), names the engine already owns (`TX`,
-`NR`, `ZZ`, `OB`, … — binding one would displace a lexer matcher), and
+`NR`, `ZZ`, `OB` and the rest, because binding one would displace a lexer matcher), and
 the empty literal (`path-empty = ""` derives epsilon, which no token can
 match).
 

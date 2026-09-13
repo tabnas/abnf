@@ -3,7 +3,7 @@
 ABNF grammar compiler for the
 [`tabnas`](https://github.com/rjrodger/tabnas) parser.
 
-Takes ABNF source (the RFC 5234 dialect — `=` and `/`, not `::=`) and
+Takes ABNF source (the RFC 5234 dialect: `=` and `/`, not `::=`) and
 emits a tabnas `GrammarSpec`. Installed on an engine, the spec parses
 inputs in that grammar and builds a `{rule, src, kids}` AST. It can also
 emit "pure-data" jsonic and supports user actions. Ships the
@@ -82,11 +82,11 @@ tn.parse('1+2+3').kids.map((k) => k.rule) // => ['term', 'term']
 Because it is a rewrite, the tree is **flat** (no nested `expr`; the
 leading operand folds into the rule, so associativity is applied in an
 action, not read off the AST), and `@ref` alt actions on the rewritten
-branches are look-up-only — attach actions to the sub-rules instead. A
+branches are look-up-only; attach actions to the sub-rules instead. A
 **purely** left-recursive rule (no non-recursive branch) is an error, and
 a rewritten rule does not round-trip back to its left-recursive source.
 (`PL = "+"` compiles to a token, not a rule, so the operators are not
-among the children — only `term` is.)
+among the children: only `term` is.)
 See [concepts.md](doc/concepts.md) and the root
 [README](../README.md#left-recursion) for the full details and caveats.
 
@@ -94,11 +94,11 @@ See [concepts.md](doc/concepts.md) and the root
 
 Four-quadrant [Diátaxis](https://diataxis.fr) docs:
 
-- [tutorial.md](doc/tutorial.md) — learning-oriented: zero to a working
+- [tutorial.md](doc/tutorial.md). Learning-oriented: zero to a working
   parser, step by step.
-- [guide.md](doc/guide.md) — task-oriented recipes for real problems.
-- [reference.md](doc/reference.md) — the exact API surface and CLI flags.
-- [concepts.md](doc/concepts.md) — how the compiler works and why.
+- [guide.md](doc/guide.md). Task-oriented recipes for real problems.
+- [reference.md](doc/reference.md). The exact API surface and CLI flags.
+- [concepts.md](doc/concepts.md). How the compiler works and why.
 
 ## CLI
 
