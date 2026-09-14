@@ -242,7 +242,7 @@ PL = "+"        ; => fixed token #PL, no `PL` rule
 ```
 
 The production name becomes the token name, so the grammar renders back
-out as `PL = "+"` rather than as a rule wrapping an anonymously-named
+out as `PL = "+"` rather than as a rule wrapping an anonymously named
 token. Four cases are deliberately excluded, and stay rules: the start
 rule (the grammar needs an entry point), multi-alternative productions
 (`sign = "+" / "-"` is a choice), names the engine already owns (`TX`,

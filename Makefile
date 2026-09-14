@@ -6,7 +6,8 @@
 
 .PHONY: all build test clean build-ts build-go test-ts test-go \
         clean-ts clean-go publish-ts publish-go tags-go reset \
-        abnf-corpus
+        abnf-corpus \
+        prose prose-counts
 
 all: build test
 
@@ -76,3 +77,9 @@ reset:
 # `vale sync`. Warnings are advisory, errors fail.
 prose:
 	vale --minAlertLevel=error $$(node ts/scripts/gated-docs.cjs)
+	node ts/scripts/vale-counts.cjs
+
+# Re-measure what .vale.ini and the style guide record, after
+# a change to the pages or to the rules moves the numbers.
+prose-counts:
+	node ts/scripts/vale-counts.cjs --write
