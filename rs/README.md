@@ -247,12 +247,22 @@ byte, over every grammar in that corpus either compiler can finish, and
 agreed on all 66; that comparison needs a built TypeScript checkout, so
 it is a procedure a maintainer repeats rather than a committed test.
 
-The differences are in the surface, not the grammar:
+One difference is in what a compiled grammar BUILDS, and the rest are
+in the surface:
+
+- **A probe and retry keeps the node it built.** Where an optional
+  prefix overlaps what follows it, the canonical runtime discards what
+  the retried alternative built and answers an empty node, and this port
+  answers the tree. Every runtime accepts and rejects the same inputs,
+  and the emitted grammar is byte identical, so the difference is in the
+  engine rather than in this crate. `DIVERGENCE.md` records it with the
+  measurements and names who owns the repair.
 
 - **A failure is returned, never raised.** `parse_abnf`, `abnf_convert`,
-  `abnf_compile` and `abnf` all answer a `Result`. The diagnostics
-  themselves are the same text, which the shared fixtures compare byte
-  for byte across all three implementations.
+  `abnf_compile` and `abnf` all answer a `Result`. Every diagnostic this
+  crate writes itself carries the same text in every runtime, which the
+  shared fixtures compare byte for byte across all three
+  implementations.
 - **There is no instance decoration.** TypeScript adds a callable
   `tn.abnf` member to the engine; Rust has no such thing, so the install
   path is the free function `abnf(&mut parser, src, opts)` and the
@@ -271,11 +281,15 @@ The differences are in the surface, not the grammar:
   characters are consumed by a hand-written matcher that leaves the
   quote for the string lexer, as the Go port does.
 - **Bracket nesting is refused past a documented cap.** A grammar
-  arrives from outside the system, the parse tree nests once per bracket, and a Rust
-  stack that runs out aborts the process rather than unwinding. About
-  five hundred nested groups or options is the limit, which the shared
-  compiler's own limit of 128 levels of element nesting reaches long
-  before.
+  arrives from outside the system, the parse tree nests once per
+  bracket, and a Rust stack that runs out aborts the process rather than
+  unwinding. About five hundred nested groups or options is the limit,
+  which the shared compiler's own limit of 128 levels of element nesting
+  reaches long before.
+- **A reversed numeric range comes back in other words.** Every runtime
+  refuses `%x5A-41`, and none of them writes that sentence: each hands
+  the pattern to the regular expression engine it carries, and reports
+  what comes back.
 
 ## Build and test
 
@@ -291,10 +305,10 @@ Or, from the repository root, `make test-rs`. For what CI would say,
 including formatting and the `Cargo.lock` check, run `ci/rust/run.sh`.
 
 The suite runs the four shared `test/spec/*.tsv` fixtures that keep all
-three implementations in step with each other, ports the TypeScript and Go
-unit suites, and runs the third-party conformance corpus of 68 published
-ABNF grammars. That corpus is fetched, never committed, and a missing
-corpus FAILS the suite rather than skipping it.
+three implementations in step with each other, ports the TypeScript and
+Go unit suites, and runs the third-party conformance corpus of 68
+published ABNF grammars. That corpus is fetched, never committed, and a
+missing corpus FAILS the suite rather than skipping it.
 
 ## License
 

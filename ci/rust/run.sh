@@ -34,11 +34,40 @@ cd "$ROOT/rs"
 # drift" claim this script exists for would hold everywhere except the
 # compiler version. Loud rather than silent when the toolchain is absent,
 # because a quiet fallback is the drift.
+# `rustup` treats `1.85` and `1.85.1` as DISTINCT versioned channels. A
+# machine carrying only `1.85.1-x86_64-unknown-linux-gnu` satisfies the
+# MSRV and matches the check below, but `cargo +1.85` on it does not run
+# that toolchain: it resolves the `1.85` channel, finds it absent, and
+# tries to DOWNLOAD it -- which fails outright for an offline
+# contributor and silently installs a second toolchain for everyone
+# else. So capture the full name of the toolchain that matched and run
+# Cargo through that name, never through the `major.minor` prefix that
+# only happened to match it.
 MSRV=$(awk -F'"' '/^rust-version = /{print $2; exit}' Cargo.toml)
 CARGO=(cargo)
 if [[ -n "$MSRV" ]]; then
-  if command -v rustup >/dev/null 2>&1 && rustup toolchain list | grep -q "^$MSRV"; then
-    CARGO=(cargo "+$MSRV")
+  MSRV_RE=$(printf '%s' "$MSRV" | sed 's/\./\\./g')
+  TOOLCHAIN=""
+  if command -v rustup >/dev/null 2>&1; then
+    # `rustup toolchain list` marks the active one with a parenthetical
+    # suffix, so take the first field. The pattern anchors the version
+    # and requires a separator after it, so `1.85` does not match
+    # `1.850`; either `1.85-<host>` or `1.85.<patch>-<host>` satisfies
+    # the MSRV, and the first listed wins.
+    #
+    # `|| true` because NO MATCH IS THE NORMAL CASE this block exists to
+    # handle. `grep` exits 1 when it matches nothing, `set -o pipefail`
+    # makes that the pipeline's status, and `set -e` then kills the
+    # whole script on the assignment -- silently, with status 1, before
+    # the warning below ever prints. That is what a contributor without
+    # the MSRV toolchain saw: a gate that exits 1 and says nothing.
+    TOOLCHAIN=$(rustup toolchain list 2>/dev/null \
+      | awk '{print $1}' \
+      | grep -E "^${MSRV_RE}([.-]|$)" \
+      | head -n 1) || true
+  fi
+  if [[ -n "$TOOLCHAIN" ]]; then
+    CARGO=(cargo "+$TOOLCHAIN")
   else
     echo "warning: MSRV $MSRV is not installed; running on $(rustc --version 2>/dev/null)" >&2
     echo "         install it with: rustup toolchain install $MSRV" >&2
@@ -118,6 +147,38 @@ trap 'if [ -f "$LOCK_BEFORE" ] && ! cmp -s "$LOCK_BEFORE" Cargo.lock; then cp "$
 # anyone running cargo directly.
 if [[ ! -d "$ROOT/test/abnf-corpus" ]]; then
   ( cd "$ROOT" && sh test/fetch-abnf-corpus.sh )
+fi
+
+# rs/tests/divergence_test.rs measures the CANONICAL half of every
+# DIVERGENCE.md entry by running node over ts/dist/abnf.js, so that an
+# entry which closes from the TypeScript side fails as loudly as one
+# that closes from the Rust side. That build is not committed and this
+# gate does not produce it. Say plainly when it is missing and turn the
+# canonical half off, rather than failing a Rust gate on a TypeScript
+# build it never asked for -- loud, for the same reason the MSRV
+# fallback above is loud, because a quiet fallback is the drift.
+#
+# `${ABNF_CANONICAL:-}` and never `$ABNF_CANONICAL`: `set -u` aborts on an
+# unset name, and UNSET IS THE NORMAL CASE here. That is the same way the
+# MSRV block above once died -- a line that cannot fail, failing, taking
+# the whole gate with it and printing nothing. The `else` arm prints on a
+# green run for the same reason: "the canonical half ran" has to be
+# visible, because the only alternative is inferring it from silence.
+if [[ "off" == "${ABNF_CANONICAL:-}" ]]; then
+  echo "warning: ABNF_CANONICAL=off arrived from the environment" >&2
+  echo "         THE CANONICAL HALF OF EVERY DIVERGENCE.md ENTRY IS NOT MEASURED" >&2
+  echo "         in this run, and nothing below will say so again." >&2
+elif ! command -v node >/dev/null 2>&1 || [[ ! -f "$ROOT/ts/dist/abnf.js" ]]; then
+  echo "warning: the canonical TypeScript is not runnable here" >&2
+  echo "         (needs node and $ROOT/ts/dist/abnf.js)" >&2
+  echo "         THE CANONICAL HALF OF EVERY DIVERGENCE.md ENTRY IS NOT MEASURED" >&2
+  echo "         in this run: rs/tests/divergence_test.rs pins only the Rust side," >&2
+  echo "         so a divergence that closes in ts/ will not be reported." >&2
+  echo "         Build it with: (cd ts && npm install && npm run build)" >&2
+  export ABNF_CANONICAL=off
+else
+  echo "the canonical TypeScript is runnable: both halves of every"
+  echo "DIVERGENCE.md entry are measured in this run."
 fi
 
 "${CARGO[@]}" fmt --check

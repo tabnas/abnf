@@ -9,31 +9,78 @@ Each entry names who owns the repair. An entry that closes must be
 deleted, and the test that pins it fails until it is, so this file
 cannot quietly go stale.
 
-The conformance dial is NOT a divergence: TypeScript and Rust read the
+The conformance dial is NOT a divergence: all three runtimes read the
 same figures over the third-party corpus (48/52 valid, 611/661 invalid,
 5 fragments, 2 over budget), and every grammar either compiler can
 finish emits byte-identical pure-data grammar text. Go's invalid figure
-is lower, which `AGENTS.md` records under "Conformance, as measured".
+used to be lower; it was re-measured on 2026-09-21 and now agrees, which
+`AGENTS.md` records under "Conformance, as measured".
 
 ## Where the divergences are pinned
 
-There is no executable register in `test/spec` for these. Two of the
-four are invisible to a grammar-to-output fixture, which is what every
-file there compares, and the fourth is about the shape of the API rather
-than about any value. So each one is pinned by a Rust test in
-`rs/tests/divergence_test.rs`, asserted in BOTH directions: the
-behaviour recorded here, and the behaviour the canonical runtime has, so
-a port that starts agreeing fails as loudly as one that starts
-disagreeing.
+There is no executable register in `test/spec` for these. Most are
+invisible to a grammar-to-output fixture, which is what every file there
+compares: two concern the shape of a value no fixture reads, one
+concerns the API rather than any value, and one is about the parse tree
+a compiled grammar builds rather than about the grammar. So each one is
+pinned by a Rust test in `rs/tests/divergence_test.rs`, asserted in BOTH
+directions: the behaviour recorded here, and the behaviour the canonical
+runtime has, so a port that starts agreeing fails as loudly as one that
+starts disagreeing.
 
-## 1. A numeric value naming a lone surrogate
+**Both directions are RUN, not described.** The canonical half of every
+entry below is measured by executing the canonical implementation:
+`rs/tests/divergence_test.rs` starts `node` on `ts/dist/abnf.js` once per
+run and compares each TypeScript cell in the tables below against what
+comes back. All seven entries are measured that way, the surrogate,
+span, nesting, API, probe, reversed-range and literal-size entries alike,
+and every TypeScript cell in every table below has an assertion behind
+it. Each one is written so that the CANONICAL behaviour changing is what
+fails, and the failure names the entry, so an entry that closes from the
+TypeScript side cannot go stale in prose.
 
-`%xD800` names one half of a UTF-16 surrogate pair. A JavaScript string
-can hold one; a Rust `String` and a Go `string` cannot.
+The GO column is the exception, and it is the one kind of claim here
+that can go stale without a test going red. No Rust test can run the Go
+port, so each Go cell was measured by hand on the date at the top of this
+file, by the procedure its entry names, and re-measuring it is a step a
+maintainer repeats rather than something CI does. Where an entry is a
+defect in the Go port rather than a divergence of this one, it says so
+and names the function.
+
+Strings cross that boundary as UTF-16 CODE UNITS rather than as text.
+Three of these entries are about a value no well-formed string can
+carry, and `JSON.parse` would repair a lone surrogate into U+FFFD on the
+way across, which is the value under test.
+
+The one thing that build needs is `ts/dist/abnf.js`, which `make
+build-ts` produces and which is not committed. Without it the divergence
+suite FAILS rather than skipping. `ABNF_CANONICAL=off` turns the
+canonical half off for a checkout that genuinely cannot build the
+canonical; `ci/rust/run.sh` sets it when the canonical is missing, and
+prints a warning naming every entry it has therefore left half measured.
+That warning is the only state in which a green Rust gate has not checked
+the canonical side.
+
+## 1. A numeric value naming a LONE surrogate
+
+`%xD800` names one half of a UTF-16 surrogate pair with no other half
+beside it. A JavaScript string can hold one; a Rust `String` and a Go
+`string` cannot.
 
 | input | TypeScript | Go | Rust |
 |---|---|---|---|
 | `g = %xD800` | fixed token `#T` is U+D800 | fixed token `#T` is U+FFFD | fixed token `#T` is U+FFFD |
+| `g = %xDC00.D800` | the two halves, in that order, neither paired | two U+FFFD | two U+FFFD |
+| `g = %xD800.0041` | U+D800 then `A` | U+FFFD then `A` | U+FFFD then `A` |
+| `g = %xD800 %xDC00` | two tokens, U+D800 and U+DC00 | ONE token, U+FFFD | ONE token, U+FFFD |
+| `g = %xD800-DFFF` | compiles to a character class | compiles to a character class | refused: `abnf: invalid regular expression for token #RX___UD800__UDFFF: ... class ... is not a valid Unicode scalar value` |
+
+The fourth row is the same fact one step downstream: the two halves are
+distinct strings in TypeScript and so get a token each, and they are the
+same string once both are U+FFFD, so the emitter allocates one token for
+both. The fifth is the same fact in a character class: the `regex`
+crate's classes are over scalar values, and a range with no scalar value
+in it at all cannot be built.
 
 **Reason.** `String.fromCodePoint(0xD800)` answers a lone surrogate.
 `char::from_u32(0xD800)` answers `None`, because a `char` is a Unicode
@@ -45,6 +92,43 @@ port to.
 surrogate code point names no character, so a grammar that matches one
 matches nothing a well-formed document can contain. No grammar in the
 third-party conformance corpus writes one.
+
+### An ADJACENT pair is not this entry, and Go gets it wrong
+
+`%xD800.DC00` is a dotted concatenation, and the canonical runtime joins
+its parts into one JavaScript string before anything asks what
+characters that string holds. The two halves are then a well-formed
+surrogate pair, which is the single character U+10000 and which every
+runtime can represent. So this is not a divergence but a defect wherever
+the answer differs.
+
+| input | TypeScript | Go | Rust |
+|---|---|---|---|
+| `g = %xD800.DC00` | one character, U+10000, so the grammar matches `𐀀` | two U+FFFD, so `𐀀` is REJECTED and `��` accepted | one character, U+10000 |
+| `g = %xD83D.DE00` | one character, U+1F600 | two U+FFFD | one character, U+1F600 |
+| `g = %x41.D800.DC00.42` | `A` U+10000 `B` | `A` U+FFFD U+FFFD `B` | `A` U+10000 `B` |
+
+**Provenance of each cell.** The TypeScript column was measured on
+2026-09-21 by running `ts/dist/abnf.js` under node and reading the
+charCodes of the element literal; the Rust column by
+`rs/tests/abnf_test.rs`, which pins every row of this table; the Go
+column by calling `ParseAbnf` from a throwaway test in `go/` on the same
+day and printing the runes of `Literal`.
+
+**Why no shared fixture row.** `test/spec/*.tsv` runs in all three
+runtimes, so a row pinning U+10000 here would go red in Go. The Rust
+behaviour is pinned by `an_adjacent_surrogate_pair_is_the_character_it_encodes`
+in `rs/tests/abnf_test.rs` instead, and the canonical behaviour by the
+entry 1 test in `rs/tests/divergence_test.rs`.
+
+**Owner.** The Go port, in `parseNumericValue` in `go/converter.go`,
+which calls `sb.WriteRune(rune(codePoint(n)))` once per dotted part and
+so replaces each half before the two can pair. The repair is to build
+the UTF-16 sequence for the whole concatenation and decode it once, as
+`push_utf16` plus `String::from_utf16_lossy` do in `rs/src/numeric.rs`.
+A pair split across a concatenation BOUNDARY (`%xD800 %xDC00`, two
+elements) is two terms in every runtime and is row four of the table
+above, not this one.
 
 ## 2. Source span offsets count bytes
 
@@ -109,7 +193,78 @@ function `abnf(&mut parser, src, opts)` and the convert-only path is
 
 **Reason.** Rust has no exceptions and no dynamic instance properties.
 
-**Owner.** Nobody. The diagnostic TEXT is identical in all three
-runtimes, which is the part that is a contract:
-`test/spec/alignment-abnf-errors.tsv` compares 33 of them byte for byte
-in every runtime, this one included.
+**Owner.** Nobody. Every diagnostic this crate writes itself carries
+identical TEXT in all three runtimes, which is the part that is a
+contract: `test/spec/alignment-abnf-errors.tsv` compares 33 of them byte
+for byte in every runtime, this one included. Entry 6 records the one
+class of refusal whose wording this crate does not own.
+
+## 5. A probe and retry keeps the node it built
+
+An optional prefix whose vocabulary overlaps what follows it is resolved
+with a probe and a retry pass. The canonical runtime discards whatever
+the retried alternative built and answers an EMPTY node; this port keeps
+it.
+
+| input | TypeScript | Go | Rust |
+|---|---|---|---|
+| `g = [ user "@" ] host`, `user = 1*ALPHA`, `host = 1*ALPHA`, parsing `ab@cd` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: 'ab@cd', kids: [user 'ab', host 'cd']}` |
+| the same grammar, parsing `abc` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: 'abc', kids: [host 'abc']}` |
+| RFC 3986 `authority`, parsing `user@example.com` | `{rule: 'authority', src: '', kids: []}` | `{rule: 'authority', src: '', kids: []}` | the full tree, `userinfo` and `host` under it |
+
+**Reason.** Not this crate. The `GrammarSpec` the three compilers emit
+for each of those grammars is BYTE IDENTICAL, and the difference shows
+with `builtins` both off, where the retry hooks are closures the shared
+compiler registers, and on, where they are the engine's own `$`
+builtins. What differs is what the engine does with the node across a
+rewind.
+
+Every runtime ACCEPTS and REJECTS the same inputs here, which is all
+`ts/test/probe.test.js`, `go/probe_test.go` and `rs/tests/probe_test.rs`
+assert, so this stayed invisible until the trees were compared.
+
+**Owner.** The engine port at `../../parser/rs`, with the shared
+compiler at `../../bnf/rs` as the other candidate. A consumer of this
+crate reads the difference as a populated tree where the canonical
+runtime gives an empty one, so it is recorded here until the engine
+settles which answer is right.
+
+## 6. A reversed numeric range is refused in the regex engine's words
+
+`%x5A-41` names a range whose start is above its end. All three
+compilers refuse it, and none of them writes the message: each hands the
+pattern to its platform's regular expression engine and reports what
+comes back.
+
+| input | TypeScript | Go | Rust |
+|---|---|---|---|
+| `g = %x5A-41` | throws `Invalid regular expression: /^[\u005a-\u0041]/: Range out of order in character class` | PANICS: `regexp: Compile(...): invalid character class range` | returns `abnf: invalid regular expression for token #RX___U005A__U0041: regex parse error: ... invalid character class range, the start must be <= the end` |
+
+**Reason.** The wording belongs to V8, to Go's `regexp` and to the
+`regex` crate respectively. The shared fixtures pin the diagnostics this
+crate writes, and this is not one of them.
+
+**Owner.** Nobody, unless a front-end starts checking the bounds itself
+before a pattern is built, which would give all three the same sentence.
+Go's outcome is the one worth fixing: it aborts the process rather than
+returning.
+
+## 7. A very long literal exceeds the regular expression size limit
+
+A case-insensitive literal becomes one regular expression, and the
+`regex` crate refuses to compile a pattern whose compiled form is larger
+than its default ten megabyte budget. V8 has no such budget.
+
+| input | TypeScript | Go | Rust |
+|---|---|---|---|
+| `g = "a…"`, 120000 characters | compiles | compiles | compiles |
+| the same, 150000 characters | compiles | compiles | refused: `abnf: invalid regular expression for token #AAA…: Compiled regex exceeds size limit of 10485760 bytes.` |
+
+**Reason.** Not this crate, and not the notation: the shared compiler
+builds the pattern in `rs/src/emit.rs` and takes the crate's default
+size limit, which `regex::RegexBuilder::size_limit` can raise.
+
+**Owner.** `tabnas-bnf` at `../../bnf/rs`, which builds the pattern. No
+grammar in the third-party conformance corpus writes a literal within
+two orders of magnitude of this, and every literal shorter than the
+limit compiles identically in all three runtimes.

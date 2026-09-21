@@ -378,3 +378,68 @@ fn annotation_part_must_be_the_annotated_rule_itself() {
     const SRC: &str = "top = \"<\" inner \">\"   ; @array\ninner = d   ; @object d\nd = 1*DIGIT\n";
     assert_eq!(annot_build(SRC, "<7>", "top"), json!([{ "d": "7" }]));
 }
+
+/// The comment an annotation rides in is lexed with JAVASCRIPT's notion
+/// of whitespace, not Rust's.
+///
+/// `str::trim`, `\s` and `char::is_whitespace` are the Unicode
+/// `White_Space` property, which holds U+0085 and lacks U+FEFF;
+/// ECMAScript's WhiteSpace plus LineTerminator is the other way round.
+/// A `;` comment takes any character at all, so every one of these is a
+/// grammar an author can write, and each was measured against the
+/// canonical runtime before being pinned here.
+#[test]
+fn an_annotation_comment_uses_javascript_whitespace() {
+    // U+FEFF is trimmed, so the annotation IS claimed and its first
+    // member is resolved (and refused, because `a` is inlined).
+    let error = abnf_convert(
+        "v = a b ; \u{feff}@object a b\na = \"x\"\nb = \"y\"\n",
+        None,
+    )
+    .expect_err("the annotation is read through the byte-order mark");
+    assert!(
+        error.to_string().contains("names 'a' as its first member"),
+        "got {error}"
+    );
+
+    // U+0085 is NOT trimmed, so the body does not start with `@` and
+    // the comment is left alone, exactly as in the canonical runtime.
+    abnf_convert("v = a b ; \u{85}@object a b\na = \"x\"\nb = \"y\"\n", None)
+        .expect("a next-line character leaves the comment unclaimed");
+
+    // Every character ECMAScript's `\s` covers separates members, so
+    // each of these names `a` and `b` rather than one long word.
+    for separator in ['\u{a0}', '\u{b}', '\u{c}', '\u{2003}', '\u{3000}'] {
+        let src = format!("v = a b ; @object a{separator}b\na = \"x\"\nb = \"y\"\n");
+        match abnf_convert(&src, None) {
+            Ok(_) => panic!("{separator:?}: expected a refusal, got none"),
+            Err(error) => assert!(
+                error.to_string().contains("names 'a' as its first member"),
+                "{separator:?}: got {error}"
+            ),
+        }
+    }
+}
+
+/// A carriage return ends what the canonical pattern can match, because
+/// JavaScript's `.` excludes every LineTerminator and the `regex`
+/// crate's excludes only `\n`. So the comment is left unclaimed rather
+/// than read as one long member list.
+#[test]
+fn a_carriage_return_ends_the_annotation_body() {
+    abnf_convert("v = a b ; @object a\rb\na = \"x\"\nb = \"y\"\n", None)
+        .expect("a carriage return leaves the comment unclaimed");
+}
+
+/// `\b` after the keyword is the ASCII word boundary a JavaScript
+/// pattern without the `u` flag has. The `regex` crate's is Unicode
+/// aware, which would stop `@objectä` matching at all.
+#[test]
+fn the_keyword_boundary_is_ascii() {
+    let error = abnf_convert("v = a b ; @object\u{e4} a b\na = \"x\"\nb = \"y\"\n", None)
+        .expect_err("the annotation is claimed and its first member refused");
+    assert!(
+        error.to_string().contains("is not a rule name"),
+        "got {error}"
+    );
+}

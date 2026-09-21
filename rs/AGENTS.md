@@ -124,11 +124,53 @@ that order exists to close.
 - **Spans carry `site.si` and `token.len`, both bytes.** Slicing the
   original source with a span gives the right text; `tests/spans_test.rs`
   asserts exactly that rather than asserting the numbers.
-- **A surrogate code point becomes U+FFFD.** No Rust `String` holds one.
-  Recorded in `../DIVERGENCE.md`.
+- **A LONE surrogate code point becomes U+FFFD.** No Rust `String` holds
+  one. Recorded in `../DIVERGENCE.md` as entry 1.
+- **An ADJACENT surrogate pair is the character it encodes, and that is
+  not the same thing.** `%xD800.DC00` is a dotted concatenation, and the
+  canonical runtime joins the parts into one JavaScript string before
+  anything asks what characters it holds: the two halves are then the
+  well-formed pair for U+10000, which every runtime can represent. So
+  `parse_numeric_value` builds the whole sequence as UTF-16 code units
+  and decodes it ONCE, with `push_utf16` and
+  `String::from_utf16_lossy`, rather than converting a part at a time.
+  Converting per part answered two U+FFFD, which REJECTED the character
+  the grammar names and ACCEPTED a document carrying two replacements.
+  A half the join leaves stranded is entry 1 again, one U+FFFD each.
+  Go still converts per part; `../DIVERGENCE.md` entry 1 records that
+  under "An ADJACENT pair is not this entry".
 - **The meta-grammar instance is a `OnceLock`.** `Tabnas` parses through
   `&self` and is `Send + Sync`, so one instance serves every caller and
   every thread; per-parse state lives on the rules and the context.
+- **The annotation comment is lexed with JAVASCRIPT's whitespace.**
+  `str::trim`, `char::is_whitespace` and the `regex` crate's `\s` are
+  the Unicode `White_Space` property, which holds U+0085 and lacks
+  U+FEFF; ECMAScript's WhiteSpace plus LineTerminator is the other way
+  round. A `;` comment takes any character, so `is_js_whitespace` in
+  `src/converter.rs` spells the set out, `(?-u:\b)` keeps the keyword
+  boundary ASCII, and the body class excludes every LineTerminator
+  because JavaScript's `.` does and the crate's `.` excludes only `\n`.
+- **A numeric value is read and printed as ECMAScript does.**
+  `parse_int` rounds ONCE from the exact integer, because `parseInt`
+  does and a repeated multiply-and-add in a double does not: the two
+  part company above 2^53, where `%d12345678901234567890` read as
+  `12345678901234570000` instead of `12345678901234567000`. That is
+  visible in the out-of-range diagnostic and `tests/abnf_test.rs` pins
+  it. `number_to_string` is the specification's `Number::toString`
+  rather than Rust's shortest float form, and that one is NOT visible
+  from outside this module: the only values it can be handed are the
+  non-negative integral doubles, `Infinity` and `NaN` that `parse_int`
+  answers, and on those the two renderers agree everywhere (449,995
+  reachable values compared, none differed; about 7,000 of 200,000
+  random doubles differ, and none of those is reachable). So it is
+  pinned by a unit test inside `src/numeric.rs`, where the difference
+  can be reached, rather than by a test under `tests/`. Do not delete
+  that unit test on the grounds that an integration test covers it:
+  none can.
+- **A probe and retry keeps the node it built**, where the canonical
+  runtime answers an empty one. That is the ENGINE's answer, not this
+  crate's: the emitted `GrammarSpec` is byte identical in all three
+  runtimes. Recorded in `../DIVERGENCE.md` as entry 5.
 
 ## Running it
 
@@ -144,6 +186,36 @@ takes minutes. `cargo test --release --test conformance_test` is the
 same measurement in about ninety seconds. Re-measure the pinned rows
 with `ABNF_CONFORMANCE_RECORD=1`, which prints the `rust` rows of
 `test/corpus/known-gaps.tsv` and asserts nothing.
+
+Two things about that sweep are load bearing, and both look like
+plumbing:
+
+- **Only the child's own watchdog is budget exhaustion.** The child
+  exits 3 when its 256MB or 60s cap fires, and the parent scores that,
+  and a kill at the parent's own deadline, as a failure to finish.
+  EVERY other ending -- a panic, an abort, a stack that ran out, a
+  loader failure -- fails the parent by name. It cannot be folded into
+  the budget, because the invalid half scores on `!ok`: a crash counted
+  as budget exhaustion is a crash counted as the compiler correctly
+  REJECTING an invalid grammar, and a regression that aborts on bad
+  input would leave the suite green.
+- **The children run a PINNED COPY of the test binary.** The sweep takes
+  minutes and the parent re-executes itself ~1500 times; a rebuild in
+  another terminal replaces or unlinks the path `current_exe` answers,
+  so later cases would measure a different artifact, or fail to spawn
+  (`Os { code: 2, kind: NotFound }`, seen in practice). The copy is
+  taken before the first child and removed when the sweep ends.
+
+The divergence suite runs the CANONICAL implementation. It starts `node`
+on `../ts/dist/abnf.js` once per run and asserts the TypeScript column of
+every table in `../DIVERGENCE.md`, so an entry that closes from the
+canonical side fails as loudly as one that closes here. That build is not
+committed: without it `tests/divergence_test.rs` FAILS rather than
+skipping, and `make build-ts` is what produces it. `ABNF_CANONICAL=off`
+turns the canonical half off where it genuinely cannot be built;
+`ci/rust/run.sh` sets that when the canonical is missing and prints a
+warning saying the canonical half went unmeasured, which is the only
+state in which a green Rust gate has not checked the other side.
 
 `tabnas`, `tabnas-bnf` and `tabnas-support` are sibling checkouts at
 `../../parser`, `../../bnf` and `../../support`.
@@ -164,6 +236,34 @@ project history. Adding or editing it changes the alert totals recorded
 in `.vale.ini` and `docs/STYLE-GUIDE.md`; re-measure with `node
 ts/scripts/vale-counts.cjs --write` and re-wrap any comment whose
 numbers changed length.
+
+## A long single rule is quadratic, and the engine owns it
+
+Parsing scales linearly in the NUMBER of rules and quadratically in the
+number of elements inside ONE rule. Measured on the release profile: a
+rule concatenating 2500, 5000, 10000 and 20000 literals takes 0.19s,
+0.75s, 3.67s and 12.75s, where the canonical runtime takes about 0.12s
+at every size.
+
+The cause is not in this crate. `Rule::accept_child_node` in the engine
+(`../../parser/rs/src/rule.rs`) does `self.child_node =
+child.node.borrow().clone()`. A `Value` container sits behind an `Arc`,
+so that clone is a second reference to the very array the next
+`push_node` mutates, and `Arc::make_mut` then copies the whole array
+once per element. The engine already computes `child_node_is_self` on
+the line above, which is the condition under which the clone is the
+parent's own accumulator and can be skipped.
+
+The same curve shows with a compiled grammar and no ABNF in sight:
+`list = item *( "," item )` over 1000, 2000, 4000 and 8000 items takes
+0.21s, 0.64s, 2.40s and 13.85s here against 0.09s, 0.18s, 0.55s and
+1.78s in the canonical runtime. Every answer is the same; only the cost
+differs, so this is not in `../DIVERGENCE.md`.
+
+`tests/untrusted_test.rs` measures the rule-count dimension, which is
+linear. Adding a ratio assertion for the element-count dimension would
+pin the quadratic as acceptable, so the number is recorded here instead
+and belongs to whoever fixes the engine.
 
 ## Checking against the canonical compiler
 

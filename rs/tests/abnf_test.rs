@@ -16,6 +16,7 @@ use serde_json::{json, Value as JsonValue};
 use tabnas::Tabnas;
 use tabnas_abnf::{
     abnf_convert, emit_grammar_spec, parse_abnf, AbnfConvertOptions, AbnfError, AbnfParseError,
+    Kind,
 };
 
 use common::{engine_for, repo_root};
@@ -430,4 +431,134 @@ fn plugin_installs_a_source_from_the_option_bag() {
     bare.use_plugin(tabnas_abnf::plugin(), None)
         .expect("the plugin installs");
     assert_eq!(bare.rule_names(), before);
+}
+
+/// A numeric value out of Unicode's range is named back to the author,
+/// and the number in that diagnostic is rendered as JavaScript's
+/// `String(n)` renders it.
+///
+/// Two things have to hold for the text to match the canonical runtime.
+/// The digits are read the way `parseInt` reads them, rounding ONCE from
+/// the exact integer rather than once per digit, which a repeated
+/// multiply-and-add in a double does not do. And the double is then
+/// printed by ECMAScript's own algorithm, which switches to exponent
+/// form at 1e21 and breaks a decimal midpoint to the even digit, neither
+/// of which Rust's shortest float form does.
+#[test]
+fn an_out_of_range_numeric_value_renders_as_javascript_prints_it() {
+    for (src, shown) in [
+        ("g = %x110000", "1114112"),
+        ("g = %d1114112", "1114112"),
+        ("g = %d9007199254740993", "9007199254740992"),
+        ("g = %d12345678901234567890", "12345678901234567000"),
+        ("g = %d99999999999999999999999", "1e+23"),
+        ("g = %d1000000000000000000000000000000", "1e+30"),
+        ("g = %b111111111111111111111111", "16777215"),
+        (
+            "g = %xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+            "1.461501637330903e+48",
+        ),
+    ] {
+        let error = parse_abnf(src).expect_err("an out-of-range code point is refused");
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!(" is {shown}, which is not a Unicode code point")),
+            "{src}: got {message}, want the value shown as {shown}"
+        );
+    }
+
+    // A digit string long enough to overflow a double reads as Infinity,
+    // exactly as `parseInt` answers it.
+    let error = parse_abnf(&format!("g = %d{}", "9".repeat(400))).expect_err("refused");
+    assert!(error.to_string().contains(" is Infinity, "), "got {error}");
+}
+
+/// The platform integer parse truncates at the first digit invalid for
+/// the base, and a multi-dash range keeps only the first two parts.
+/// Both are canonical behaviours, ported deliberately: Go refuses each
+/// of them.
+#[test]
+fn the_numeric_parse_truncates_as_the_canonical_runtime_does() {
+    // `%d5A` is `%d5`, so the grammar compiles and matches "\u{5}".
+    let spec = abnf_convert("g = %d5A", None).expect("%d5A is %d5");
+    assert_eq!(
+        spec.options
+            .get("fixed")
+            .and_then(|fixed| fixed.get("token"))
+            .and_then(|token| token.get("#T"))
+            .and_then(JsonValue::as_str),
+        Some("\u{5}")
+    );
+
+    // `%x41-5A-60` is `%x41-5A`.
+    let spec = abnf_convert("g = %x41-5A-60", None).expect("the first two parts are the range");
+    let text = serde_json::to_string(&spec.options).expect("options serialise");
+    assert!(
+        text.contains("u0041") && text.contains("u005a") && !text.contains("u0060"),
+        "got {text}"
+    );
+}
+
+/// The literal a one-element production carries, straight off the IR.
+fn term_literal(src: &str) -> String {
+    let grammar = parse_abnf(src).expect("parses");
+    match &grammar.productions[0].alts[0][0].kind {
+        Kind::Term { literal, .. } => literal.clone(),
+        other => panic!("{src}: expected a term, got {other:?}"),
+    }
+}
+
+/// A dotted concatenation is decoded as ONE UTF-16 string, so an
+/// adjacent surrogate pair is the character it encodes.
+///
+/// `%xD800.DC00` is the UTF-16 encoding of U+10000. The canonical
+/// runtime builds the parts into one JavaScript string before anything
+/// asks what characters it holds, so the halves pair up and the grammar
+/// matches the single character U+10000. Converting each part on its own
+/// answers two replacement characters instead, which REJECTS the
+/// character the grammar names and ACCEPTS a document carrying two
+/// U+FFFD.
+///
+/// This is not `../DIVERGENCE.md` entry 1. That entry is about a code
+/// point no Rust `String` can hold; the result here is an ordinary
+/// character, so a difference would be a plain defect.
+#[test]
+fn an_adjacent_surrogate_pair_is_the_character_it_encodes() {
+    assert_eq!(term_literal("g = %xD800.DC00"), "\u{10000}");
+    assert_eq!(term_literal("g = %xD83D.DE00"), "\u{1F600}");
+
+    let pair = parser("g = %xD800.DC00");
+    assert_accept(&pair, "\u{10000}");
+    assert_reject(&pair, "\u{FFFD}\u{FFFD}");
+
+    let emoji = parser("g = %xD83D.DE00");
+    assert_accept(&emoji, "\u{1F600}");
+    assert_reject(&emoji, "\u{FFFD}\u{FFFD}");
+
+    // A pair still pairs with the rest of a longer concatenation around
+    // it, because the whole sequence is decoded at once.
+    assert_eq!(term_literal("g = %x41.D800.DC00.42"), "A\u{10000}B");
+
+    // What no pairing can rescue is entry 1 again, one replacement per
+    // stranded half: a low surrogate first, a high one with an ordinary
+    // character after it, and a lone half on either side.
+    assert_eq!(term_literal("g = %xDC00.D800"), "\u{FFFD}\u{FFFD}");
+    assert_eq!(term_literal("g = %xD800.0041"), "\u{FFFD}A");
+    assert_eq!(term_literal("g = %x0041.D800"), "A\u{FFFD}");
+    assert_eq!(term_literal("g = %xD800"), "\u{FFFD}");
+
+    // A pair split ACROSS a concatenation boundary is two terms and
+    // never one character, in every runtime: `parseNumericValue` runs
+    // once per numeric value and nothing joins the results afterwards.
+    assert_eq!(term_literal("g = %xD800 %xDC00"), "\u{FFFD}");
+    let split = parser("g = %xD800 %xDC00");
+    assert_reject(&split, "\u{10000}");
+    assert_accept(&split, "\u{FFFD}\u{FFFD}");
+
+    // And nothing outside the surrogate range changed: an astral code
+    // point written directly is still itself, and an ordinary dotted
+    // concatenation is still its characters.
+    assert_eq!(term_literal("g = %x1F600"), "\u{1F600}");
+    assert_eq!(term_literal("g = %x0D.0A"), "\r\n");
+    assert_eq!(term_literal("g = %x66.6f.6f"), "foo");
 }

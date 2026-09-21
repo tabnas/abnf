@@ -165,6 +165,7 @@ the point: they are what would have caught this.
 | [`ts/test/grammar/`](ts/test/grammar/) | `.abnf` fixture grammars (`greet`, `pair`, `arith`, `arith-leftrec`, `json-subset`, `rfc3986-uri`). |
 | [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
 | [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`), tracking the TS implementation; front-end in [`rs/src/converter.rs`](rs/src/converter.rs), ABNF meta-grammar in [`rs/src/parser_abnf.rs`](rs/src/parser_abnf.rs), public surface in [`rs/src/lib.rs`](rs/src/lib.rs). No CLI. |
+| [`DIVERGENCE.md`](DIVERGENCE.md) | Every input on which a port answers something the canonical TypeScript does not, each one measured and each one pinned by a test in [`rs/tests/divergence_test.rs`](rs/tests/divergence_test.rs) so it cannot go stale. |
 
 The usual tabnas "the port tracks TS" contract applies: `go/` and `rs/`
 mirror the TypeScript implementation (`Abnf` / `abnf_convert`,
@@ -289,26 +290,34 @@ How it is judged, and by whom:
   row to silence a failure you did not fix, and never narrow the corpus
   or loosen an assertion to raise the figure.
 
-Measured on 2026-08-09, at the commit that introduced the suite (run
-`make test` and read the dial the conformance tests print):
+Measured by the suites themselves, the TS column on 2026-08-09 at the
+commit that introduced them and the Go and Rust columns on 2026-09-21
+(run `make test` and read the dial the conformance tests print):
 
 |                                   | TS        | Go        | Rust      |
 | --------------------------------- | --------- | --------- | --------- |
 | valid accepted **and** value-correct | 48/52  | 48/52     | 48/52     |
-| invalid rejected                  | 611/661   | 513/661   | 611/661   |
+| invalid rejected                  | 611/661   | 611/661   | 611/661   |
 | excluded fragments                | 5         | 5         | 5         |
 | over budget (counted as failures) | 2         | 2         | 2         |
 
-The Rust column was measured on 2026-09-21, by the same instrument.
+The Rust column was measured on 2026-09-21, by the same instrument. The
+Go column was RE-measured the same day and is no longer what it was:
+this table read `513/661` for Go, from 2026-08-09, and the dial
+`go/conformance_test.go` prints today reads `611/661`. Go used to accept
+an unclosed group `( "a" / "b"` and an unclosed option `[ "a"`, which
+was the largest TS/Go divergence in the corpus; it no longer does. Do
+not re-cite the old figure without running the suite: the numbers here
+are a snapshot, and `test/corpus/known-gaps.tsv` is the executable
+record that fails when one moves.
 
 The four valid-half gaps are the same files in every runtime: the two
 budget blow-ups, `go-abnf/testdata/void.abnf` (an empty grammar), and
 `tree-sitter-abnf/examples/elements.abnf` (the deliberate prose-val
-limit above). The invalid-half difference is real and is the largest
-TS/Go divergence in the corpus: Go additionally accepts an unclosed
-group `( "a" / "b"` and an unclosed option `[ "a"`, which TS rejects.
-Rust rejects both, so it reads the same figure as TS. All three still
-accept a dangling alternation `"a" /`.
+limit above). All three runtimes still accept a dangling alternation
+`"a" /` and a rulename opening with a digit, which is why
+`known-gaps.tsv` carries the same eight rows under `ts`, `go` and
+`rust`.
 
 ## The tabnas engine dependency
 

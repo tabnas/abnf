@@ -125,6 +125,30 @@ pub fn parse_abnf(src: &str) -> Result<Grammar, AbnfParseError> {
 
 // ---- value annotations ----------------------------------------------
 
+/// What JavaScript treats as whitespace in `String.prototype.trim`, in
+/// `\s` and in the member split: ECMAScript WhiteSpace and
+/// LineTerminator together.
+///
+/// That set is NOT Rust's `char::is_whitespace`, which is the Unicode
+/// `White_Space` property: `White_Space` holds U+0085, which JavaScript
+/// does not trim, and lacks U+FEFF, which JavaScript does. A `;` comment
+/// takes any character at all, so both differences are reachable from a
+/// grammar and the set is spelled out rather than borrowed.
+fn is_js_whitespace(character: char) -> bool {
+    '\u{feff}' == character || (character.is_whitespace() && '\u{85}' != character)
+}
+
+/// The same set, as the body of a regular expression class.
+const JS_WHITESPACE_CLASS: &str = concat!(
+    r"\t\n\x0B\x0C\r \u{a0}\u{1680}\u{2000}-\u{200a}",
+    r"\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}"
+);
+
+/// What JavaScript's `.` matches: anything that is not a LineTerminator.
+/// The `regex` crate's `.` excludes only `\n`, so a carriage return in a
+/// comment would be matched here where the canonical pattern stops.
+const JS_DOT_CLASS: &str = r"^\n\r\u{2028}\u{2029}";
+
 /// A trailing comment claiming a value annotation:
 ///
 /// ```abnf
@@ -145,7 +169,14 @@ pub fn parse_abnf(src: &str) -> Result<Grammar, AbnfParseError> {
 fn annotation_pattern() -> &'static Regex {
     static PATTERN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r"^@(object|array)\b\s*(.*)$").expect("the annotation pattern is valid")
+        // `(?-u:\b)` is the ASCII word boundary the canonical `\b` is. A
+        // JavaScript pattern without the `u` flag reads `\w` as
+        // `[A-Za-z0-9_]`, where the `regex` crate reads it as the Unicode
+        // word class, so `@objectä` would stop matching here.
+        Regex::new(&format!(
+            r"^@(object|array)(?-u:\b)[{JS_WHITESPACE_CLASS}]*([{JS_DOT_CLASS}]*)$"
+        ))
+        .expect("the annotation pattern is valid")
     })
 }
 
@@ -182,7 +213,9 @@ fn annotation_comments(src: &str) -> Vec<(usize, String)> {
                     .iter()
                     .position(|byte| b'\n' == *byte)
                     .map_or(bytes.len(), |offset| index + offset);
-                let body = src[index + 1..end].trim().to_string();
+                let body = src[index + 1..end]
+                    .trim_matches(is_js_whitespace)
+                    .to_string();
                 if body.starts_with('@') {
                     out.push((index, body));
                 }
@@ -236,7 +269,7 @@ fn attach_value_annotations(src: &str, prods: &mut [Value]) -> Result<(), AbnfPa
         let members: Vec<String> = captures
             .get(2)
             .map_or("", |group| group.as_str())
-            .split([' ', '\t', ','])
+            .split(|character: char| ',' == character || is_js_whitespace(character))
             .filter(|word| !word.is_empty())
             .map(str::to_string)
             .collect();
