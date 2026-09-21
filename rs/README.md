@@ -239,13 +239,22 @@ resolve.
 
 ## Differences from the canonical TypeScript
 
-The conformance dial reads the same figures in each implementation, and
-that IS a test: `tests/conformance_test.rs` measures it over the same 68
-published ABNF grammars the other two suites read. The emitted grammar
-text was separately compared with the canonical compiler's, byte for
-byte, over every grammar in that corpus either compiler can finish, and
-agreed on all 66; that comparison needs a built TypeScript checkout, so
-it is a procedure a maintainer repeats rather than a committed test.
+Every grammar in the third-party corpus this suite can finish inside its
+budget is accepted or rejected here exactly as the other two
+implementations answer it, and that IS a test:
+`tests/conformance_test.rs` measures it over the same 68 published ABNF
+grammars the other two suites read. The dial this crate prints is one
+rejection lower than theirs, because one grammar that all three do
+reject takes about 161 seconds in the debug build this suite runs,
+against about 13 and 16 seconds in the other two, and so runs out the
+shared 60 second budget. `../AGENTS.md` names the file, the cause and
+the owner.
+
+The emitted grammar text was separately compared with the canonical
+compiler's, byte for byte, over every grammar in that corpus either
+compiler can finish, and agreed on all 66; that comparison needs a built
+TypeScript checkout, so it is a procedure a maintainer repeats rather
+than a committed test.
 
 One difference is in what a compiled grammar BUILDS, and the rest are
 in the surface:
@@ -259,10 +268,13 @@ in the surface:
   measurements and names who owns the repair.
 
 - **A failure is returned, never raised.** `parse_abnf`, `abnf_convert`,
-  `abnf_compile` and `abnf` all answer a `Result`. Every diagnostic this
-  crate writes itself carries the same text in every runtime, which the
-  shared fixtures compare byte for byte across all three
-  implementations.
+  `abnf_compile` and `abnf` all answer a `Result`. The 33 diagnostics
+  `test/spec/alignment-abnf-errors.tsv` names carry the same text in
+  every runtime, which that fixture compares byte for byte across all
+  three implementations. Diagnostics outside those rows are held to the
+  canonical text by this crate's own tests, not by a cross-runtime one,
+  and `../DIVERGENCE.md` records the class this crate does not word
+  itself.
 - **There is no instance decoration.** TypeScript adds a callable
   `tn.abnf` member to the engine; Rust has no such thing, so the install
   path is the free function `abnf(&mut parser, src, opts)` and the

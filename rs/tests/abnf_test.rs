@@ -473,6 +473,74 @@ fn an_out_of_range_numeric_value_renders_as_javascript_prints_it() {
     assert!(error.to_string().contains(" is Infinity, "), "got {error}");
 }
 
+/// An out-of-range numeric value outranks a fault the engine meets
+/// LATER in the same source.
+///
+/// The canonical runtime throws from inside the decoding action, so it
+/// never reaches the later fault at all. This port records the
+/// diagnostic and reads it once the parse is over, and a parse the
+/// engine refused used to discard it and report the engine's own
+/// complaint instead: `g = %x110000` followed by an unterminated string
+/// was answered with the lexer's message about line two.
+///
+/// Measured on 2026-09-21 by running `ts/dist/abnf.js` under node over
+/// each source below. Every one throws
+/// `abnf: parse error: numeric value ... is not a Unicode code point`,
+/// carrying no row and no column.
+#[test]
+fn a_refused_numeric_value_outranks_a_later_engine_refusal() {
+    let deep_open = "( ".repeat(600);
+    let deep_close = " )".repeat(600);
+    for src in [
+        // The finding's own case: a lexer fault on the next line.
+        "g = %x110000\nbad = \"unterminated".to_string(),
+        // A parse fault rather than a lexer one.
+        "g = %x110000\nbad = = \"x\"".to_string(),
+        // Out of range because the digits overflow a double.
+        "g = %d999999999999999999999\nbad = \"unterminated".to_string(),
+        // Nesting this port refuses on its own (DIVERGENCE.md entry 3)
+        // is a later fault too, and the numeric value still wins.
+        format!("g = %x110000 {deep_open}\"x\"{deep_close}"),
+    ] {
+        let error = parse_abnf(&src).expect_err("an out-of-range code point is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("which is not a Unicode code point"),
+            "{src:?}: got {error}, want the numeric diagnostic"
+        );
+        assert!(
+            error.line.is_none() && error.column.is_none(),
+            "{src:?}: the canonical numeric diagnostic carries no position, got {:?}",
+            (error.line, error.column)
+        );
+    }
+
+    // The converse, so the repair cannot become "the numeric value
+    // always wins". A fault the engine meets BEFORE the numeric value
+    // leaves the value undecoded, records nothing, and the engine's own
+    // refusal stands. The first row is what the canonical runtime
+    // answers too, measured the same day; the second is the depth
+    // divergence, where the canonical accepts the nesting and reports
+    // the numeric value.
+    for (src, wanted) in [
+        (
+            "bad = \"unterminated\ng = %x110000".to_string(),
+            "unprintable",
+        ),
+        (
+            format!("g = {deep_open}\"x\"{deep_close} %x110000"),
+            "nests too deeply",
+        ),
+    ] {
+        let error = parse_abnf(&src).expect_err("refused");
+        assert!(
+            error.to_string().contains(wanted),
+            "{src:?}: got {error}, want {wanted}"
+        );
+    }
+}
+
 /// The platform integer parse truncates at the first digit invalid for
 /// the base, and a multi-dash range keeps only the first two parts.
 /// Both are canonical behaviours, ported deliberately: Go refuses each

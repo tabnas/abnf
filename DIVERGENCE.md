@@ -9,12 +9,20 @@ Each entry names who owns the repair. An entry that closes must be
 deleted, and the test that pins it fails until it is, so this file
 cannot quietly go stale.
 
-The conformance dial is NOT a divergence: all three runtimes read the
-same figures over the third-party corpus (48/52 valid, 611/661 invalid,
-5 fragments, 2 over budget), and every grammar either compiler can
-finish emits byte-identical pure-data grammar text. Go's invalid figure
-used to be lower; it was re-measured on 2026-09-21 and now agrees, which
-`AGENTS.md` records under "Conformance, as measured".
+The conformance dial is NOT a divergence. All three runtimes accept and
+reject the same grammars in the third-party corpus, and every grammar
+either compiler can finish emits byte-identical pure-data grammar text.
+The figures are 48/52 valid, 5 fragments, and 611/661 invalid with 2
+over budget in TypeScript and Go against 610/661 with 3 over budget in
+Rust. The one file behind that difference,
+`ex_abnf/test/resources/RFC5322.abnf`, is REJECTED by all three with the
+same message; the Rust suite runs the unoptimised test profile and takes
+161s over it where node takes 13s and `go test` 16s, so it exceeds the
+shared 60s budget and is counted as over budget rather than as the
+rejection it eventually is. That is cost, not behaviour, and
+`AGENTS.md` records it under "Conformance, as measured" beside the
+figures. Go's invalid figure used to be lower for a real reason; it was
+re-measured on 2026-09-21 and now agrees.
 
 ## Where the divergences are pinned
 
@@ -193,11 +201,22 @@ function `abnf(&mut parser, src, opts)` and the convert-only path is
 
 **Reason.** Rust has no exceptions and no dynamic instance properties.
 
-**Owner.** Nobody. Every diagnostic this crate writes itself carries
-identical TEXT in all three runtimes, which is the part that is a
-contract: `test/spec/alignment-abnf-errors.tsv` compares 33 of them byte
-for byte in every runtime, this one included. Entry 6 records the one
-class of refusal whose wording this crate does not own.
+**Owner.** Nobody. The TEXT is the part that is a contract, and what is
+under contract is the 33 diagnostics
+`test/spec/alignment-abnf-errors.tsv` names: it compares each of them
+byte for byte in every runtime, this one included. That is narrower than
+"every diagnostic this crate writes". Entry 6 records the one class of
+refusal whose wording this crate does not own, and the numeric-value
+diagnostic reaches a source the fixture rows do not, where Go still
+answers a later engine fault instead: `g = %x110000` on one line and an
+unterminated string on the next is answered by TypeScript and Rust with
+the out-of-range value and by Go with the lexer's complaint about line
+two, measured 2026-09-21. That is a defect in `go/converter.go`, which
+hangs the deferred diagnostic on the element it decoded and so has
+nowhere to keep it when the parse the element belonged to is refused;
+`rs/src/parser_abnf.rs` keeps it beside the parse instead. It is not a
+divergence of this port and needs no entry of its own; it is named here
+so the sentence above cannot be read as more than it measures.
 
 ## 5. A probe and retry keeps the node it built
 

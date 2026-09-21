@@ -23,9 +23,16 @@
 //
 //   - EVERY BASE COMPILE IS BUDGETED, in its own process. Two real
 //     published grammars in the corpus (RFC 5322 email, Dhall) do not
-//     terminate in this compiler, in any runtime. Exceeding the budget
-//     is recorded as a failure to accept, never as a pass and never as a
-//     skip.
+//     terminate in this compiler, in any runtime, and one more
+//     (ex_abnf's RFC 5322) finishes here only at about 161s, well past
+//     the budget, where node and `go test` clear it in 13s and 16s.
+//     Exceeding the budget is recorded as a failure to accept, never as
+//     a pass and never as a skip. On the INVALID half that means it is
+//     never scored as a rejection either: the child reports
+//     `{budget: true, ok: false}`, which is indistinguishable from a
+//     refusal unless the budget flag is read, and a nontermination on
+//     invalid input would otherwise leave this suite green. That third
+//     file is how the omission was found.
 //
 //   - THE RESIDUAL GAPS ARE AN EXACT SET, not a ratchet. Fixing one
 //     fails the suite as loudly as regressing one; the fix is to delete
@@ -691,8 +698,39 @@ fn conformance() {
     }
 
     // --- half 2a: corpus grammars the oracle rejects must be rejected ---
+    //
+    // A compile that never finishes is NOT a rejection. This half scores
+    // on `!ok`, and a child stopped by its own watchdog answers
+    // `{budget: true, ok: false}`, so testing `.ok` alone read a
+    // nontermination as the compiler correctly refusing the grammar and
+    // left the suite green through exactly the regression it exists to
+    // catch. Budget exhaustion is therefore recorded in `over_budget`,
+    // as the valid half records it, and counted out of the dial rather
+    // than into it.
+    //
+    // It does NOT join `invalid_gaps`: that set is pinned against the
+    // `invalid-accepted` rows of known-gaps.tsv and means "the compiler
+    // accepted this", which is the opposite claim. `over_budget` is
+    // pinned against the `budget-exceeded` rows, which is the claim
+    // being made, and a new member of that set fails the assertion below
+    // whichever half it came from.
+    let mut invalid_over_budget = BTreeSet::new();
     for rel in &invalid {
-        if compile_budgeted(exe, rel, "").ok {
+        let result = compile_budgeted(exe, rel, "");
+        if result.budget {
+            over_budget.insert(rel.clone());
+            invalid_over_budget.insert(rel.clone());
+            if record {
+                note(
+                    "budget-exceeded",
+                    rel,
+                    1,
+                    "compiler does not terminate within 256MB / 60s",
+                );
+            }
+            continue;
+        }
+        if result.ok {
             invalid_gaps.insert(rel.clone());
             if record {
                 note(
@@ -741,18 +779,24 @@ fn conformance() {
     // --- the dial: what was actually measured ---------------------------
     let mutant_total = bases.len() * mutations.len();
     let mutant_leaks: usize = mutation_leaks.values().sum();
+    // A grammar the compiler could not finish is subtracted from the
+    // invalid half rather than added to it: it was neither accepted nor
+    // rejected, so it is reported on its own line and nowhere else.
     println!(
         "\n  ABNF conformance dial (Rust), as measured by this run:\
          \n    valid   accepted + value-correct : {}/{}\
          \n    invalid rejected                 : {}/{}\
          \n    excluded fragments               : {}\
-         \n    over budget (counted as failures): {}",
+         \n    over budget (never scored a pass): {} ({} valid, {} invalid)",
         valid.len() - valid_gaps.len(),
         valid.len(),
-        invalid.len() - invalid_gaps.len() + mutant_total - mutant_leaks,
+        invalid.len() - invalid_gaps.len() - invalid_over_budget.len() + mutant_total
+            - mutant_leaks,
         invalid.len() + mutant_total,
         fragment.len(),
-        over_budget.len()
+        over_budget.len(),
+        over_budget.len() - invalid_over_budget.len(),
+        invalid_over_budget.len()
     );
 
     if record {

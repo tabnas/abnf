@@ -322,16 +322,26 @@ the children. Only `term` does.)
   reasonably small.
 
 This repository contains three implementations. `ts/` is canonical;
-`go/` and `rs/` track it. All three compile the same `.abnf` fixtures (in
-`ts/test/grammar/`) and produce the same parse trees.
+`go/` and `rs/` track it. All three compile the same `.abnf` fixtures
+(in `ts/test/grammar/`), and all three agree on every row of the shared
+conformance fixtures.
 
-That claim is enforced, not asserted: [`test/spec/*.tsv`](test/spec/)
-holds cross-runtime conformance fixtures pinning, for each grammar, the
-tokens allocated, the rule names emitted, the AST a sample input parses
-to, and the exact message for each rejected grammar. `ts/test/parity.test.js`,
-`go/parity_test.go` and `rs/tests/parity_test.rs` run the *same* files, so
-no runtime can drift without going red. See
+That second claim is enforced, not asserted, and it is exactly as wide
+as the rows that measure it: [`test/spec/*.tsv`](test/spec/) pins, for
+each grammar it names, the tokens allocated, the rule names emitted, the
+AST a sample input parses to, and the exact message for each rejected
+grammar. `ts/test/parity.test.js`, `go/parity_test.go` and
+`rs/tests/parity_test.rs` run the *same* files, so no runtime can drift
+on a pinned row without going red. See
 [`test/AGENTS.md`](test/AGENTS.md).
+
+Behaviour no row reaches can still differ, and each difference found so
+far is recorded with its measurement in
+[`DIVERGENCE.md`](DIVERGENCE.md). The parse tree is one: for a probe and
+retry grammar such as `g = [ user "@" ] host`, and for RFC 3986
+`authority`, `ts/` and `go/` answer an empty node where `rs/` answers
+the tree it built. Read that file before relying on any two of them
+agreeing about something no fixture row pins.
 
 | Path | Description |
 |---|---|

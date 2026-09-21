@@ -79,11 +79,15 @@ thread_local! {
     /// TypeScript diagnostic does not carry, and the exact bytes of that
     /// message are pinned by `test/spec/alignment-abnf-errors.tsv`.
     ///
-    /// So the message is recorded here and read once the parse is
-    /// structurally complete, which is what `go/converter.go` does with
-    /// its per-element `NumErr` field. A thread local rather than the
-    /// parse context's `u` bag because `Tabnas::parse` hands the context
-    /// back to nobody: this is the only channel out.
+    /// So the message is recorded here and read once the parse is over,
+    /// whether it SUCCEEDED or the engine refused the source. See
+    /// [`parse_abnf_raw`] for why a refused parse must surrender it too.
+    ///
+    /// A thread local rather than the parse context's `u` bag because
+    /// `Tabnas::parse` hands the context back to nobody: this is the
+    /// only channel out. `go/converter.go` keeps a per-element `NumErr`
+    /// field instead, which agrees for a parse that completes and has
+    /// nothing to carry the diagnostic on for one that does not.
     static NUM_ERR: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
@@ -974,10 +978,30 @@ pub(crate) enum RawError {
     /// The parser itself could not be built, or the source nests past
     /// [`MAX_GROUP_DEPTH`].
     Message(String),
+    /// A numeric value the decoding action refused, recorded BEFORE the
+    /// engine gave up somewhere later in the source. See
+    /// [`parse_abnf_raw`] for why it outranks the engine's own refusal.
+    Numeric(String),
 }
 
 /// Run the meta-grammar over `src` and return the raw production list,
 /// together with the numeric-value diagnostic the parse recorded.
+///
+/// A FAILED parse carries that diagnostic out too. The engine lexes and
+/// matches forward, so a numeric fault recorded before the engine gave
+/// up was decoded at an EARLIER position than the refusal the engine
+/// ends with, and the canonical runtime, which throws from inside the
+/// decoding action, never reaches that later refusal at all. Dropping
+/// the diagnostic here reported the later fault instead:
+/// `g = %x110000` followed by an unterminated string was answered with
+/// the lexer's complaint about line two rather than with the
+/// out-of-range value on line one.
+///
+/// Both refusals below are the later one, the depth message included:
+/// it is raised once the nesting passes [`MAX_GROUP_DEPTH`], which is a
+/// point the parse only reaches after carrying the numeric fault past
+/// it. A source whose nesting comes FIRST is refused before the numeric
+/// value is ever decoded, records nothing, and still reports the depth.
 pub(crate) fn parse_abnf_raw(src: &str) -> Result<(Vec<Value>, Option<String>), RawError> {
     let parser = abnf_parser().map_err(RawError::Message)?;
     clear_num_err();
@@ -992,7 +1016,10 @@ pub(crate) fn parse_abnf_raw(src: &str) -> Result<(Vec<Value>, Option<String>), 
             };
             Ok((productions, num_err))
         }
-        Err(error) if DEPTH_CODE == error.code => Err(RawError::Message(DEPTH_MESSAGE.to_string())),
-        Err(error) => Err(RawError::Engine(Box::new(error))),
+        Err(error) => Err(match num_err {
+            Some(message) => RawError::Numeric(message),
+            None if DEPTH_CODE == error.code => RawError::Message(DEPTH_MESSAGE.to_string()),
+            None => RawError::Engine(Box::new(error)),
+        }),
     }
 }

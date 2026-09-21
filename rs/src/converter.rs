@@ -71,9 +71,15 @@ impl std::error::Error for AbnfParseError {}
 /// numeric diagnostic first, then the incremental-merge refusal, then
 /// the malformed element. A rejection naming a different cause in each
 /// runtime is the divergence that order exists to close.
+///
+/// "First" includes ahead of a refusal from the engine itself, which is
+/// why the numeric diagnostic is answered on the error path below as
+/// well as on the success path. The canonical runtime throws out of the
+/// decoding action, so a later fault is never reached.
 pub fn parse_abnf(src: &str) -> Result<Grammar, AbnfParseError> {
     let (productions, num_err) = match parse_abnf_raw(src) {
         Ok(parsed) => parsed,
+        Err(RawError::Numeric(message)) => return Err(numeric_parse_error(&message)),
         Err(RawError::Message(message)) => return Err(AbnfParseError::new(message)),
         Err(RawError::Engine(error)) => {
             let line = error.row;
@@ -103,7 +109,7 @@ pub fn parse_abnf(src: &str) -> Result<Grammar, AbnfParseError> {
     // precedes every check below even when the element it was decoded
     // into was dropped with an unclosed group.
     if let Some(message) = num_err {
-        return Err(AbnfParseError::new(format!("abnf: parse error: {message}")));
+        return Err(numeric_parse_error(&message));
     }
 
     // BEFORE merging, not after. `merge_incrementals` drops each `=/`
@@ -121,6 +127,17 @@ pub fn parse_abnf(src: &str) -> Result<Grammar, AbnfParseError> {
         typed.push(production_from_value(production)?);
     }
     Ok(Grammar::new(with_core_rules(typed)))
+}
+
+/// The rejection a refused numeric value becomes.
+///
+/// One place, because the diagnostic is raised from two: a parse that
+/// completed structurally, and a parse the engine later refused. The
+/// text is pinned byte for byte by
+/// `test/spec/alignment-abnf-errors.tsv` in all three runtimes, and it
+/// carries no row or column, because the canonical one does not.
+fn numeric_parse_error(message: &str) -> AbnfParseError {
+    AbnfParseError::new(format!("abnf: parse error: {message}"))
 }
 
 // ---- value annotations ----------------------------------------------
