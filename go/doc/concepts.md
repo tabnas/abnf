@@ -107,9 +107,15 @@ the serialisable variant: named slots bound by the consumer at load.
 
 ## Differences from the TS version
 
-The Go port tracks `../ts` (the canonical implementation) closely
-(same pipeline, same fixtures, same parse trees) but a few things differ
-because of Go's type system and idioms:
+The Go port tracks `../ts` (the canonical implementation) closely: the
+same pipeline, the same fixtures, and the same parse trees over every
+grammar under `../../ts/test/grammar/` and every row of
+`../../test/spec/*.tsv`. A few things differ because of Go's type system
+and idioms, and those are listed below. A difference that is not idiom,
+on input no fixture row reaches, belongs in
+[`../../DIVERGENCE.md`](../../DIVERGENCE.md) instead, and one is
+recorded there: `%xD800.DC00` names the single character U+10000 in
+TypeScript and becomes two replacement characters here.
 
 - **AST node type.** The tree is a `map[string]any` (`rule`, `src`,
   `kids []any`) rather than a JS object. Map keys print in alphabetical

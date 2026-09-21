@@ -26,6 +26,7 @@
 [Jj]sonic
 [Ll]exer
 [Ll]ookahead
+[Ll]ookaround
 [Mm]atchers
 [Nn]pm
 [Oo]ptionals

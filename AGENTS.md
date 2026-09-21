@@ -108,7 +108,7 @@ Four things an agent should know before touching this:
   the rule: more than one alternative, a member count that does not
   match the parts, a leading member the fold erases, and a source-text
   member that reaches a value-building rule. Seventeen of them are
-  pinned byte for byte in both runtimes by
+  pinned byte for byte in all three runtimes by
   [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
   against twenty-three positive rows in
   [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
@@ -164,10 +164,18 @@ the point: they are what would have caught this.
 | [`ts/test/`](ts/test/) | `node --test` suite (see below). |
 | [`ts/test/grammar/`](ts/test/grammar/) | `.abnf` fixture grammars (`greet`, `pair`, `arith`, `arith-leftrec`, `json-subset`, `rfc3986-uri`). |
 | [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
+| [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`), tracking the TS implementation; front-end in [`rs/src/converter.rs`](rs/src/converter.rs), ABNF meta-grammar in [`rs/src/parser_abnf.rs`](rs/src/parser_abnf.rs), public surface in [`rs/src/lib.rs`](rs/src/lib.rs). No CLI. |
+| [`DIVERGENCE.md`](DIVERGENCE.md) | Every input on which a port answers something the canonical TypeScript does not, each one measured and each one pinned by a test in [`rs/tests/divergence_test.rs`](rs/tests/divergence_test.rs) so it cannot go stale. |
 
-The usual tabnas "Go port tracks TS" contract applies: the `go/` directory
-mirrors the TypeScript implementation (`Abnf`, `ParseAbnf`, `AbnfCompile`,
-matching the TS `abnfConvert` / `parseAbnf` / `abnfCompile`).
+The usual tabnas "the port tracks TS" contract applies: `go/` and `rs/`
+mirror the TypeScript implementation (`Abnf` / `abnf_convert`,
+`ParseAbnf` / `parse_abnf`, `AbnfCompile` / `abnf_compile`, matching the
+TS `abnfConvert` / `parseAbnf` / `abnfCompile`).
+
+The Rust port takes the shared compiler as the `tabnas-bnf` crate, the
+same split the TypeScript and Go sides make: `rs/` holds the RFC 5234
+front-end and nothing else. Its own guide is
+[`rs/AGENTS.md`](rs/AGENTS.md).
 
 ## How the compiler is itself a tabnas grammar
 
@@ -243,13 +251,14 @@ commit as a mode-160000 gitlink and ship an empty directory to everyone.
 It is fetched, pinned to exact commit SHAs, by
 `test/fetch-abnf-corpus.sh`.
 
-It is no longer a reference corpus you measure by hand. Both runtimes
-run it as a suite — `ts/test/conformance.test.js` and
-`go/conformance_test.go` — and both **fail, never skip**, if it is
-absent. You should never have to fetch it yourself: `npm test` does so
-through the `pretest` hook, `go test` from `TestMain`, and `make
-test-go` depends on `make abnf-corpus`. CI therefore runs the
-conformance suite on every push.
+It is no longer a reference corpus you measure by hand. All three
+runtimes run it as a suite — `ts/test/conformance.test.js`,
+`go/conformance_test.go` and `rs/tests/conformance_test.rs` — and all
+three **fail, never skip**, if it is absent. You should never have to
+fetch it yourself: `npm test` does so through the `pretest` hook, `go
+test` from `TestMain`, `cargo test` from the suite itself, and `make
+test-go` and `make test-rs` both depend on `make abnf-corpus`. CI
+therefore runs the conformance suite on every push.
 
 How it is judged, and by whom:
 
@@ -271,33 +280,79 @@ How it is judged, and by whom:
 - Every corpus compile runs **in its own process, under a 256 MB / 60 s
   budget**. The two grammars that hit the Paull's blow-up above
   (`node-abnf/examples/email.abnf`, `tree-sitter-abnf/examples/dhall.abnf`)
-  exceed it, in both runtimes. That is recorded as a failure to accept —
+  exceed it, in every runtime. That is recorded as a failure to accept —
   never a pass, never a skip — and it is the only reason those two are
   left out of the mutation half, since a mutant of a base that never
-  compiles measures nothing.
+  compiles measures nothing. On the **invalid** half, exceeding the
+  budget is likewise never scored as a rejection: the child answers
+  `{budget: true, ok: false}`, so a half that tests `ok` alone reads a
+  nontermination as a correct refusal and stays green through the
+  regression it exists to catch. `rs/tests/conformance_test.rs` reads the
+  flag, which is why its invalid figure moved (see the table below).
+  `ts/test/conformance.test.js` and `go/conformance_test.go` still do
+  not: no invalid grammar exceeds their budget today, so their figures
+  are right, but the hole is there and the next one to blow up would go
+  unnoticed. Fixing those two is open work.
 - The residual gaps are pinned as an **exact set** in
   `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
   as loudly as regressing one; the fix is to delete its row. Never edit a
   row to silence a failure you did not fix, and never narrow the corpus
   or loosen an assertion to raise the figure.
 
-Measured on 2026-08-09, at the commit that introduced the suite (run
-`make test` and read the dial the conformance tests print):
+Measured by the suites themselves, the TS column on 2026-08-09 at the
+commit that introduced them and the Go and Rust columns on 2026-09-21
+(run `make test` and read the dial the conformance tests print):
 
-|                                   | TS        | Go        |
-| --------------------------------- | --------- | --------- |
-| valid accepted **and** value-correct | 48/52  | 48/52     |
-| invalid rejected                  | 611/661   | 513/661   |
-| excluded fragments                | 5         | 5         |
-| over budget (counted as failures) | 2         | 2         |
+|                                   | TS        | Go        | Rust      |
+| --------------------------------- | --------- | --------- | --------- |
+| valid accepted **and** value-correct | 48/52  | 48/52     | 48/52     |
+| invalid rejected                  | 611/661   | 611/661   | 610/661   |
+| excluded fragments                | 5         | 5         | 5         |
+| over budget (never scored a pass) | 2         | 2         | 3         |
 
-The four valid-half gaps are the same files in both runtimes: the two
+**The Rust invalid figure is one lower, and it is a cost difference, not
+a disagreement.** `ex_abnf/test/resources/RFC5322.abnf` is rejected by
+all three with the same message (`abnf: rule 'ccontent' references
+unknown rule 'quoted-pair'`), in 13s under node and 16s under `go test`,
+but in **161s** in the Rust suite, which runs the unoptimised test
+profile and pays the engine quadratic `rs/AGENTS.md` records under "A
+long single rule is quadratic". So it exceeds the same 60s budget the
+other two clear, and the Rust half now counts it as over budget rather
+than as a rejection, which is what the row
+`rust budget-exceeded ex_abnf/test/resources/RFC5322.abnf` in
+`known-gaps.tsv` pins. It read 611/661 until 2026-09-21 only because
+`rs/tests/conformance_test.rs` scored the invalid half on `ok` alone: a
+child stopped by its own watchdog answers `{budget: true, ok: false}`,
+which is indistinguishable from a refusal unless the budget flag is
+read.
+
+**That row is the one timing-sensitive entry in `known-gaps.tsv`**, and
+it is the only one that is: the other two are Paull's blow-ups that
+never finish at all, while this one finishes at roughly 2.7x the budget
+on the host it was measured on (four shared cores). A host fast enough
+to bring it under 60 s will fail the suite with "If you FIXED one,
+delete its row", and deleting it is then the right answer. Fixing the
+engine quadratic is the other way it closes.
+
+The Rust column was measured on 2026-09-21, by the same instrument, and
+re-measured the same day once that instrument began reading the budget
+flag on both halves rather than only on the valid one. The Go column was
+RE-measured the same day and is no longer what it was:
+this table read `513/661` for Go, from 2026-08-09, and the dial
+`go/conformance_test.go` prints today reads `611/661`. Go used to accept
+an unclosed group `( "a" / "b"` and an unclosed option `[ "a"`, which
+was the largest TS/Go divergence in the corpus; it no longer does. Do
+not re-cite the old figure without running the suite: the numbers here
+are a snapshot, and `test/corpus/known-gaps.tsv` is the executable
+record that fails when one moves.
+
+The four valid-half gaps are the same files in every runtime: the two
 budget blow-ups, `go-abnf/testdata/void.abnf` (an empty grammar), and
 `tree-sitter-abnf/examples/elements.abnf` (the deliberate prose-val
-limit above). The invalid-half difference is real and is the largest
-TS/Go divergence in the corpus: Go additionally accepts an unclosed
-group `( "a" / "b"` and an unclosed option `[ "a"`, which TS rejects.
-Both runtimes still accept a dangling alternation `"a" /`.
+limit above). All three runtimes still accept a dangling alternation
+`"a" /` and a rulename opening with a digit, so `known-gaps.tsv` carries
+the same eight rows under `ts`, `go` and `rust`, plus the ninth `rust`
+row for the budget difference above.
 
 ## The tabnas engine dependency
 
@@ -352,22 +407,33 @@ matches the suite name. Rename that suite and the pattern stops matching —
 conformance would then run in both passes: slower, still correct, and
 noisy enough to notice.
 
-Top-level `Makefile` targets. The aggregates run **both** runtimes, not
-just TypeScript:
+Top-level `Makefile` targets. The aggregates run **all three** runtimes,
+not just TypeScript:
 
 ```bash
-make build        # build-ts + build-go
-make test         # test-ts + test-go   (test-go depends on abnf-corpus)
-make clean        # clean-ts + clean-go
-make abnf-corpus  # sh test/fetch-abnf-corpus.sh — a prerequisite of test-go
+make build        # build-ts + build-go + build-rs
+make test         # test-ts + test-go + test-rs
+                  #   (test-go and test-rs both depend on abnf-corpus)
+make clean        # clean-ts + clean-go + clean-rs
+make abnf-corpus  # sh test/fetch-abnf-corpus.sh — a prerequisite of
+                  #   test-go and test-rs
+make version-rs V=x.y.z   # bump the two Rust version sites
 make publish-ts   # NOT the release path — see "Releasing"
 make publish-go V=x.y.z   # NOT the release path — see "Releasing"
 make tags-go      # list go/v* tags
-make reset        # rebuilds and retests BOTH sides
+make reset        # rebuilds and retests the TS and Go sides
 ```
 
-The per-side targets (`build-ts`/`build-go`, `test-ts`/`test-go`,
-`clean-ts`/`clean-go`) exist too, for working on one runtime at a time.
+The per-side targets (`build-ts`/`build-go`/`build-rs`,
+`test-ts`/`test-go`/`test-rs`, `clean-ts`/`clean-go`/`clean-rs`) exist
+too, for working on one runtime at a time. `ci/rust/run.sh` is the full
+Rust gate: formatting, build, tests, doctests, clippy with `-D warnings`
+and the `Cargo.lock` check.
+
+The Rust crate takes `tabnas`, `tabnas-bnf` and (for tests)
+`tabnas-support` as **sibling checkouts**, the same model the TypeScript
+side uses for its `file:` dependencies. Clone `parser`, `bnf` and
+`support` beside this repository before working in `rs/`.
 
 **Do not release with `make publish-ts` or `make publish-go`** — by
 anyone, not just an agent. They predate
@@ -375,10 +441,11 @@ anyone, not just an agent. They predate
 
 - `publish-ts` runs a local `npm publish`, which goes out over a token and
   bypasses the OIDC trusted publishing the workflow uses.
-- `publish-go` **breaks the three-version invariant.** It `sed`s only
+- `publish-go` **breaks the five-version invariant.** It `sed`s only
   `const VERSION` in `go/abnf.go`, then commits, tags and pushes — leaving
-  `ts/package.json` and `ts/src/abnf.ts` on the previous version, which
-  `ts/test/version.test.js` and `go/version_test.go` exist to reject. It
+  `ts/package.json`, `ts/src/abnf.ts` and both Rust sites on the previous
+  version, which `ts/test/version.test.js`, `go/version_test.go` and
+  `rs/tests/version_test.rs` exist to reject. It
   also runs `test-go` *before* the bump, so what it verifies is not what it
   ships. And it pushes a tag, which a session cannot do at all.
 
@@ -406,7 +473,7 @@ The commands that prove a change is correct. Run them from the repo root
 unless stated:
 
 ```bash
-make build && make test      # both runtimes — the check that matters
+make build && make test      # all three runtimes — the check that matters
 ```
 
 Narrower, when iterating:
@@ -414,7 +481,14 @@ Narrower, when iterating:
 ```bash
 (cd ts && npm run build && npm test)   # build first: the tests run against dist/
 (cd go && go test ./...)               # unit + parity + conformance suites
+(cd rs && cargo test --all-targets && cargo test --doc)
 ```
+
+The Rust conformance sweep compiles every corpus grammar in its own
+budgeted process and every mutant in this one, so it takes minutes on
+the unoptimised profile. `cargo test --release --test conformance_test`
+is the same measurement in about ninety seconds, which is what to run
+while iterating on the compiler.
 
 Each line is a subshell, and the TS one builds before testing on purpose.
 `npm test` runs the `.test.js` suite against the compiled `dist/` and does
@@ -423,36 +497,49 @@ alone on a fresh checkout and it either fails for want of `dist/` or
 silently passes against stale output.
 
 You never fetch the conformance corpus by hand: `npm test` does it through
-the `pretest` hook, `go test` from `TestMain`, and `make test-go` depends on
-`make abnf-corpus`. A missing corpus is a **failure** in both runtimes,
-never a skip.
+the `pretest` hook, `go test` from `TestMain`, `cargo test` from the suite
+itself, and `make test-go` and `make test-rs` both depend on
+`make abnf-corpus`. A missing corpus is a **failure** in all three
+runtimes, never a skip.
 
 What "correct" means here, in order of authority:
 
-1. **The shared fixtures pass in BOTH runtimes.** `test/spec/*.tsv` (the
-   four `alignment-abnf-*` files) is the parity contract — a row green in
-   one runtime and red in the other is a failure, not a discrepancy.
+1. **The shared fixtures pass in ALL THREE runtimes.** `test/spec/*.tsv`
+   (the four `alignment-abnf-*` files) is the parity contract — a row
+   green in one runtime and red in another is a failure, not a
+   discrepancy. It is also the whole of that contract: behaviour no row
+   reaches is not under it, and `DIVERGENCE.md` is where the differences
+   found outside it are recorded.
 2. **The conformance dial does not regress.** `test/corpus/known-gaps.tsv`
    is an exact set, per runtime: fixing a gap fails the suite as loudly as
    regressing one, and the fix is to delete its row — never to edit a row
    you did not fix, and never to narrow the corpus.
-3. **The three version constants agree** — `ts/package.json` `"version"`,
-   `VERSION` in `ts/src/abnf.ts`, and `const VERSION` in `go/abnf.go`.
-   `ts/test/version.test.js` and `go/version_test.go` fail the build if
-   they drift.
+3. **The five version sites agree** — `ts/package.json` `"version"`,
+   `VERSION` in `ts/src/abnf.ts`, `const VERSION` in `go/abnf.go`,
+   `version` in `rs/Cargo.toml` and `pub const VERSION` in
+   `rs/src/lib.rs`. `ts/test/version.test.js`, `go/version_test.go` and
+   `rs/tests/version_test.rs` fail the build if they drift; `make
+   version-rs V=x.y.z` bumps the two Rust ones.
 
 ## Error codes
 
 This package declares **no** error codes of its own: there is no
-`error`/`hint` catalogue in either runtime, and no fixture pins an
+`error`/`hint` catalogue in any runtime, and no fixture pins an
 `ERROR:<code>` row — none of the engine's inherited base codes is exercised
 here either. Compiler diagnostics are thrown exceptions (`AbnfParseError`
 in `ts/src/converter.ts`, and its Go counterpart) whose prose messages
-carry the `abnf:` prefix.
+carry the `abnf:` prefix. Rust has no exceptions, so the same diagnostics
+are RETURNED there, as `AbnfParseError` and the `AbnfError` enum that
+wraps it; the text is identical wherever the shared fixtures compare it,
+which is the 33 rows of `alignment-abnf-errors.tsv` and not every
+diagnostic the package can produce. `DIVERGENCE.md` entry 4 names a
+numeric-value source outside those rows where Go still answers a
+different sentence.
 
 What the fixtures pin instead is the rendered **message**:
-`test/spec/alignment-abnf-errors.tsv` compares each diagnostic byte for
-byte, in both runtimes, through the parity runners' `matchError` hook. The
+`test/spec/alignment-abnf-errors.tsv` compares each of its 33 diagnostics
+byte for byte, in all three runtimes, through the parity runners'
+`matchError` hook. The
 wording is deliberately under test there — these diagnostics name the
 offending rule and say what to write instead — but a message is a weaker
 contract than a code: rewording a diagnostic and changing which failure
@@ -510,6 +597,12 @@ reusable workflow rather than in this repo.
 A **Go job runs too** (`ubuntu`/`macos`): `run-ts` and `run-go` both
 default to `true` and this repo overrides neither.
 
+The Rust gate is **not** part of that workflow. It is a standalone
+workflow staged at [`ci/workflows/rust.yml`](ci/workflows/rust.yml)
+under admin ADR-8, running [`ci/rust/run.sh`](ci/rust/run.sh); a session
+cannot write `.github/workflows`, so a maintainer promotes it. See
+[`ci/README.md`](ci/README.md).
+
 ## Releasing
 
 `.github/workflows/release.yml` handles releases: it publishes
@@ -526,14 +619,20 @@ agent can take: **a session's credentials cannot push tag refs —
 same credentials succeed. No loss, because the workflow creates both tags
 itself, atomically, *after* npm accepts the publish.
 
-1. Bump all **three** version sites — `ts/package.json`, `VERSION` in
-   `ts/src/abnf.ts`, `const VERSION` in `go/abnf.go`. `ts/test/version.test.js`
-   and `go/version_test.go` fail the build if they drift.
-2. Verify both runtimes, including conformance: **`make build && make
-   test`**, not `make test` alone. `npm test` runs against the compiled
-   `dist/` and does not compile, so a bumped `ts/src/abnf.ts` is otherwise
-   checked as stale output — or fails outright on a fresh checkout. Same
-   reason the "Verify your work" section builds first.
+1. Bump all **five** version sites — `ts/package.json`, `VERSION` in
+   `ts/src/abnf.ts`, `const VERSION` in `go/abnf.go`, and then `make
+   version-rs V=x.y.z`, which writes the two Rust ones (`version` in
+   `rs/Cargo.toml`, `pub const VERSION` in `rs/src/lib.rs`) and
+   refreshes the crate's entry in `rs/Cargo.lock`.
+   `ts/test/version.test.js`, `go/version_test.go` and
+   `rs/tests/version_test.rs` each fail the build if they drift, so
+   bumping only the first three makes step 2 fail before the workflow
+   can be dispatched. The full list is under "Verify your work" above.
+2. Verify **all three** runtimes, including conformance: **`make build
+   && make test`**, not `make test` alone. `npm test` runs against the
+   compiled `dist/` and does not compile, so a bumped `ts/src/abnf.ts`
+   is otherwise checked as stale output — or fails outright on a fresh
+   checkout. Same reason the "Verify your work" section builds first.
 3. **Merge the bump through a reviewed PR.** That is the house convention
    and what `release.yml`'s own header describes. A direct push to `main`
    is a recovery path, not the normal one: CI still gates it, but nothing
