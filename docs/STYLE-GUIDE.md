@@ -2,11 +2,12 @@
 
 How the tabnas documentation is written. Adapted from
 [aontu](https://github.com/aontu-lang/aontu)'s `docs/STYLE-GUIDE.md`,
-with tabnas's terminology, two-runtime file layout, and executable-example
-conventions. This guide is normative for every page `ts/scripts/gated-docs.cjs`
-lists, which is the reader-facing set: 11 pages in this repository. It exists so that a page written next year sounds like a
-page written this year, and so that a reviewer can point at a rule instead
-of arguing taste.
+with tabnas's terminology, three-runtime file layout, and
+executable-example conventions. This guide is normative for every page
+`ts/scripts/gated-docs.cjs` lists, which is the reader-facing set: 12
+pages in this repository. It exists so that a page written next year
+sounds like a page written this year, and so that a reviewer can point
+at a rule instead of arguing taste.
 
 Three sources feed it, in a fixed priority order. The same order is
 encoded in `.vale.ini`, and every rule switched off there names the
@@ -65,7 +66,7 @@ is capability, not preference.**
 
 **A Google rule sitting below error level was tried at error first and
 found wrong for these pages.** `.vale.ini` records what each produced on
-a clean run over the gated set: 403 alerts across 11 files. Those
+a clean run over the gated set: 451 alerts across 12 files. Those
 numbers were written by hand once, and this sentence and the one in
 `.vale.ini` drifted apart from each other and from a run.
 `node ts/scripts/vale-counts.cjs` now reads both against a live Vale run
@@ -100,11 +101,15 @@ tutorial, used in a guide, specified in the reference, argued in the
 explanation) but the normative statement lives in the reference and
 everything else links to it.
 
-**The two runtimes carry the same set.** A page present under `ts/doc/`
-and missing under `go/doc/` is a gap, and `gated-docs.cjs` filters to
-what is on disk so the gap shows up as a missing gate rather than a
-crash. A page only one port has is a deliberate exception and says so in
-its own opening lines.
+**The two documented runtimes carry the same set.** A page present under
+`ts/doc/` and missing under `go/doc/` is a gap, and `gated-docs.cjs`
+throws on a declared page that is not on disk, so the gap shows up as a
+missing gate rather than a crash. A page only one port has is a
+deliberate exception and says so in its own opening lines.
+
+The Rust port is the deliberate exception at the set level: it documents
+itself in `rs/README.md` alone, which is gated like the other READMEs,
+rather than carrying a fourth quadrant of its own.
 
 ## The published set cites nothing internal
 

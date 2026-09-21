@@ -321,21 +321,23 @@ the children. Only `term` does.)
   first-step converter, not a full grammar toolchain, so keep grammars
   reasonably small.
 
-This repository contains two implementations. `ts/` is canonical; `go/`
-tracks it. Both compile the same `.abnf` fixtures (in
+This repository contains three implementations. `ts/` is canonical;
+`go/` and `rs/` track it. All three compile the same `.abnf` fixtures (in
 `ts/test/grammar/`) and produce the same parse trees.
 
 That claim is enforced, not asserted: [`test/spec/*.tsv`](test/spec/)
 holds cross-runtime conformance fixtures pinning, for each grammar, the
 tokens allocated, the rule names emitted, the AST a sample input parses
-to, and the exact message for each rejected grammar. `ts/test/parity.test.js`
-and `go/parity_test.go` run the *same* files, so neither runtime can drift
-without going red. See [`test/AGENTS.md`](test/AGENTS.md).
+to, and the exact message for each rejected grammar. `ts/test/parity.test.js`,
+`go/parity_test.go` and `rs/tests/parity_test.rs` run the *same* files, so
+no runtime can drift without going red. See
+[`test/AGENTS.md`](test/AGENTS.md).
 
 | Path | Description |
 |---|---|
 | [`ts/`](ts/) | TypeScript / JavaScript (`@tabnas/abnf`) + the `tabnas-abnf` CLI. |
 | [`go/`](go/) | Go port (`github.com/tabnas/abnf/go`, package `tabnasabnf`) + CLI. |
+| [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`); see [`rs/README.md`](rs/README.md). |
 
 ## Documentation
 
@@ -348,8 +350,8 @@ Four-quadrant [Diátaxis](https://diataxis.fr) docs in each language:
 | Reference (API/CLI) | [ts/doc/reference.md](ts/doc/reference.md) | [go/doc/reference.md](go/doc/reference.md) |
 | Concepts (why) | [ts/doc/concepts.md](ts/doc/concepts.md) | [go/doc/concepts.md](go/doc/concepts.md) |
 
-See [`ts/README.md`](ts/README.md) and [`go/README.md`](go/README.md)
-for per-language orientation.
+See [`ts/README.md`](ts/README.md), [`go/README.md`](go/README.md) and
+[`rs/README.md`](rs/README.md) for per-language orientation.
 
 ## License
 
