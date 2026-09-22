@@ -531,13 +531,11 @@ in `ts/src/converter.ts`, and its Go counterpart) whose prose messages
 carry the `abnf:` prefix. Rust has no exceptions, so the same diagnostics
 are RETURNED there, as `AbnfParseError` and the `AbnfError` enum that
 wraps it; the text is identical wherever the shared fixtures compare it,
-which is the 33 rows of `alignment-abnf-errors.tsv` and not every
-diagnostic the package can produce. `DIVERGENCE.md` entry 4 names a
-numeric-value source outside those rows where Go still answers a
-different sentence.
+which is the 35 rows of `alignment-abnf-errors.tsv` and not every
+diagnostic the package can produce.
 
 What the fixtures pin instead is the rendered **message**:
-`test/spec/alignment-abnf-errors.tsv` compares each of its 33 diagnostics
+`test/spec/alignment-abnf-errors.tsv` compares each of its 35 diagnostics
 byte for byte, in all three runtimes, through the parity runners'
 `matchError` hook. The
 wording is deliberately under test there — these diagnostics name the

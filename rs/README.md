@@ -268,7 +268,7 @@ in the surface:
   measurements and names who owns the repair.
 
 - **A failure is returned, never raised.** `parse_abnf`, `abnf_convert`,
-  `abnf_compile` and `abnf` all answer a `Result`. The 33 diagnostics
+  `abnf_compile` and `abnf` all answer a `Result`. The 35 diagnostics
   `test/spec/alignment-abnf-errors.tsv` names carry the same text in
   every runtime, which that fixture compares byte for byte across all
   three implementations. Diagnostics outside those rows are held to the

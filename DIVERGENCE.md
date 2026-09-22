@@ -202,21 +202,22 @@ function `abnf(&mut parser, src, opts)` and the convert-only path is
 **Reason.** Rust has no exceptions and no dynamic instance properties.
 
 **Owner.** Nobody. The TEXT is the part that is a contract, and what is
-under contract is the 33 diagnostics
+under contract is the 35 diagnostics
 `test/spec/alignment-abnf-errors.tsv` names: it compares each of them
 byte for byte in every runtime, this one included. That is narrower than
 "every diagnostic this crate writes". Entry 6 records the one class of
-refusal whose wording this crate does not own, and the numeric-value
-diagnostic reaches a source the fixture rows do not, where Go still
-answers a later engine fault instead: `g = %x110000` on one line and an
-unterminated string on the next is answered by TypeScript and Rust with
-the out-of-range value and by Go with the lexer's complaint about line
-two, measured 2026-09-21. That is a defect in `go/converter.go`, which
-hangs the deferred diagnostic on the element it decoded and so has
-nowhere to keep it when the parse the element belonged to is refused;
-`rs/src/parser_abnf.rs` keeps it beside the parse instead. It is not a
-divergence of this port and needs no entry of its own; it is named here
-so the sentence above cannot be read as more than it measures.
+refusal whose wording this crate does not own.
+
+The numeric-value diagnostic used to reach a source the fixture rows did
+not: `g = %x110000` on one line and an unterminated string on the next
+was answered by TypeScript and Rust with the out-of-range value and by
+Go with the lexer's complaint about line two, measured 2026-09-21. That
+was a defect in `go/converter.go`, which hung the deferred diagnostic on
+the element it decoded and so had nowhere to keep it once the parse that
+element belonged to was refused. Since tabnas/abnf#75 the recorder rides
+in the parse's own meta, as `rs/src/parser_abnf.rs` keeps it beside the
+parse, and the two sources are rows of
+`test/spec/alignment-abnf-errors.tsv` rather than a sentence here.
 
 ## 5. A probe and retry keeps the node it built
 

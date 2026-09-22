@@ -35,7 +35,20 @@ func (e *AbnfParseError) Unwrap() error { return e.Cause }
 // parseAbnf parses ABNF source into a grammar AST via the tabnas-based
 // parser, merging incrementals and splicing in referenced core rules.
 func parseAbnf(src string) (*abnfGrammar, error) {
-	productions, err := parseAbnfRaw(src)
+	productions, numErr, err := parseAbnfRaw(src)
+	// The numeric-value diagnostic outranks a refusal the engine reached
+	// LATER in the same source. The canonical runtime throws from inside
+	// the decoding action, so it never meets that later fault at all;
+	// here the action records and the parse carries on, so a parse the
+	// engine then refused used to answer the engine's complaint instead:
+	// `g = %x110000` followed by an unterminated string was reported as
+	// the lexer's problem on line two (tabnas/abnf#75). The recorder is
+	// scoped to this parse, not to an element, so it survives the parse
+	// being refused and the element being dropped.
+	if "" != numErr {
+		return nil, &AbnfParseError{
+			Message: "abnf: parse error: " + numErr}
+	}
 	if err != nil {
 		line, col := errLineCol(err)
 		loc := ""
@@ -50,12 +63,6 @@ func parseAbnf(src string) (*abnfGrammar, error) {
 	}
 	if len(productions) == 0 {
 		return nil, &AbnfParseError{Message: "abnf: no productions found"}
-	}
-	// Surface any deferred numeric-value diagnostic now that the parse is
-	// structurally complete (see abnfElement.NumErr).
-	if msg := findNumErr(productions); msg != "" {
-		return nil, &AbnfParseError{
-			Message: "abnf: parse error: " + msg}
 	}
 	// BEFORE merging, not after. mergeIncrementals drops each `=/`
 	// production, keeping only the base's span — so an annotation on an
@@ -257,23 +264,6 @@ func attachValueAnnotations(src string, prods []*abnfProduction) error {
 // dropped with it — see @elem-close in parser_abnf.go.
 const kindHole = bnf.ElemKind("abnf-hole")
 
-// firstNumErrInAlts finds the first deferred numeric diagnostic in a subtree
-// that is about to be discarded. `bad = ( %x110000` drops the whole group when
-// it never closes, taking the offending element with it — and TS, which checks
-// the code point eagerly inside parseNumericValue, reports the numeric fault
-// rather than the unclosed group. Carrying the message out on the hole is what
-// lets the deferred Go check reach the same verdict.
-func firstNumErrInAlts(alts []abnfSequence) string {
-	for _, alt := range alts {
-		for _, el := range alt {
-			if msg := walkNumErr(el); "" != msg {
-				return msg
-			}
-		}
-	}
-	return ""
-}
-
 // rejectHoles refuses a production containing an element the parser could
 // not build. It is the Go counterpart of `rejectHoles` in ts/src/converter.ts
 // and walks the same shape for the same reason: `bad = *( "a"` leaves the hole
@@ -319,49 +309,6 @@ func rejectHoles(prods []*abnfProduction) *AbnfParseError {
 		}
 	}
 	return nil
-}
-
-// findNumErr returns the first deferred numeric-value diagnostic recorded
-// anywhere in the parsed productions, or "" when every numeric value was a
-// valid Unicode code point. Walks nested groups and repetitions.
-func findNumErr(prods []*abnfProduction) string {
-	for _, p := range prods {
-		for _, alt := range p.Alts {
-			for _, el := range alt {
-				if msg := walkNumErr(el); "" != msg {
-					return msg
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// walkNumErr is findNumErr for a single element and its descendants.
-func walkNumErr(el *abnfElement) string {
-	// A hole. rejectHoles reports it, but only after this walk, so skip
-	// rather than dereference.
-	if nil == el {
-		return ""
-	}
-	if "" != el.NumErr {
-		return el.NumErr
-	}
-	switch el.Kind {
-	case kindOpt, kindStar, kindPlus, kindRep:
-		if nil != el.Inner {
-			return walkNumErr(el.Inner)
-		}
-	case kindGroup:
-		for _, alt := range el.Alts {
-			for _, inner := range alt {
-				if msg := walkNumErr(inner); "" != msg {
-					return msg
-				}
-			}
-		}
-	}
-	return ""
 }
 
 // errLineCol attempts to pull line/column from a tabnas parse error.
@@ -443,7 +390,7 @@ LWSP   = *( WSP / CRLF WSP )
 // coreRuleList returns the parsed core rules (order-preserving) with
 // nodeKind=core. Parsed on each call; the parser instance is cached.
 func coreRuleList() []*abnfProduction {
-	raw, err := parseAbnfRaw(coreRulesABNF)
+	raw, _, err := parseAbnfRaw(coreRulesABNF)
 	if err != nil {
 		panic("abnf: internal — core rules failed to parse: " + err.Error())
 	}
@@ -507,7 +454,36 @@ func withCoreRules(user []*abnfProduction) []*abnfProduction {
 
 // ---- numeric value -------------------------------------------------
 
-func parseNumericValue(src string, tkn *tabnas.Token) *abnfElement {
+// numErrRecorder keeps the FIRST out-of-range numeric-value diagnostic
+// decoded during one parse. It travels in the engine's per-parse meta
+// (see parseAbnfRaw), which is what makes it safe on the shared
+// sync.Once parser instance: two concurrent parses each carry their own.
+//
+// Only the first is kept. The canonical runtime throws at the first one,
+// so a second is never decoded there.
+type numErrRecorder struct{ msg string }
+
+// numErrMeta is the meta key the recorder travels under. Namespaced so a
+// grammar's own meta cannot collide with it.
+const numErrMeta = "abnf$numErr"
+
+func (r *numErrRecorder) record(msg string) {
+	if nil != r && "" != msg && "" == r.msg {
+		r.msg = msg
+	}
+}
+
+// numErrOf reads the recorder off a parse context. Nil-safe: a context
+// without one (a caller running the meta-grammar by hand) records nowhere.
+func numErrOf(ctx *tabnas.Context) *numErrRecorder {
+	if nil == ctx || nil == ctx.Meta {
+		return nil
+	}
+	rec, _ := ctx.Meta[numErrMeta].(*numErrRecorder)
+	return rec
+}
+
+func parseNumericValue(src string, tkn *tabnas.Token, rec *numErrRecorder) *abnfElement {
 	sp := spanOf(tkn)
 	base := strings.ToLower(string(src[1]))
 	radix := 16
@@ -522,10 +498,12 @@ func parseNumericValue(src string, tkn *tabnas.Token) *abnfElement {
 	// above U+10FFFF is a code point. Check it here so an out-of-range
 	// grammar gets an ABNF diagnostic naming the offending value, rather than
 	// the silent U+FFFD that `string(rune(n))` yields. The message is
-	// recorded on the element rather than returned, because the caller is an
-	// engine alt-action with no error return — see abnfElement.NumErr.
-	// Mirrors the TS parseNumericValue check, whose message it reproduces
-	// byte for byte.
+	// recorded rather than returned, because the caller is an engine
+	// alt-action with no error return: on the element (abnfElement.NumErr,
+	// the field the IR documents) and on the parse-scoped recorder, which
+	// is what parseAbnf reads, because the element does not survive a
+	// parse the engine refuses and the diagnostic has to. Mirrors the TS
+	// parseNumericValue check, whose message it reproduces byte for byte.
 	NumErr := ""
 	codePoint := func(text string) int64 {
 		n, err := strconv.ParseInt(text, radix, 64)
@@ -550,6 +528,8 @@ func parseNumericValue(src string, tkn *tabnas.Token) *abnfElement {
 		}
 		return n
 	}
+
+	defer func() { rec.record(NumErr) }()
 
 	if strings.Contains(body, "-") {
 		parts := strings.SplitN(body, "-", 2)

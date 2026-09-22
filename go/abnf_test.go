@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 
 	tabnas "github.com/tabnas/parser/go"
@@ -388,4 +390,91 @@ func srcField(v any) string {
 		}
 	}
 	return ""
+}
+
+// ---- the numeric diagnostic survives a refused parse ----------------
+
+// An out-of-range numeric value outranks a fault the engine meets LATER
+// in the same source (tabnas/abnf#75).
+//
+// The canonical runtime throws from inside the decoding action, so it
+// never reaches the later fault at all. This port records the diagnostic
+// and reads it once the parse is over, and a parse the engine refused
+// used to discard it with the element it was hung on and report the
+// engine's own complaint instead: `g = %x110000` followed by an
+// unterminated string was answered with the lexer's message about line
+// two. The recorder now rides in the parse's own meta, so it survives.
+//
+// Measured on 2026-09-21 by running `ts/dist/abnf.js` under node over
+// each source below: every one throws `abnf: parse error: numeric value
+// ... is not a Unicode code point`, carrying no row and no column. The
+// first row is also pinned for all three runtimes by
+// test/spec/alignment-abnf-errors.tsv.
+func TestRefusedNumericValueOutranksLaterEngineRefusal(t *testing.T) {
+	deepOpen := strings.Repeat("( ", 600)
+	deepClose := strings.Repeat(" )", 600)
+	for _, src := range []string{
+		// The finding's own case: a lexer fault on the next line.
+		"g = %x110000\nbad = \"unterminated",
+		// A parse fault rather than a lexer one.
+		"g = %x110000\nbad = = \"x\"",
+		// Out of range because the digits overflow an int64.
+		"g = %d999999999999999999999\nbad = \"unterminated",
+		// Deep nesting AFTER the value. Go accepts every depth
+		// (DIVERGENCE.md entry 3), so this parses and the recorded
+		// diagnostic is read off the success path.
+		"g = %x110000 " + deepOpen + "\"x\"" + deepClose,
+		// Inside a group that never closes: the element is dropped with
+		// the subtree, and the diagnostic must not go with it.
+		"bad = ( %x110000",
+	} {
+		_, err := ParseAbnf(src)
+		if nil == err {
+			t.Fatalf("%q: expected the out-of-range code point to be refused", src)
+		}
+		if !strings.Contains(err.Error(), "which is not a Unicode code point") {
+			t.Errorf("%q: got %v, want the numeric diagnostic", src, err)
+		}
+		pe, ok := err.(*AbnfParseError)
+		if !ok {
+			t.Fatalf("%q: got %T, want *AbnfParseError", src, err)
+		}
+		if 0 != pe.Line || 0 != pe.Column {
+			t.Errorf("%q: the canonical numeric diagnostic carries no position, got %d:%d",
+				src, pe.Line, pe.Column)
+		}
+	}
+
+	// The converse, so the repair cannot become "the numeric value always
+	// wins". A fault the engine meets BEFORE the numeric value leaves the
+	// value undecoded, records nothing, and the engine's own refusal
+	// stands, which is what the canonical runtime answers too.
+	_, err := ParseAbnf("bad = \"unterminated\ng = %x110000")
+	if nil == err || !strings.Contains(err.Error(), "unprintable") {
+		t.Errorf("got %v, want the engine's own refusal of line one", err)
+	}
+}
+
+// Two parses at once each keep their own diagnostic. The parser instance
+// is a shared singleton, and the recorder is per parse precisely so a
+// package-level slot's race cannot appear here.
+func TestNumericDiagnosticIsScopedToItsParse(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, err := ParseAbnf("g = %x110000\nbad = \"unterminated")
+			if nil == err || !strings.Contains(err.Error(), "'%x110000'") {
+				t.Errorf("out-of-range parse: got %v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := ParseAbnf("g = %x41\nh = \"ok\""); nil != err {
+				t.Errorf("a clean parse beside a refused one reported %v", err)
+			}
+		}()
+	}
+	wg.Wait()
 }

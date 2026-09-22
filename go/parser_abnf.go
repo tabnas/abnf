@@ -178,21 +178,15 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 			// pinned two of them at 49 bases each. Record the hole instead and
 			// let the converter reject it by name (see rejectHoles).
 			//
-			// The subtree the atom was building is dropped here too, so rescue
-			// any deferred numeric diagnostic from it on the way past: TS
-			// checks the code point eagerly and reports THAT for
-			// `bad = ( %x110000`, and a rejection naming a different cause in
-			// each runtime is the divergence class this repair closes.
+			// The subtree the atom was building is dropped here too. A
+			// numeric diagnostic decoded inside it (`bad = ( %x110000`) is
+			// not lost with it: the decoding action records on the
+			// parse-scoped recorder (see numErrRecorder), which is how TS's
+			// eager check is matched for a dropped subtree and for a parse
+			// the engine refuses outright alike.
 			if item == nil {
-				hole := &abnfElement{Kind: kindHole}
-				if r.Child != nil && r.Child != tabnas.NoRule &&
-					r.Child.Child != nil && r.Child.Child != tabnas.NoRule {
-					if alts, ok := r.Child.Child.Node.(*[]abnfSequence); ok && nil != alts {
-						hole.NumErr = firstNumErrInAlts(*alts)
-					}
-				}
 				if seqPtr, ok := r.Node.(*abnfSequence); ok {
-					*seqPtr = append(*seqPtr, hole)
+					*seqPtr = append(*seqPtr, &abnfElement{Kind: kindHole})
 				}
 				return
 			}
@@ -241,8 +235,8 @@ func abnfParseRef() map[tabnas.FuncRef]any {
 				Sp: spanOf(r.O[0]),
 			}
 		}),
-		"@atom-nv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
-			r.Node = parseNumericValue(r.O[0].Src, r.O[0])
+		"@atom-nv": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
+			r.Node = parseNumericValue(r.O[0].Src, r.O[0], numErrOf(ctx))
 		}),
 		"@atom-pv": tabnas.AltAction(func(r *tabnas.Rule, _ *tabnas.Context) {
 			// Strip the surrounding `<` and `>`; the resolveProseTerminals
@@ -622,26 +616,37 @@ func getAbnfParser() (*tabnas.Tabnas, error) {
 }
 
 // parseAbnfRaw runs the ABNF parser grammar over src and returns the raw
-// production list.
-func parseAbnfRaw(src string) ([]*abnfProduction, error) {
+// production list, together with the first out-of-range numeric-value
+// diagnostic the parse decoded, if any.
+//
+// The diagnostic is answered on the FAILURE path too. The engine lexes
+// and matches forward, so a numeric fault recorded before the engine
+// gave up sits at an earlier position than the refusal it ends with, and
+// the canonical runtime, which throws from inside the decoding action,
+// never reaches that later refusal at all. The recorder rides in the
+// engine's per-parse meta rather than on an element or in a package
+// variable: no element survives a refused parse, and the parser instance
+// is a shared singleton that a package-level slot would make racy.
+func parseAbnfRaw(src string) ([]*abnfProduction, string, error) {
 	j, err := getAbnfParser()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	out, perr := j.Parse(src)
+	rec := &numErrRecorder{}
+	out, perr := j.ParseMeta(src, map[string]any{numErrMeta: rec})
 	if perr != nil {
-		return nil, perr
+		return nil, rec.msg, perr
 	}
 	if out == nil {
-		return nil, nil
+		return nil, rec.msg, nil
 	}
 	if p, ok := out.(*productionList); ok {
-		return *p, nil
+		return *p, rec.msg, nil
 	}
 	if prods, ok := out.([]*abnfProduction); ok {
-		return prods, nil
+		return prods, rec.msg, nil
 	}
-	return nil, nil
+	return nil, rec.msg, nil
 }
 
 // --- small helpers ---
