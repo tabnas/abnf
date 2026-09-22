@@ -391,6 +391,57 @@ fn fixture_arith_leftrec_equivalence() {
     }
 }
 
+/// `addition.abnf` is the grammar the engine README shares, and it was
+/// the one fixture grammar under `ts/test/grammar/` that no port ran:
+/// `ts/test/roundtrip.test.js` read it and neither `go/` nor this crate
+/// did, so the three dialect features it exists to exercise (prose for a
+/// built-in token, a one-literal production lifting to a named fixed
+/// token, a pure alias surviving) were held in the canonical runtime
+/// only. Found in the tabnas/abnf#73 census.
+#[test]
+fn fixture_addition() {
+    let src = fixture("addition.abnf");
+    let spec = abnf_convert(&src, None).expect("addition.abnf converts");
+    let fixed = spec
+        .options
+        .get("fixed")
+        .and_then(|fixed| fixed.get("token"))
+        .cloned()
+        .unwrap_or(JsonValue::Null);
+    assert_eq!(fixed["#PL"], json!("+"), "PL lifts to a named fixed token");
+    assert!(
+        !spec.rule.contains_key("NR"),
+        "the prose line emits no rule"
+    );
+    assert!(
+        !spec.rule.contains_key("PL"),
+        "a lexical definition emits no rule"
+    );
+    assert!(
+        spec.rule.get("val").map(Option::is_some).unwrap_or(false),
+        "the pure alias survives as a rule"
+    );
+
+    let parser = parser(&src);
+    assert_parse(
+        &parser,
+        "1+2+3",
+        node(
+            "val",
+            "1+2+3",
+            vec![
+                node("add", "1", vec![]),
+                node("add", "2", vec![]),
+                node("add", "3", vec![]),
+            ],
+        ),
+    );
+    assert_eq!(
+        src_field(&parser.parse("7").expect("parses").to_json()),
+        "7"
+    );
+}
+
 #[test]
 fn fixture_json_subset() {
     let parser = parser(&fixture("json-subset.abnf"));

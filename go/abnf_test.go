@@ -374,6 +374,41 @@ func TestFixtureArithLeftrecEquivalence(t *testing.T) {
 	}
 }
 
+// addition.abnf is the grammar the engine README shares, and it was the
+// one fixture grammar under ts/test/grammar/ that no port ran:
+// ts/test/roundtrip.test.js read it and neither this package nor rs/
+// did, so the three dialect features it exists to exercise (prose for a
+// built-in token, a one-literal production lifting to a named fixed
+// token, a pure alias surviving) were held in the canonical runtime
+// only. Found in the tabnas/abnf#73 census.
+func TestFixtureAddition(t *testing.T) {
+	src := loadFixture(t, "addition.abnf")
+	spec, err := Abnf(src, nil)
+	if nil != err {
+		t.Fatalf("addition.abnf converts: %v", err)
+	}
+	if nil == spec.Options || nil == spec.Options.Fixed {
+		t.Fatalf("no fixed tokens emitted")
+	}
+	if got, ok := spec.Options.Fixed.Token["#PL"]; !ok || nil == got || "+" != *got {
+		t.Errorf("fixed[#PL] is not \"+\"; got %v", spec.Options.Fixed.Token)
+	}
+	for _, name := range []string{"NR", "PL"} {
+		if _, ok := spec.Rule[name]; ok {
+			t.Errorf("rule %q was emitted; a prose line and a lexical "+
+				"definition both compile to no rule", name)
+		}
+	}
+	if r, ok := spec.Rule["val"]; !ok || nil == r {
+		t.Errorf("the pure alias `val` did not survive as a rule")
+	}
+
+	j := makeParser(t, src, nil)
+	assertParse(t, j, "1+2+3", node("val", "1+2+3",
+		node("add", "1"), node("add", "2"), node("add", "3")))
+	assertParse(t, j, "7", node("val", "7", node("add", "7")))
+}
+
 func TestFixtureJsonSubset(t *testing.T) {
 	j := makeParser(t, loadFixture(t, "json-subset.abnf"), nil)
 	assertParse(t, j, "1", node("value", "1"))

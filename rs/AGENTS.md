@@ -36,7 +36,7 @@ annotation out of a trailing comment.
 | `src/numeric.rs` | `parseNumericValue` |
 | `src/compile.rs` | `ts/src/compile.ts` and `go/compile.go`: `abnf_compile` |
 | `tests/parity_test.rs` | `go/parity_test.go`: the four shared `test/spec/*.tsv` fixtures |
-| `tests/abnf_test.rs` | `go/abnf_test.go` and `ts/test/abnf.test.js` |
+| `tests/abnf_test.rs` | `go/abnf_test.go` and `ts/test/abnf.test.js`, including a runner for every `.abnf` grammar under `ts/test/grammar/` |
 | `tests/compile_test.rs` | `go/compile_test.go` |
 | `tests/leftrec_test.rs` | `go/leftrec_test.go` |
 | `tests/probe_test.rs` | `go/probe_test.go` |
