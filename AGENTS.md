@@ -110,8 +110,12 @@ Four things an agent should know before touching this:
   member that reaches a value-building rule. Seventeen of them are
   pinned byte for byte in all three runtimes by
   [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
-  against twenty-three positive rows in
+  which holds 35 rows in all, against the 58 positive rows in
   [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
+  Both counts are `wc -l` minus the header row, and the `doc-counts`
+  suite in `ts/test/docs.test.js` reads them out of this sentence and
+  compares them with the files, so a fixture that grows fails the gate
+  until the sentence is corrected.
 - **An unknown annotation word is NOT refused.** The checks above run
   only once `@object` or `@array` has matched, so `; @objekt a b` and
   `; @ARRAY` compile silently and answer the tree. That is deliberate to
@@ -158,11 +162,11 @@ the point: they are what would have caught this.
 |---|---|
 | [`ts/`](ts/) | **Canonical** implementation — the `@tabnas/abnf` package, plus the `tabnas-abnf` CLI. |
 | [`ts/src/abnf.ts`](ts/src/abnf.ts) | Plugin entry point. Wires `tn.abnf` / `tn.abnf.toSpec` and re-exports the converter. Thin. |
-| [`ts/src/converter.ts`](ts/src/converter.ts) | The whole compiler (~2.3k lines): ABNF parser (`parseAbnf`), left-recursion rewriter (`eliminateLeftRecursion`), probe-dispatch analyser, and the `GrammarSpec` emitter (`emitGrammarSpec`). |
+| [`ts/src/converter.ts`](ts/src/converter.ts) | The RFC 5234 front end (~1.2k lines): the ABNF parser (`parseAbnf`), the core rules, the annotation reader and `AbnfParseError`. `eliminateLeftRecursion` and `emitGrammarSpec` are re-exported from [`@tabnas/bnf`](https://github.com/tabnas/bnf), where the rewriter, the probe-dispatch analyser and the emitter live. |
 | [`ts/src/bin/tabnas-abnf-cli.ts`](ts/src/bin/tabnas-abnf-cli.ts) | CLI implementation (`run(argv, console)`). |
 | [`ts/bin/tabnas-abnf`](ts/bin/tabnas-abnf) | Executable shim → `dist/bin/tabnas-abnf-cli`. The `bin` entry in `package.json`. |
 | [`ts/test/`](ts/test/) | `node --test` suite (see below). |
-| [`ts/test/grammar/`](ts/test/grammar/) | `.abnf` fixture grammars (`greet`, `pair`, `arith`, `arith-leftrec`, `json-subset`, `rfc3986-uri`). |
+| [`ts/test/grammar/`](ts/test/grammar/) | Seven `.abnf` fixture grammars (`addition`, `arith`, `arith-leftrec`, `greet`, `json-subset`, `pair`, `rfc3986-uri`). |
 | [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
 | [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`), tracking the TS implementation; front-end in [`rs/src/converter.rs`](rs/src/converter.rs), ABNF meta-grammar in [`rs/src/parser_abnf.rs`](rs/src/parser_abnf.rs), public surface in [`rs/src/lib.rs`](rs/src/lib.rs). No CLI. |
 | [`DIVERGENCE.md`](DIVERGENCE.md) | Every input on which a port answers something the canonical TypeScript does not, each one measured and each one pinned by a test in [`rs/tests/divergence_test.rs`](rs/tests/divergence_test.rs) so it cannot go stale. |
@@ -386,7 +390,7 @@ npm run test-conformance                # the corpus dial, on its own
 
 `conformance.test.js` measures this compiler against 68 grammars from four
 third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
-on an older one — one of its cases alone is 64s. The other 46 suites finish
+on an older one — one of its cases alone is 64s. The other 51 suites finish
 in seconds.
 
 Run together with default concurrency, the fast suites drain and Node's
@@ -452,7 +456,10 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-The test suite (`ts/test/*.test.js`, run against the built `dist`):
+Five of the fourteen files in `ts/test/*.test.js`, run against the built
+`dist`, need a word of explanation. The other nine name themselves:
+`class-overlap`, `compile`, `conformance`, `docs`, `parity`, `roundtrip`,
+`token`, `value-annotation` and `version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
