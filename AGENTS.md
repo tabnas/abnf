@@ -110,7 +110,7 @@ Four things an agent should know before touching this:
   member that reaches a value-building rule. Seventeen of them are
   pinned byte for byte in all three runtimes by
   [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
-  which holds 35 rows in all, against the 68 positive rows in
+  which holds 35 rows in all, against the 72 positive rows in
   [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
   Both counts are `wc -l` minus the header row, and the `doc-counts`
   suite in `ts/test/docs.test.js` reads them out of this sentence and
@@ -459,10 +459,10 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-Five of the fourteen files in `ts/test/*.test.js`, run against the built
-`dist`, need a word of explanation. The other nine name themselves:
-`class-overlap`, `compile`, `conformance`, `docs`, `parity`, `roundtrip`,
-`token`, `value-annotation` and `version`.
+Five of the fifteen files in `ts/test/*.test.js`, run against the built
+`dist`, need a word of explanation. The other ten name themselves:
+`class-overlap`, `compile`, `conformance`, `docs`, `lifting`, `parity`,
+`roundtrip`, `token`, `value-annotation` and `version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
