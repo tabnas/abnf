@@ -118,6 +118,8 @@ fn word_keywords_does_not_grab_an_identifier_prefix() {
         engine(true).parse("mapping ;").is_err(),
         "on: `mapping ;` should be refused, `map` is not a whole word there"
     );
-    let out = engine(true).parse("map foo ;").expect("on: `map foo ;` parses");
+    let out = engine(true)
+        .parse("map foo ;")
+        .expect("on: `map foo ;` parses");
     assert_eq!(out.to_json()["src"], serde_json::json!("mapfoo;"));
 }
