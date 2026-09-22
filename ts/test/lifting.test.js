@@ -17,6 +17,12 @@
 // answer by construction. What stays here is the reading of a single
 // named field, which no fixture column reaches, and the repeated
 // emission, which is not a grammar-to-output case at all.
+//
+// Both of those two ARE pinned in the ports, as per-runtime tests rather
+// than fixture rows: `TestAstPureAliasSurvives` and `TestEmitIsRepeatable`
+// in `go/abnf_test.go`, `ast_pure_alias_survives` and `emit_is_repeatable`
+// in `rs/tests/abnf_test.rs`. Said here because a census taken over file
+// names sees no `lifting` twin in either port and reads that as a gap.
 
 const { describe, it } = require('node:test')
 const assert = require('node:assert')

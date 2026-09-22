@@ -36,13 +36,13 @@ annotation out of a trailing comment.
 | `src/numeric.rs` | `parseNumericValue` |
 | `src/compile.rs` | `ts/src/compile.ts` and `go/compile.go`: `abnf_compile` |
 | `tests/parity_test.rs` | `go/parity_test.go`: the four shared `test/spec/*.tsv` fixtures |
-| `tests/abnf_test.rs` | `go/abnf_test.go` and `ts/test/abnf.test.js`, including a runner for every `.abnf` grammar under `ts/test/grammar/` |
+| `tests/abnf_test.rs` | `go/abnf_test.go` and `ts/test/abnf.test.js`, including a runner for every `.abnf` grammar under `ts/test/grammar/`, and the two assertions of `ts/test/lifting.test.js` that no shared fixture column reaches |
 | `tests/compile_test.rs` | `go/compile_test.go` |
-| `tests/leftrec_test.rs` | `go/leftrec_test.go` |
+| `tests/leftrec_test.rs` | `go/leftrec_test.go` and the `left-recursion elimination` suite in `ts/test/abnf.test.js` |
 | `tests/probe_test.rs` | `go/probe_test.go` |
 | `tests/token_test.rs` | `go/token_test.go` and `ts/test/token.test.js` |
 | `tests/rfc3986_test.rs` | `go/rfc3986_test.go` |
-| `tests/spans_test.rs` | `go/spans_test.go` |
+| `tests/spans_test.rs` | `go/spans_test.go` and the `source spans` suite in `ts/test/abnf.test.js` |
 | `tests/class_overlap_test.rs` | `go/class_overlap_test.go` |
 | `tests/actions_test.rs` | `go/actions_test.go` |
 | `tests/value_annotation_test.rs` | `go/value_annotation_test.go` |
@@ -52,6 +52,15 @@ annotation out of a trailing comment.
 | `tests/divergence_test.rs` | no twin: every entry of `../DIVERGENCE.md`, both halves, the canonical one by running `node` over `../ts/dist/abnf.js` |
 | `tests/version_test.rs` | the five version sites must agree |
 | `README.md` | the crate front page; its `rust` fences run as doctests |
+
+Two rows above name a suite that the canonical side keeps INSIDE
+`ts/test/abnf.test.js` rather than in a file of its own. A census taken
+over file names reads that as a behaviour pinned in the ports alone, and
+tabnas/abnf#73 did: `leftrec` and `spans` were listed as having no
+TypeScript twin. They have one, and it is the larger of the two, so the
+drift ran the other way. Name the canonical suite in this table when a
+port splits one out, so the next census over file names does not have to
+guess.
 
 ## The parse AST is engine values
 
