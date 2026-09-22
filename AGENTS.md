@@ -393,7 +393,7 @@ npm run test-conformance                # the corpus dial, on its own
 
 `conformance.test.js` measures this compiler against 68 grammars from four
 third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
-on an older one — one of its cases alone is 64s. The other 51 suites finish
+on an older one — one of its cases alone is 64s. The other 53 suites finish
 in seconds.
 
 Run together with default concurrency, the fast suites drain and Node's

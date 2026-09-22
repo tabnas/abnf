@@ -22,6 +22,7 @@
 const Fs = require('node:fs')
 const Path = require('node:path')
 const Assert = require('node:assert')
+const ChildProcess = require('node:child_process')
 const { describe, test } = require('node:test')
 
 const { gatedDocs, tutorials } = require('../scripts/gated-docs.cjs')
@@ -746,6 +747,36 @@ describe('doc-counts', () => {
     const WORDS = { five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
     Assert.equal(WORDS[m[1].toLowerCase()], names.length,
       `AGENTS.md says ${m[1]} grammar fixtures; there are ${names.length}`)
+  })
+
+
+  // The fourth counted claim, and the one the first pass at this suite
+  // missed: the sentence saying how many suites run beside conformance.
+  // It read 46, was corrected to 51, and executing it gave 53, so it went
+  // stale again in the very change meant to stop that happening.
+  //
+  // The count comes from ts/scripts/suite-count.cjs, in a child process:
+  // it registers every unit test file with `node:test` stubbed and counts
+  // the suites, which is the number `node --test` prints. A grep for
+  // `describe(` reads 49, because parity.test.js registers its four
+  // suites through `makeRunner().file()` in @tabnas/support and so has no
+  // `describe` of its own.
+  test('agents-md-counts-the-unit-suites', () => {
+    const m = /The other (\d+) suites finish\s+in seconds\./.exec(AGENTS)
+    Assert.ok(null != m,
+      'AGENTS.md no longer counts the unit suites in the form this test '
+      + 'reads')
+
+    const script = Path.join(REPO, 'ts', 'scripts', 'suite-count.cjs')
+    const out = ChildProcess.execFileSync(process.execPath, [script], {
+      encoding: 'utf8',
+      timeout: 120000,
+    })
+    const actual = Number(out.trim())
+    Assert.ok(Number.isInteger(actual) && 0 < actual,
+      `suite-count.cjs printed no count: ${out}`)
+    Assert.equal(Number(m[1]), actual,
+      `AGENTS.md says ${m[1]} suites beside conformance; there are ${actual}`)
   })
 
 })
