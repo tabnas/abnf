@@ -279,13 +279,6 @@ describe('conformance: third-party ABNF corpus', () => {
       }
     }
     assertNoCrashes(validCrashes, 'compiling the valid corpus')
-    if (RECORD) return
-    assert.deepEqual(
-      validGaps.sort(), PINNED_VALID_GAPS,
-      'the set of valid RFC 5234 grammars this compiler does not fully accept has ' +
-        'changed. If you FIXED one, delete its row from test/corpus/known-gaps.tsv. ' +
-        'If you BROKE one, that is a regression.',
-    )
   })
 
   // --- half 2a: corpus grammars the oracle rejects must be rejected ----
@@ -333,19 +326,6 @@ describe('conformance: third-party ABNF corpus', () => {
       if (isChildCrash(r)) crashes.push(`${rel}: ${r.error}`)
     }
     assertNoCrashes(crashes, 'compiling the invalid corpus')
-    if (RECORD) return
-    assert.deepEqual(
-      leaked.sort(), PINNED_INVALID_GAPS,
-      'the set of non-RFC-5234 corpus grammars this compiler accepts has changed. ' +
-        'If you FIXED one, delete its row from test/corpus/known-gaps.tsv.',
-    )
-    // The budget set spans both halves, so it is asserted once both have
-    // run rather than at the end of the valid half.
-    assert.deepEqual(
-      overBudget.slice().sort(), PINNED_BUDGET,
-      `the set of grammars the compiler cannot finish within ${BUDGET_MB}MB / ` +
-        `${BUDGET_MS}ms has changed (see test/corpus/known-gaps.tsv).`,
-    )
   })
 
   // --- half 2b: mutants violating a named RFC 5234 production ----------
@@ -390,13 +370,6 @@ describe('conformance: third-party ABNF corpus', () => {
     // recording run that swallowed these would emit mutation-leak rows
     // measured against crashed compiles.
     assertNoCrashes(crashes, 'mutating the valid corpus')
-    if (RECORD) return
-    assert.deepEqual(
-      leaks, PINNED_MUTATION_LEAKS,
-      'the per-class mutation leak counts have changed. Each count is the number ' +
-        'of corpus bases that accepted an appended line RFC 5234 cannot derive. ' +
-        'Lower is better; update test/corpus/known-gaps.tsv when you improve one.',
-    )
   })
 
   // --- the dial: what was actually measured, printed ------------------
@@ -425,5 +398,47 @@ describe('conformance: third-party ABNF corpus', () => {
     // The dial is derived from the pinned sets, so it cannot drift from them;
     // this only guards against the corpus itself being gutted.
     assert.ok(vOk > 0 && iOk > 0, 'the dial measured nothing')
+  })
+
+  // --- what known-gaps.tsv pins, asserted once every half has run -----
+  //
+  // All four sets are compared HERE rather than at the end of the half
+  // that fills them, which is the shape `TestConformance` already has in
+  // go/conformance_test.go.
+  //
+  // The budget set forced the question: it spans both halves, because a
+  // watchdog stop on the invalid half is budget exhaustion and not a
+  // rejection (tabnas/abnf#74). Asserting it inside one half pins it only
+  // when that half runs, so a filtered run of the other half would leave
+  // it unpinned and still green. Collected here, a half that does not run
+  // contributes an empty set and this test FAILS against the pinned rows
+  // rather than passing quietly, which is the right way round: a
+  // conformance run that measured only part of the corpus should not be
+  // able to report a clean sheet.
+  it('the residual gaps are exactly what known-gaps.tsv pins', () => {
+    if (RECORD) return
+
+    assert.deepEqual(
+      validGaps.slice().sort(), PINNED_VALID_GAPS,
+      'the set of valid RFC 5234 grammars this compiler does not fully accept has ' +
+        'changed. If you FIXED one, delete its row from test/corpus/known-gaps.tsv. ' +
+        'If you BROKE one, that is a regression.',
+    )
+    assert.deepEqual(
+      overBudget.slice().sort(), PINNED_BUDGET,
+      `the set of grammars the compiler cannot finish within ${BUDGET_MB}MB / ` +
+        `${BUDGET_MS}ms has changed (see test/corpus/known-gaps.tsv).`,
+    )
+    assert.deepEqual(
+      invalidGaps.slice().sort(), PINNED_INVALID_GAPS,
+      'the set of non-RFC-5234 corpus grammars this compiler accepts has changed. ' +
+        'If you FIXED one, delete its row from test/corpus/known-gaps.tsv.',
+    )
+    assert.deepEqual(
+      mutationLeaks, PINNED_MUTATION_LEAKS,
+      'the per-class mutation leak counts have changed. Each count is the number ' +
+        'of corpus bases that accepted an appended line RFC 5234 cannot derive. ' +
+        'Lower is better; update test/corpus/known-gaps.tsv when you improve one.',
+    )
   })
 })
