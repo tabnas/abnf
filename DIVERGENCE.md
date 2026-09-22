@@ -257,16 +257,22 @@ comes back.
 
 | input | TypeScript | Go | Rust |
 |---|---|---|---|
-| `g = %x5A-41` | throws `Invalid regular expression: /^[\u005a-\u0041]/: Range out of order in character class` | PANICS: `regexp: Compile(...): invalid character class range` | returns `abnf: invalid regular expression for token #RX___U005A__U0041: regex parse error: ... invalid character class range, the start must be <= the end` |
+| `g = %x5A-41` | throws `Invalid regular expression: /^[\u005a-\u0041]/: Range out of order in character class` | returns `abnf: invalid regular expression: Compile(...): error parsing regexp: invalid character class range: ...` | returns `abnf: invalid regular expression for token #RX___U005A__U0041: regex parse error: ... invalid character class range, the start must be <= the end` |
 
 **Reason.** The wording belongs to V8, to Go's `regexp` and to the
 `regex` crate respectively. The shared fixtures pin the diagnostics this
 crate writes, and this is not one of them.
 
+Go used to PANIC here rather than return, out of the
+`regexp.MustCompile` the shared compiler hands every character class
+to. Since tabnas/abnf#72 the boundary in `go/bnf_alias.go` converts that
+one panic into the error return above, pinned by
+`go/numeric_range_test.go`; the `MustCompile` itself is in
+`tabnas/bnf`'s `go/emit.go` and still wants to become `regexp.Compile`,
+which would let the message name the token as the Rust one does.
+
 **Owner.** Nobody, unless a front-end starts checking the bounds itself
 before a pattern is built, which would give all three the same sentence.
-Go's outcome is the one worth fixing: it aborts the process rather than
-returning.
 
 ## 7. A very long literal exceeds the regular expression size limit
 

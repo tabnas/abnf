@@ -16,6 +16,8 @@
 package tabnasabnf
 
 import (
+	"strings"
+
 	bnf "github.com/tabnas/bnf/go"
 	tabnas "github.com/tabnas/parser/go"
 )
@@ -86,7 +88,7 @@ var (
 // they did not import. The shared compiler takes the prefix from Tag,
 // so this front-end supplies its own whenever the caller did not.
 func emitGrammarSpec(
-	g *abnfGrammar, opts *AbnfConvertOptions) (*tabnas.GrammarSpec, error) {
+	g *abnfGrammar, opts *AbnfConvertOptions) (spec *tabnas.GrammarSpec, err error) {
 	if opts == nil {
 		opts = &AbnfConvertOptions{}
 	}
@@ -95,8 +97,41 @@ func emitGrammarSpec(
 		clone.Tag = "abnf"
 		opts = &clone
 	}
+	// A grammar is untrusted input, so a compiler must never take the
+	// process down over one. The shared compiler hands every character
+	// class it builds to regexp.MustCompile, and a class Go's regexp
+	// rejects, a reversed numeric range such as `%x5A-41` being the one
+	// an author can write, PANICS there where TypeScript throws and Rust
+	// returns (tabnas/abnf#72, DIVERGENCE.md entry 6). The repair that
+	// belongs to the shared compiler is regexp.Compile at that site; this
+	// boundary turns the panic into the error return the other two
+	// runtimes give until it lands, and it stays useful afterwards
+	// because it guards every other way a generated class could fail to
+	// compile.
+	//
+	// ONLY a regexp compile panic is converted. Go's regexp panics with
+	// a string that opens `regexp: Compile(`, and nothing else in the
+	// pipeline produces one. Every other panic is a compiler BUG, and a
+	// bug that returns an error looks like a rejected grammar, so those
+	// keep panicking exactly as the shared compiler's own boundary lets
+	// them.
+	defer func() {
+		if r := recover(); nil != r {
+			text, isText := r.(string)
+			if !isText || !strings.HasPrefix(text, regexpPanicPrefix) {
+				panic(r)
+			}
+			spec, err = nil, &bnf.EmitError{
+				Message: opts.Tag + ": invalid regular expression: " +
+					strings.TrimPrefix(text, "regexp: "),
+			}
+		}
+	}()
 	return bnf.EmitGrammarSpec(g, opts)
 }
+
+// regexpPanicPrefix opens the message regexp.MustCompile panics with.
+const regexpPanicPrefix = "regexp: Compile("
 
 func eliminateLeftRecursion(g *abnfGrammar) *abnfGrammar {
 	return bnf.EliminateLeftRecursion(g)
