@@ -110,8 +110,12 @@ Four things an agent should know before touching this:
   member that reaches a value-building rule. Seventeen of them are
   pinned byte for byte in all three runtimes by
   [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
-  against twenty-three positive rows in
+  which holds 35 rows in all, against the 72 positive rows in
   [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
+  Both counts are `wc -l` minus the header row, and the `doc-counts`
+  suite in `ts/test/docs.test.js` reads them out of this sentence and
+  compares them with the files, so a fixture that grows fails the gate
+  until the sentence is corrected.
 - **An unknown annotation word is NOT refused.** The checks above run
   only once `@object` or `@array` has matched, so `; @objekt a b` and
   `; @ARRAY` compile silently and answer the tree. That is deliberate to
@@ -158,11 +162,11 @@ the point: they are what would have caught this.
 |---|---|
 | [`ts/`](ts/) | **Canonical** implementation — the `@tabnas/abnf` package, plus the `tabnas-abnf` CLI. |
 | [`ts/src/abnf.ts`](ts/src/abnf.ts) | Plugin entry point. Wires `tn.abnf` / `tn.abnf.toSpec` and re-exports the converter. Thin. |
-| [`ts/src/converter.ts`](ts/src/converter.ts) | The whole compiler (~2.3k lines): ABNF parser (`parseAbnf`), left-recursion rewriter (`eliminateLeftRecursion`), probe-dispatch analyser, and the `GrammarSpec` emitter (`emitGrammarSpec`). |
+| [`ts/src/converter.ts`](ts/src/converter.ts) | The RFC 5234 front end (~1.2k lines): the ABNF parser (`parseAbnf`), the core rules, the annotation reader and `AbnfParseError`. `eliminateLeftRecursion` and `emitGrammarSpec` are re-exported from [`@tabnas/bnf`](https://github.com/tabnas/bnf), where the rewriter, the probe-dispatch analyser and the emitter live. |
 | [`ts/src/bin/tabnas-abnf-cli.ts`](ts/src/bin/tabnas-abnf-cli.ts) | CLI implementation (`run(argv, console)`). |
 | [`ts/bin/tabnas-abnf`](ts/bin/tabnas-abnf) | Executable shim → `dist/bin/tabnas-abnf-cli`. The `bin` entry in `package.json`. |
 | [`ts/test/`](ts/test/) | `node --test` suite (see below). |
-| [`ts/test/grammar/`](ts/test/grammar/) | `.abnf` fixture grammars (`greet`, `pair`, `arith`, `arith-leftrec`, `json-subset`, `rfc3986-uri`). |
+| [`ts/test/grammar/`](ts/test/grammar/) | Seven `.abnf` fixture grammars (`addition`, `arith`, `arith-leftrec`, `greet`, `json-subset`, `pair`, `rfc3986-uri`). |
 | [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
 | [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`), tracking the TS implementation; front-end in [`rs/src/converter.rs`](rs/src/converter.rs), ABNF meta-grammar in [`rs/src/parser_abnf.rs`](rs/src/parser_abnf.rs), public surface in [`rs/src/lib.rs`](rs/src/lib.rs). No CLI. |
 | [`DIVERGENCE.md`](DIVERGENCE.md) | Every input on which a port answers something the canonical TypeScript does not, each one measured and each one pinned by a test in [`rs/tests/divergence_test.rs`](rs/tests/divergence_test.rs) so it cannot go stale. |
@@ -287,21 +291,22 @@ How it is judged, and by whom:
   budget is likewise never scored as a rejection: the child answers
   `{budget: true, ok: false}`, so a half that tests `ok` alone reads a
   nontermination as a correct refusal and stays green through the
-  regression it exists to catch. `rs/tests/conformance_test.rs` reads the
-  flag, which is why its invalid figure moved (see the table below).
-  `ts/test/conformance.test.js` and `go/conformance_test.go` still do
-  not: no invalid grammar exceeds their budget today, so their figures
-  are right, but the hole is there and the next one to blow up would go
-  unnoticed. Fixing those two is open work.
+  regression it exists to catch. All three suites read the flag on both
+  halves now, each through one `scoreCorpus` that both halves call and a
+  unit test pins, so the reading cannot differ between the halves of one
+  suite or between the three. Rust reads a grammar over its budget on
+  the invalid half today and the other two do not, which is the whole of
+  the difference in the table below.
 - The residual gaps are pinned as an **exact set** in
   `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
   as loudly as regressing one; the fix is to delete its row. Never edit a
   row to silence a failure you did not fix, and never narrow the corpus
   or loosen an assertion to raise the figure.
 
-Measured by the suites themselves, the TS column on 2026-08-09 at the
-commit that introduced them and the Go and Rust columns on 2026-09-21
-(run `make test` and read the dial the conformance tests print):
+Measured by the suites themselves, the TS and Go columns on 2026-09-22
+once both began reading the budget flag on the invalid half, and the
+Rust column on 2026-09-21 (run `make test` and read the dial the
+conformance tests print):
 
 |                                   | TS        | Go        | Rust      |
 | --------------------------------- | --------- | --------- | --------- |
@@ -336,8 +341,10 @@ engine quadratic is the other way it closes.
 
 The Rust column was measured on 2026-09-21, by the same instrument, and
 re-measured the same day once that instrument began reading the budget
-flag on both halves rather than only on the valid one. The Go column was
-RE-measured the same day and is no longer what it was:
+flag on both halves rather than only on the valid one. The TS and Go
+columns were re-measured on 2026-09-22, once the same reading reached
+those two suites; neither figure moved, because no invalid grammar
+exceeds their budget today. The Go column is no longer what it was:
 this table read `513/661` for Go, from 2026-08-09, and the dial
 `go/conformance_test.go` prints today reads `611/661`. Go used to accept
 an unclosed group `( "a" / "b"` and an unclosed option `[ "a"`, which
@@ -386,7 +393,7 @@ npm run test-conformance                # the corpus dial, on its own
 
 `conformance.test.js` measures this compiler against 68 grammars from four
 third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
-on an older one — one of its cases alone is 64s. The other 46 suites finish
+on an older one — one of its cases alone is 64s. The other 53 suites finish
 in seconds.
 
 Run together with default concurrency, the fast suites drain and Node's
@@ -452,7 +459,10 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-The test suite (`ts/test/*.test.js`, run against the built `dist`):
+Five of the fifteen files in `ts/test/*.test.js`, run against the built
+`dist`, need a word of explanation. The other ten name themselves:
+`class-overlap`, `compile`, `conformance`, `docs`, `lifting`, `parity`,
+`roundtrip`, `token`, `value-annotation` and `version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
@@ -531,13 +541,11 @@ in `ts/src/converter.ts`, and its Go counterpart) whose prose messages
 carry the `abnf:` prefix. Rust has no exceptions, so the same diagnostics
 are RETURNED there, as `AbnfParseError` and the `AbnfError` enum that
 wraps it; the text is identical wherever the shared fixtures compare it,
-which is the 33 rows of `alignment-abnf-errors.tsv` and not every
-diagnostic the package can produce. `DIVERGENCE.md` entry 4 names a
-numeric-value source outside those rows where Go still answers a
-different sentence.
+which is the 35 rows of `alignment-abnf-errors.tsv` and not every
+diagnostic the package can produce.
 
 What the fixtures pin instead is the rendered **message**:
-`test/spec/alignment-abnf-errors.tsv` compares each of its 33 diagnostics
+`test/spec/alignment-abnf-errors.tsv` compares each of its 35 diagnostics
 byte for byte, in all three runtimes, through the parity runners'
 `matchError` hook. The
 wording is deliberately under test there — these diagnostics name the

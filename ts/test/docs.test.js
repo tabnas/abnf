@@ -22,6 +22,7 @@
 const Fs = require('node:fs')
 const Path = require('node:path')
 const Assert = require('node:assert')
+const ChildProcess = require('node:child_process')
 const { describe, test } = require('node:test')
 
 const { gatedDocs, tutorials } = require('../scripts/gated-docs.cjs')
@@ -661,6 +662,121 @@ describe('docs-style', () => {
       .map(([, src]) => src)
     Assert.deepEqual([...new Set(missing)], [],
       `banned patterns with no summary in the guide: ${missing.join(', ')}`)
+  })
+
+})
+
+
+// ---- the counted claims in AGENTS.md ---------------------------------
+//
+// AGENTS.md states how many rows the shared fixtures hold and how many
+// test files there are. Nothing was checking those numbers, so the
+// `alignment-abnf-ast.tsv` count sat at twenty-three while the file grew
+// to fifty-eight (tabnas/abnf#76). A count in prose is a claim like any
+// other, and a claim nothing executes is the kind that goes stale
+// silently: these tests fail when the data moves, and the repair is to
+// correct the sentence rather than the number here.
+describe('doc-counts', () => {
+
+  const AGENTS = Fs.readFileSync(Path.join(REPO, 'AGENTS.md'), 'utf8')
+
+  // Data rows, i.e. every line but the header. A fixture is written with
+  // a trailing newline, so an empty last field is dropped rather than
+  // counted.
+  function specRows(name) {
+    const file = Path.join(REPO, 'test', 'spec', name)
+    return lf(Fs.readFileSync(file, 'utf8'))
+      .split('\n')
+      .filter((l) => '' !== l)
+      .length - 1
+  }
+
+
+  test('agents-md-states-the-spec-fixture-row-counts', () => {
+    const m = /which holds (\d+) rows in all, against the (\d+) positive rows/
+      .exec(AGENTS)
+    Assert.ok(null != m,
+      'AGENTS.md no longer states the two fixture row counts in the form '
+      + 'this test reads; update both together')
+    Assert.equal(Number(m[1]), specRows('alignment-abnf-errors.tsv'),
+      'AGENTS.md states the wrong row count for alignment-abnf-errors.tsv')
+    Assert.equal(Number(m[2]), specRows('alignment-abnf-ast.tsv'),
+      'AGENTS.md states the wrong row count for alignment-abnf-ast.tsv')
+  })
+
+
+  test('agents-md-names-every-ts-test-file', () => {
+    const files = Fs.readdirSync(Path.join(__dirname))
+      .filter((f) => f.endsWith('.test.js'))
+      .sort()
+    // Named either in full (`abnf.test.js`) or by stem (`class-overlap`),
+    // both in backticks so a stem cannot match a word of ordinary prose.
+    const missing = files.filter((f) => {
+      const stem = f.replace(/\.test\.js$/, '')
+      return !AGENTS.includes('`' + f + '`')
+        && !AGENTS.includes('`' + stem + '`')
+    })
+    Assert.deepEqual(missing, [],
+      `AGENTS.md names no test file called: ${missing.join(', ')}`)
+
+    const WORDS = {
+      twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+    }
+    const m = /Five of the (\w+) files in `ts\/test\/\*\.test\.js`/.exec(AGENTS)
+    Assert.ok(null != m,
+      'AGENTS.md no longer counts the test files in the form this test reads')
+    Assert.equal(WORDS[m[1]], files.length,
+      `AGENTS.md says ${m[1]} test files; there are ${files.length}`)
+  })
+
+
+  test('agents-md-counts-the-grammar-fixtures', () => {
+    const dir = Path.join(__dirname, 'grammar')
+    const names = Fs.readdirSync(dir)
+      .filter((f) => f.endsWith('.abnf'))
+      .map((f) => f.replace(/\.abnf$/, ''))
+      .sort()
+    const m = /\| (\w+) `\.abnf` fixture grammars \(([^)]*)\) \./.exec(
+      AGENTS.replace(/\)\. \|/g, ') .'))
+    Assert.ok(null != m,
+      'AGENTS.md no longer lists the grammar fixtures in the form this '
+      + 'test reads')
+    const listed = m[2].split(',').map((s) => s.trim().replace(/`/g, '')).sort()
+    Assert.deepEqual(listed, names,
+      'AGENTS.md lists grammar fixtures that do not match ts/test/grammar')
+    const WORDS = { five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
+    Assert.equal(WORDS[m[1].toLowerCase()], names.length,
+      `AGENTS.md says ${m[1]} grammar fixtures; there are ${names.length}`)
+  })
+
+
+  // The fourth counted claim, and the one the first pass at this suite
+  // missed: the sentence saying how many suites run beside conformance.
+  // It read 46, was corrected to 51, and executing it gave 53, so it went
+  // stale again in the very change meant to stop that happening.
+  //
+  // The count comes from ts/scripts/suite-count.cjs, in a child process:
+  // it registers every unit test file with `node:test` stubbed and counts
+  // the suites, which is the number `node --test` prints. A grep for
+  // `describe(` reads 49, because parity.test.js registers its four
+  // suites through `makeRunner().file()` in @tabnas/support and so has no
+  // `describe` of its own.
+  test('agents-md-counts-the-unit-suites', () => {
+    const m = /The other (\d+) suites finish\s+in seconds\./.exec(AGENTS)
+    Assert.ok(null != m,
+      'AGENTS.md no longer counts the unit suites in the form this test '
+      + 'reads')
+
+    const script = Path.join(REPO, 'ts', 'scripts', 'suite-count.cjs')
+    const out = ChildProcess.execFileSync(process.execPath, [script], {
+      encoding: 'utf8',
+      timeout: 120000,
+    })
+    const actual = Number(out.trim())
+    Assert.ok(Number.isInteger(actual) && 0 < actual,
+      `suite-count.cjs printed no count: ${out}`)
+    Assert.equal(Number(m[1]), actual,
+      `AGENTS.md says ${m[1]} suites beside conformance; there are ${actual}`)
   })
 
 })

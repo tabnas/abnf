@@ -156,6 +156,18 @@ function compileBudgeted(rel, append) {
   }
 }
 
+// How one budgeted compile is scored, in ONE place so the two halves
+// cannot disagree about what a watchdog stop means. A child stopped by its
+// own watchdog answers `{budget:true}` and a refusal answers `{ok:false}`,
+// which are indistinguishable to a test that reads `ok` alone: the invalid
+// half did read it alone, so a grammar that never terminated was scored as
+// the compiler correctly rejecting it (tabnas/abnf#74). Budget exhaustion
+// is a failure to finish on BOTH halves, never a pass and never a skip.
+function scoreCorpus(r) {
+  if (r.budget) return 'budget'
+  return r.ok ? 'accepted' : 'rejected'
+}
+
 const manifest = loadTSV(path.join(CORPUS_DIR, 'manifest.tsv'))
 const mutations = loadTSV(path.join(CORPUS_DIR, 'mutations.tsv'))
 const gapRows = loadTSV(path.join(CORPUS_DIR, 'known-gaps.tsv')).filter((r) => r[0] === 'ts')
@@ -213,6 +225,19 @@ describe('conformance: third-party ABNF corpus', () => {
     }
   })
 
+  // The scorer, pinned. Both halves read it, and the whole of
+  // tabnas/abnf#74 was the invalid half reading `ok` instead: a child the
+  // watchdog stopped answers `{ok:false}` with the budget flag set, so a
+  // grammar that never terminated was counted as a correct rejection and
+  // the dial went up. Cheap to assert, and it is what the sweep means by
+  // "never scored a pass".
+  it('a watchdog stop is never scored as a rejection or a pass', () => {
+    assert.equal(scoreCorpus({ budget: true }), 'budget')
+    assert.equal(scoreCorpus({ budget: true, ok: false }), 'budget')
+    assert.equal(scoreCorpus({ ok: true, names: [] }), 'accepted')
+    assert.equal(scoreCorpus({ ok: false, error: 'no', rejected: true }), 'rejected')
+  })
+
   // --- half 1: valid grammars compile, and yield every declared rule ---
   const validGaps = []
   const overBudget = []
@@ -222,7 +247,8 @@ describe('conformance: third-party ABNF corpus', () => {
     for (const rel of VALID) {
       const src = readCorpus(rel)
       const r = compileBudgeted(rel)
-      if (r.budget) {
+      const score = scoreCorpus(r)
+      if ('budget' === score) {
         overBudget.push(rel)
         validGaps.push(rel)
         if (RECORD) {
@@ -232,7 +258,7 @@ describe('conformance: third-party ABNF corpus', () => {
         }
         continue
       }
-      if (!r.ok) {
+      if ('rejected' === score) {
         // A crash here is NOT merely a grammar this compiler cannot accept.
         // Left unclassified it would be pinned as `valid-not-accepted`, which
         // is the same laundering as scoring it a correct rejection: a defect
@@ -253,29 +279,42 @@ describe('conformance: third-party ABNF corpus', () => {
       }
     }
     assertNoCrashes(validCrashes, 'compiling the valid corpus')
-    if (RECORD) return
-    assert.deepEqual(
-      validGaps.sort(), PINNED_VALID_GAPS,
-      'the set of valid RFC 5234 grammars this compiler does not fully accept has ' +
-        'changed. If you FIXED one, delete its row from test/corpus/known-gaps.tsv. ' +
-        'If you BROKE one, that is a regression.',
-    )
-    assert.deepEqual(
-      overBudget.sort(), PINNED_BUDGET,
-      `the set of grammars the compiler cannot finish within ${BUDGET_MB}MB / ` +
-        `${BUDGET_MS}ms has changed (see test/corpus/known-gaps.tsv).`,
-    )
   })
 
   // --- half 2a: corpus grammars the oracle rejects must be rejected ----
   const invalidGaps = []
+  const invalidOverBudget = []
 
   it('invalid: grammars the third-party oracle rejects are rejected', () => {
     const leaked = invalidGaps
     const crashes = []
     for (const rel of INVALID) {
       const r = compileBudgeted(rel)
-      if (r.ok) {
+      // A compile that never finished is NOT a rejection. This half scores
+      // on `!ok`, and a child stopped by its own watchdog answers
+      // `{budget:true}`, which is indistinguishable from a refusal unless
+      // the flag is read: testing `ok` alone read a nontermination as the
+      // compiler correctly refusing the grammar and left the suite green
+      // through exactly the regression this half exists to catch
+      // (tabnas/abnf#74). So budget exhaustion goes to `overBudget`, as it
+      // does on the valid half, and is counted out of the dial.
+      //
+      // It does NOT join `invalidGaps`: that set is pinned against the
+      // `invalid-accepted` rows of known-gaps.tsv and means "the compiler
+      // accepted this", which is the opposite claim. `overBudget` is pinned
+      // against the `budget-exceeded` rows, which is the claim being made,
+      // and a new member fails that assertion whichever half it came from.
+      const score = scoreCorpus(r)
+      if ('budget' === score) {
+        overBudget.push(rel)
+        invalidOverBudget.push(rel)
+        if (RECORD) {
+          record('budget-exceeded', rel, 1,
+            `compiler did not finish within ${BUDGET_MB}MB / ${BUDGET_MS}ms`)
+        }
+        continue
+      }
+      if ('accepted' === score) {
         leaked.push(rel)
         if (RECORD) record('invalid-accepted', rel, 1, 'accepted; oracle rejects it')
         continue
@@ -287,12 +326,6 @@ describe('conformance: third-party ABNF corpus', () => {
       if (isChildCrash(r)) crashes.push(`${rel}: ${r.error}`)
     }
     assertNoCrashes(crashes, 'compiling the invalid corpus')
-    if (RECORD) return
-    assert.deepEqual(
-      leaked.sort(), PINNED_INVALID_GAPS,
-      'the set of non-RFC-5234 corpus grammars this compiler accepts has changed. ' +
-        'If you FIXED one, delete its row from test/corpus/known-gaps.tsv.',
-    )
   })
 
   // --- half 2b: mutants violating a named RFC 5234 production ----------
@@ -337,13 +370,6 @@ describe('conformance: third-party ABNF corpus', () => {
     // recording run that swallowed these would emit mutation-leak rows
     // measured against crashed compiles.
     assertNoCrashes(crashes, 'mutating the valid corpus')
-    if (RECORD) return
-    assert.deepEqual(
-      leaks, PINNED_MUTATION_LEAKS,
-      'the per-class mutation leak counts have changed. Each count is the number ' +
-        'of corpus bases that accepted an appended line RFC 5234 cannot derive. ' +
-        'Lower is better; update test/corpus/known-gaps.tsv when you improve one.',
-    )
   })
 
   // --- the dial: what was actually measured, printed ------------------
@@ -352,14 +378,17 @@ describe('conformance: third-party ABNF corpus', () => {
     const mutantTotal = bases.length * mutations.length
     const mutantLeaks = Object.values(mutationLeaks).reduce((a, b) => a + b, 0)
     const vOk = VALID.length - validGaps.length
-    const iOk = INVALID.length - invalidGaps.length + (mutantTotal - mutantLeaks)
+    const iOk = INVALID.length - invalidGaps.length - invalidOverBudget.length
+      + (mutantTotal - mutantLeaks)
     const iTotal = INVALID.length + mutantTotal
     console.log(
       '\n  ABNF conformance dial (TS), as measured by this run:' +
         `\n    valid   accepted + value-correct : ${vOk}/${VALID.length}` +
         `\n    invalid rejected                 : ${iOk}/${iTotal}` +
         `\n    excluded fragments               : ${FRAGMENT.length}` +
-        `\n    over budget (counted as failures): ${overBudget.length}\n`,
+        `\n    over budget (never scored a pass) : ${overBudget.length}` +
+        ` (${overBudget.length - invalidOverBudget.length} valid,` +
+        ` ${invalidOverBudget.length} invalid)\n`,
     )
     if (RECORD) {
       console.log('# paste the `ts` rows of test/corpus/known-gaps.tsv:')
@@ -369,5 +398,47 @@ describe('conformance: third-party ABNF corpus', () => {
     // The dial is derived from the pinned sets, so it cannot drift from them;
     // this only guards against the corpus itself being gutted.
     assert.ok(vOk > 0 && iOk > 0, 'the dial measured nothing')
+  })
+
+  // --- what known-gaps.tsv pins, asserted once every half has run -----
+  //
+  // All four sets are compared HERE rather than at the end of the half
+  // that fills them, which is the shape `TestConformance` already has in
+  // go/conformance_test.go.
+  //
+  // The budget set forced the question: it spans both halves, because a
+  // watchdog stop on the invalid half is budget exhaustion and not a
+  // rejection (tabnas/abnf#74). Asserting it inside one half pins it only
+  // when that half runs, so a filtered run of the other half would leave
+  // it unpinned and still green. Collected here, a half that does not run
+  // contributes an empty set and this test FAILS against the pinned rows
+  // rather than passing quietly, which is the right way round: a
+  // conformance run that measured only part of the corpus should not be
+  // able to report a clean sheet.
+  it('the residual gaps are exactly what known-gaps.tsv pins', () => {
+    if (RECORD) return
+
+    assert.deepEqual(
+      validGaps.slice().sort(), PINNED_VALID_GAPS,
+      'the set of valid RFC 5234 grammars this compiler does not fully accept has ' +
+        'changed. If you FIXED one, delete its row from test/corpus/known-gaps.tsv. ' +
+        'If you BROKE one, that is a regression.',
+    )
+    assert.deepEqual(
+      overBudget.slice().sort(), PINNED_BUDGET,
+      `the set of grammars the compiler cannot finish within ${BUDGET_MB}MB / ` +
+        `${BUDGET_MS}ms has changed (see test/corpus/known-gaps.tsv).`,
+    )
+    assert.deepEqual(
+      invalidGaps.slice().sort(), PINNED_INVALID_GAPS,
+      'the set of non-RFC-5234 corpus grammars this compiler accepts has changed. ' +
+        'If you FIXED one, delete its row from test/corpus/known-gaps.tsv.',
+    )
+    assert.deepEqual(
+      mutationLeaks, PINNED_MUTATION_LEAKS,
+      'the per-class mutation leak counts have changed. Each count is the number ' +
+        'of corpus bases that accepted an appended line RFC 5234 cannot derive. ' +
+        'Lower is better; update test/corpus/known-gaps.tsv when you improve one.',
+    )
   })
 })

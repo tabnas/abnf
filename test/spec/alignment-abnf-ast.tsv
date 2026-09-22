@@ -54,6 +54,20 @@ list = ( item ) *( item )   ; @array\nitem = DIGIT	123	["1","2","3"]
 top = *( "," )   ; @array	,,	[",,"]
 top = *item   ; @array\nitem = "x"	xxx	["xxx"]
 top = *DIGIT   ; @array	123	["1","2","3"]
+ident = TX	hello	{"rule":"ident","src":"hello","kids":[]}
+n = NR	42	{"rule":"n","src":"42","kids":[]}
+s = ST	"hi"	{"rule":"s","src":"\"hi\"","kids":[]}
+v = VL	true	{"rule":"v","src":"true","kids":[]}
+top = TX\nTX = "literal"	literal	{"rule":"top","src":"literal","kids":[{"rule":"TX","src":"literal","kids":[]}]}
+pair = a b\na = TX\nb = TX	alpha beta	{"rule":"pair","src":"alphabeta","kids":[{"rule":"b","src":"beta","kids":[]}]}
+top = a / b\na = [ "x" ] c "z"\nc = TX\nb = "w"	foo z	{"rule":"top","src":"fooz","kids":[{"rule":"c","src":"foo","kids":[]}]}
+top = a / b\na = [ "x" ] c "z"\nc = TX\nb = "w"	x foo z	{"rule":"top","src":"xfooz","kids":[{"rule":"c","src":"foo","kids":[]}]}
+top = a / b\na = [ "x" ] c "z"\nc = TX\nb = "w"	w	{"rule":"top","src":"w","kids":[]}
+path = TX *( "." TX )	foo.bar.baz	{"rule":"path","src":"foo.bar.baz","kids":[]}
+top = A B\nA = "+"\nB = "+"	++	{"rule":"top","src":"++","kids":[{"rule":"B","src":"+","kids":[]}]}
+P = Q\nQ = P PL / NR\nPL = "+"	1++	{"rule":"P","src":"1++","kids":[]}
+add = NR [ PL add ]\nNR = <number>\nPL = "+"	1+2	{"rule":"add","src":"1+2","kids":[{"rule":"add","src":"2","kids":[]}]}
+e = plus NR\nplus = "+"	+7	{"rule":"e","src":"+7","kids":[]}
 top = "@" a b   ; @object a b\na = 1*ALPHA\nb = "[" x *( "," x ) "]"   ; @array\nx = 1*DIGIT	@ab[1,2]	{"a":"ab","b":["1","2"]}
 top = "<" b *( ";" b ) ">"   ; @array\nb = "[" x *( "," x ) "]"   ; @array\nx = 1*DIGIT	<[1,2];[3]>	[["1","2"],["3"]]
 top = "@" b   ; @object b\nb = "[" x *( "," x ) "]"   ; @array\nx = 1*DIGIT	@[1,2]	{"b":["1","2"]}

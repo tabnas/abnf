@@ -241,6 +241,53 @@ struct Outcome {
     budget: bool,
 }
 
+/// How one budgeted compile is scored, in ONE place so the two halves
+/// cannot disagree about what a watchdog stop means.
+#[derive(Debug, PartialEq, Eq)]
+enum Score {
+    Budget,
+    Accepted,
+    Rejected,
+}
+
+/// Reads the budget flag BEFORE `ok`. A child stopped by its own watchdog
+/// answers `{budget: true, ok: false}`, which is indistinguishable from a
+/// refusal to a caller that reads `ok` alone, and a half that reads it
+/// alone counts a nontermination as the compiler correctly rejecting the
+/// grammar. That was tabnas/abnf#74, open in all three runtimes and fixed
+/// here first; the same scorer now stands in `ts/test/conformance.test.js`
+/// and `go/conformance_test.go`.
+fn score_corpus(result: &Outcome) -> Score {
+    if result.budget {
+        Score::Budget
+    } else if result.ok {
+        Score::Accepted
+    } else {
+        Score::Rejected
+    }
+}
+
+/// The scorer, pinned. Cheap to assert, and it is what the sweep means by
+/// "never scored a pass".
+#[test]
+fn a_watchdog_stop_is_never_scored_as_a_rejection_or_a_pass() {
+    let budget = Outcome {
+        budget: true,
+        ..Outcome::default()
+    };
+    assert_eq!(score_corpus(&budget), Score::Budget);
+    let accepted = Outcome {
+        ok: true,
+        ..Outcome::default()
+    };
+    assert_eq!(score_corpus(&accepted), Score::Accepted);
+    let rejected = Outcome {
+        error: "no".to_string(),
+        ..Outcome::default()
+    };
+    assert_eq!(score_corpus(&rejected), Score::Rejected);
+}
+
 /// How one budgeted child ended.
 ///
 /// The distinction this type exists to make: "the compiler did not
@@ -651,7 +698,7 @@ fn conformance() {
     // --- half 1: valid grammars compile AND yield every declared rule ---
     for rel in &valid {
         let result = compile_budgeted(exe, rel, "");
-        if result.budget {
+        if Score::Budget == score_corpus(&result) {
             over_budget.insert(rel.clone());
             valid_gaps.insert(rel.clone());
             if record {
@@ -717,7 +764,8 @@ fn conformance() {
     let mut invalid_over_budget = BTreeSet::new();
     for rel in &invalid {
         let result = compile_budgeted(exe, rel, "");
-        if result.budget {
+        let score = score_corpus(&result);
+        if Score::Budget == score {
             over_budget.insert(rel.clone());
             invalid_over_budget.insert(rel.clone());
             if record {
@@ -730,7 +778,7 @@ fn conformance() {
             }
             continue;
         }
-        if result.ok {
+        if Score::Accepted == score {
             invalid_gaps.insert(rel.clone());
             if record {
                 note(

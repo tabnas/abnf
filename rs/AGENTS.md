@@ -36,10 +36,11 @@ annotation out of a trailing comment.
 | `src/numeric.rs` | `parseNumericValue` |
 | `src/compile.rs` | `ts/src/compile.ts` and `go/compile.go`: `abnf_compile` |
 | `tests/parity_test.rs` | `go/parity_test.go`: the four shared `test/spec/*.tsv` fixtures |
-| `tests/abnf_test.rs` | `go/abnf_test.go` and `ts/test/abnf.test.js` |
+| `tests/abnf_test.rs` | `go/abnf_test.go` and `ts/test/abnf.test.js`, including a runner for every `.abnf` grammar under `ts/test/grammar/` |
 | `tests/compile_test.rs` | `go/compile_test.go` |
 | `tests/leftrec_test.rs` | `go/leftrec_test.go` |
 | `tests/probe_test.rs` | `go/probe_test.go` |
+| `tests/token_test.rs` | `go/token_test.go` and `ts/test/token.test.js` |
 | `tests/rfc3986_test.rs` | `go/rfc3986_test.go` |
 | `tests/spans_test.rs` | `go/spans_test.go` |
 | `tests/class_overlap_test.rs` | `go/class_overlap_test.go` |
@@ -48,6 +49,7 @@ annotation out of a trailing comment.
 | `tests/conformance_test.rs` | `go/conformance_test.go` |
 | `tests/untrusted_test.rs` | no twin: the boundaries a Rust port has to state, because a stack that runs out aborts rather than unwinding |
 | `tests/perf_test.rs` | no twin: two ratio comparisons, both measured on one machine in one run |
+| `tests/divergence_test.rs` | no twin: every entry of `../DIVERGENCE.md`, both halves, the canonical one by running `node` over `../ts/dist/abnf.js` |
 | `tests/version_test.rs` | the five version sites must agree |
 | `README.md` | the crate front page; its `rust` fences run as doctests |
 
@@ -171,6 +173,21 @@ that order exists to close.
   runtime answers an empty one. That is the ENGINE's answer, not this
   crate's: the emitted `GrammarSpec` is byte identical in all three
   runtimes. Recorded in `../DIVERGENCE.md` as entry 5.
+
+## What this crate does not have
+
+No binary target. The canonical package ships the `tabnas-abnf` command
+and the Go module ships `cmd/tabnas-abnf`; this crate is a library only,
+and `../AGENTS.md` records that in its repository map. Everything either
+command does is a call to `abnf_convert`, `abnf` or `abnf_compile`, so
+adding one is packaging rather than capability, and nothing in the
+shared fixtures or the conformance instrument reaches a command line.
+
+No error codes either, in any runtime: `../AGENTS.md` under "Error
+codes" states that this package declares none, `tabnas.plugin.json`
+carries an empty `errorCodes`, and no fixture row pins an
+`ERROR:<code>`. What the shared errors fixture pins is the rendered
+message, byte for byte, this crate included.
 
 ## Running it
 
