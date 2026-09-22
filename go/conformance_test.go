@@ -172,6 +172,56 @@ func compileBudgeted(t *testing.T, rel, appendLine string) conformanceResult {
 	return res
 }
 
+// TestConformanceScoring pins the scorer both halves read. The whole of
+// tabnas/abnf#74 was the invalid half reading OK instead: a child the
+// watchdog stopped answers OK=false with Budget set, so a grammar that
+// never terminated was counted as a correct rejection and the dial went
+// up. Cheap to assert, and it is what the sweep means by "never scored a
+// pass".
+func TestConformanceScoring(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		res  conformanceResult
+		want conformanceScore
+	}{
+		{"watchdog stop", conformanceResult{Budget: true}, scoreBudget},
+		{"watchdog stop, not ok", conformanceResult{Budget: true, OK: false}, scoreBudget},
+		{"compiled", conformanceResult{OK: true}, scoreAccepted},
+		{"refused", conformanceResult{OK: false, Error: "no"}, scoreRejected},
+	} {
+		if got := scoreCorpus(c.res); got != c.want {
+			t.Errorf("%s: scoreCorpus = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// conformanceScore is how one budgeted compile is scored, in ONE place so
+// the two halves cannot disagree about what a watchdog stop means.
+type conformanceScore int
+
+const (
+	scoreBudget conformanceScore = iota
+	scoreAccepted
+	scoreRejected
+)
+
+// scoreCorpus reads the budget flag BEFORE OK. A child stopped by its own
+// watchdog answers OK=false with Budget set, which is indistinguishable
+// from a refusal to a caller that reads OK alone: the invalid half did
+// read it alone, so a grammar that never terminated was counted as the
+// compiler correctly rejecting it and the dial went up (tabnas/abnf#74).
+// Budget exhaustion is a failure to finish on BOTH halves, never a pass
+// and never a skip.
+func scoreCorpus(res conformanceResult) conformanceScore {
+	if res.Budget {
+		return scoreBudget
+	}
+	if res.OK {
+		return scoreAccepted
+	}
+	return scoreRejected
+}
+
 // Every name the compiled spec can reach: rules, fixed tokens, match tokens.
 func specNames(spec *tabnas.GrammarSpec) []string {
 	seen := map[string]bool{}
@@ -353,7 +403,7 @@ func TestConformance(t *testing.T) {
 	// --- half 1: valid grammars compile AND yield every declared rule ---
 	for _, rel := range c.valid {
 		res := compileBudgeted(t, rel, "")
-		if res.Budget {
+		if scoreBudget == scoreCorpus(res) {
 			c.overBudget = append(c.overBudget, rel)
 			c.validGaps = append(c.validGaps, rel)
 			if c.record {
@@ -389,8 +439,33 @@ func TestConformance(t *testing.T) {
 	}
 
 	// --- half 2a: corpus grammars the oracle rejects must be rejected ---
+	//
+	// A compile that never finished is NOT a rejection. This half scores on
+	// !OK, and a child stopped by its own watchdog answers OK=false with the
+	// budget flag set, so reading OK alone read a nontermination as the
+	// compiler correctly refusing the grammar and left the suite green
+	// through exactly the regression this half exists to catch
+	// (tabnas/abnf#74). Budget exhaustion is therefore recorded in
+	// overBudget, as the valid half records it, and counted out of the dial
+	// rather than into it.
+	//
+	// It does NOT join invalidGaps: that set is pinned against the
+	// `invalid-accepted` rows of known-gaps.tsv and means "the compiler
+	// accepted this", which is the opposite claim. overBudget is pinned
+	// against the `budget-exceeded` rows, which is the claim being made, and
+	// a new member of that set fails the assertion whichever half it came
+	// from.
+	var invalidOverBudget []string
 	for _, rel := range c.invalid {
-		if res := compileBudgeted(t, rel, ""); res.OK {
+		switch scoreCorpus(compileBudgeted(t, rel, "")) {
+		case scoreBudget:
+			c.overBudget = append(c.overBudget, rel)
+			invalidOverBudget = append(invalidOverBudget, rel)
+			if c.record {
+				c.note("budget-exceeded", rel, 1,
+					"compiler does not terminate within 256MB / 60s")
+			}
+		case scoreAccepted:
 			c.invalidGaps = append(c.invalidGaps, rel)
 			if c.record {
 				c.note("invalid-accepted", rel, 1, "accepted; the oracle rejects it")
@@ -436,11 +511,12 @@ func TestConformance(t *testing.T) {
 		"\n    valid   accepted + value-correct : %d/%d"+
 		"\n    invalid rejected                 : %d/%d"+
 		"\n    excluded fragments               : %d"+
-		"\n    over budget (counted as failures): %d",
+		"\n    over budget (never scored a pass) : %d (%d valid, %d invalid)",
 		len(c.valid)-len(c.validGaps), len(c.valid),
-		len(c.invalid)-len(c.invalidGaps)+mutantTotal-mutantLeaks,
+		len(c.invalid)-len(c.invalidGaps)-len(invalidOverBudget)+mutantTotal-mutantLeaks,
 		len(c.invalid)+mutantTotal,
-		len(c.fragment), len(c.overBudget))
+		len(c.fragment), len(c.overBudget),
+		len(c.overBudget)-len(invalidOverBudget), len(invalidOverBudget))
 
 	if c.record {
 		t.Logf("\n# paste the `go` rows of test/corpus/known-gaps.tsv:\n%s",

@@ -291,21 +291,22 @@ How it is judged, and by whom:
   budget is likewise never scored as a rejection: the child answers
   `{budget: true, ok: false}`, so a half that tests `ok` alone reads a
   nontermination as a correct refusal and stays green through the
-  regression it exists to catch. `rs/tests/conformance_test.rs` reads the
-  flag, which is why its invalid figure moved (see the table below).
-  `ts/test/conformance.test.js` and `go/conformance_test.go` still do
-  not: no invalid grammar exceeds their budget today, so their figures
-  are right, but the hole is there and the next one to blow up would go
-  unnoticed. Fixing those two is open work.
+  regression it exists to catch. All three suites read the flag on both
+  halves now, each through one `scoreCorpus` that both halves call and a
+  unit test pins, so the reading cannot differ between the halves of one
+  suite or between the three. Rust reads a grammar over its budget on
+  the invalid half today and the other two do not, which is the whole of
+  the difference in the table below.
 - The residual gaps are pinned as an **exact set** in
   `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
   as loudly as regressing one; the fix is to delete its row. Never edit a
   row to silence a failure you did not fix, and never narrow the corpus
   or loosen an assertion to raise the figure.
 
-Measured by the suites themselves, the TS column on 2026-08-09 at the
-commit that introduced them and the Go and Rust columns on 2026-09-21
-(run `make test` and read the dial the conformance tests print):
+Measured by the suites themselves, the TS and Go columns on 2026-09-22
+once both began reading the budget flag on the invalid half, and the
+Rust column on 2026-09-21 (run `make test` and read the dial the
+conformance tests print):
 
 |                                   | TS        | Go        | Rust      |
 | --------------------------------- | --------- | --------- | --------- |
@@ -340,8 +341,10 @@ engine quadratic is the other way it closes.
 
 The Rust column was measured on 2026-09-21, by the same instrument, and
 re-measured the same day once that instrument began reading the budget
-flag on both halves rather than only on the valid one. The Go column was
-RE-measured the same day and is no longer what it was:
+flag on both halves rather than only on the valid one. The TS and Go
+columns were re-measured on 2026-09-22, once the same reading reached
+those two suites; neither figure moved, because no invalid grammar
+exceeds their budget today. The Go column is no longer what it was:
 this table read `513/661` for Go, from 2026-08-09, and the dial
 `go/conformance_test.go` prints today reads `611/661`. Go used to accept
 an unclosed group `( "a" / "b"` and an unclosed option `[ "a"`, which

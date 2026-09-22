@@ -156,6 +156,18 @@ function compileBudgeted(rel, append) {
   }
 }
 
+// How one budgeted compile is scored, in ONE place so the two halves
+// cannot disagree about what a watchdog stop means. A child stopped by its
+// own watchdog answers `{budget:true}` and a refusal answers `{ok:false}`,
+// which are indistinguishable to a test that reads `ok` alone: the invalid
+// half did read it alone, so a grammar that never terminated was scored as
+// the compiler correctly rejecting it (tabnas/abnf#74). Budget exhaustion
+// is a failure to finish on BOTH halves, never a pass and never a skip.
+function scoreCorpus(r) {
+  if (r.budget) return 'budget'
+  return r.ok ? 'accepted' : 'rejected'
+}
+
 const manifest = loadTSV(path.join(CORPUS_DIR, 'manifest.tsv'))
 const mutations = loadTSV(path.join(CORPUS_DIR, 'mutations.tsv'))
 const gapRows = loadTSV(path.join(CORPUS_DIR, 'known-gaps.tsv')).filter((r) => r[0] === 'ts')
@@ -213,6 +225,19 @@ describe('conformance: third-party ABNF corpus', () => {
     }
   })
 
+  // The scorer, pinned. Both halves read it, and the whole of
+  // tabnas/abnf#74 was the invalid half reading `ok` instead: a child the
+  // watchdog stopped answers `{ok:false}` with the budget flag set, so a
+  // grammar that never terminated was counted as a correct rejection and
+  // the dial went up. Cheap to assert, and it is what the sweep means by
+  // "never scored a pass".
+  it('a watchdog stop is never scored as a rejection or a pass', () => {
+    assert.equal(scoreCorpus({ budget: true }), 'budget')
+    assert.equal(scoreCorpus({ budget: true, ok: false }), 'budget')
+    assert.equal(scoreCorpus({ ok: true, names: [] }), 'accepted')
+    assert.equal(scoreCorpus({ ok: false, error: 'no', rejected: true }), 'rejected')
+  })
+
   // --- half 1: valid grammars compile, and yield every declared rule ---
   const validGaps = []
   const overBudget = []
@@ -222,7 +247,8 @@ describe('conformance: third-party ABNF corpus', () => {
     for (const rel of VALID) {
       const src = readCorpus(rel)
       const r = compileBudgeted(rel)
-      if (r.budget) {
+      const score = scoreCorpus(r)
+      if ('budget' === score) {
         overBudget.push(rel)
         validGaps.push(rel)
         if (RECORD) {
@@ -232,7 +258,7 @@ describe('conformance: third-party ABNF corpus', () => {
         }
         continue
       }
-      if (!r.ok) {
+      if ('rejected' === score) {
         // A crash here is NOT merely a grammar this compiler cannot accept.
         // Left unclassified it would be pinned as `valid-not-accepted`, which
         // is the same laundering as scoring it a correct rejection: a defect
@@ -260,22 +286,42 @@ describe('conformance: third-party ABNF corpus', () => {
         'changed. If you FIXED one, delete its row from test/corpus/known-gaps.tsv. ' +
         'If you BROKE one, that is a regression.',
     )
-    assert.deepEqual(
-      overBudget.sort(), PINNED_BUDGET,
-      `the set of grammars the compiler cannot finish within ${BUDGET_MB}MB / ` +
-        `${BUDGET_MS}ms has changed (see test/corpus/known-gaps.tsv).`,
-    )
   })
 
   // --- half 2a: corpus grammars the oracle rejects must be rejected ----
   const invalidGaps = []
+  const invalidOverBudget = []
 
   it('invalid: grammars the third-party oracle rejects are rejected', () => {
     const leaked = invalidGaps
     const crashes = []
     for (const rel of INVALID) {
       const r = compileBudgeted(rel)
-      if (r.ok) {
+      // A compile that never finished is NOT a rejection. This half scores
+      // on `!ok`, and a child stopped by its own watchdog answers
+      // `{budget:true}`, which is indistinguishable from a refusal unless
+      // the flag is read: testing `ok` alone read a nontermination as the
+      // compiler correctly refusing the grammar and left the suite green
+      // through exactly the regression this half exists to catch
+      // (tabnas/abnf#74). So budget exhaustion goes to `overBudget`, as it
+      // does on the valid half, and is counted out of the dial.
+      //
+      // It does NOT join `invalidGaps`: that set is pinned against the
+      // `invalid-accepted` rows of known-gaps.tsv and means "the compiler
+      // accepted this", which is the opposite claim. `overBudget` is pinned
+      // against the `budget-exceeded` rows, which is the claim being made,
+      // and a new member fails that assertion whichever half it came from.
+      const score = scoreCorpus(r)
+      if ('budget' === score) {
+        overBudget.push(rel)
+        invalidOverBudget.push(rel)
+        if (RECORD) {
+          record('budget-exceeded', rel, 1,
+            `compiler did not finish within ${BUDGET_MB}MB / ${BUDGET_MS}ms`)
+        }
+        continue
+      }
+      if ('accepted' === score) {
         leaked.push(rel)
         if (RECORD) record('invalid-accepted', rel, 1, 'accepted; oracle rejects it')
         continue
@@ -292,6 +338,13 @@ describe('conformance: third-party ABNF corpus', () => {
       leaked.sort(), PINNED_INVALID_GAPS,
       'the set of non-RFC-5234 corpus grammars this compiler accepts has changed. ' +
         'If you FIXED one, delete its row from test/corpus/known-gaps.tsv.',
+    )
+    // The budget set spans both halves, so it is asserted once both have
+    // run rather than at the end of the valid half.
+    assert.deepEqual(
+      overBudget.slice().sort(), PINNED_BUDGET,
+      `the set of grammars the compiler cannot finish within ${BUDGET_MB}MB / ` +
+        `${BUDGET_MS}ms has changed (see test/corpus/known-gaps.tsv).`,
     )
   })
 
@@ -352,14 +405,17 @@ describe('conformance: third-party ABNF corpus', () => {
     const mutantTotal = bases.length * mutations.length
     const mutantLeaks = Object.values(mutationLeaks).reduce((a, b) => a + b, 0)
     const vOk = VALID.length - validGaps.length
-    const iOk = INVALID.length - invalidGaps.length + (mutantTotal - mutantLeaks)
+    const iOk = INVALID.length - invalidGaps.length - invalidOverBudget.length
+      + (mutantTotal - mutantLeaks)
     const iTotal = INVALID.length + mutantTotal
     console.log(
       '\n  ABNF conformance dial (TS), as measured by this run:' +
         `\n    valid   accepted + value-correct : ${vOk}/${VALID.length}` +
         `\n    invalid rejected                 : ${iOk}/${iTotal}` +
         `\n    excluded fragments               : ${FRAGMENT.length}` +
-        `\n    over budget (counted as failures): ${overBudget.length}\n`,
+        `\n    over budget (never scored a pass) : ${overBudget.length}` +
+        ` (${overBudget.length - invalidOverBudget.length} valid,` +
+        ` ${invalidOverBudget.length} invalid)\n`,
     )
     if (RECORD) {
       console.log('# paste the `ts` rows of test/corpus/known-gaps.tsv:')
