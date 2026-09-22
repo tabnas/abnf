@@ -40,6 +40,7 @@ annotation out of a trailing comment.
 | `tests/compile_test.rs` | `go/compile_test.go` |
 | `tests/leftrec_test.rs` | `go/leftrec_test.go` |
 | `tests/probe_test.rs` | `go/probe_test.go` |
+| `tests/token_test.rs` | `go/token_test.go` and `ts/test/token.test.js` |
 | `tests/rfc3986_test.rs` | `go/rfc3986_test.go` |
 | `tests/spans_test.rs` | `go/spans_test.go` |
 | `tests/class_overlap_test.rs` | `go/class_overlap_test.go` |

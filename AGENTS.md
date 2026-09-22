@@ -110,7 +110,7 @@ Four things an agent should know before touching this:
   member that reaches a value-building rule. Seventeen of them are
   pinned byte for byte in all three runtimes by
   [`test/spec/alignment-abnf-errors.tsv`](test/spec/alignment-abnf-errors.tsv),
-  which holds 35 rows in all, against the 58 positive rows in
+  which holds 35 rows in all, against the 68 positive rows in
   [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv).
   Both counts are `wc -l` minus the header row, and the `doc-counts`
   suite in `ts/test/docs.test.js` reads them out of this sentence and
