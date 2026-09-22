@@ -16,7 +16,7 @@ use tabnas_abnf::{
 
 const SPAN_SRC: &str = concat!(
     "doc  = item\n",
-    "item = \"hi\" / %s\"Yo\" / ref / (alt / two) / [opt] / %x41-5A\n",
+    "item = \"hi\" / %s\"Yo\" / ref / (alt / two) / [opt] / %x41-5A / <free>\n",
     "ref  = ALPHA\n",
     "alt  = \"a\"\n",
     "two  = \"b\"\n",
@@ -64,6 +64,12 @@ fn ref_numeric_and_prose_spans() {
     let alts = span_prod("item").alts;
     assert_eq!(span_text(alts[2][0].sp), "ref");
     assert_eq!(span_text(alts[5][0].sp), "%x41-5A");
+    // Prose too. This assertion is why the fixture carries a `<free>`
+    // alternative at all, and it is the one the name of this test has
+    // always claimed: a prose element carrying no span leaves the shared
+    // compiler nothing to underline, and that failure is one the
+    // front-end is supposed to place.
+    assert_eq!(span_text(alts[6][0].sp), "<free>");
 }
 
 #[test]
@@ -113,6 +119,52 @@ fn core_rules_carry_no_span() {
     assert_eq!(span_text(span_prod("ref").alts[0][0].sp), "ALPHA");
 }
 
+/// The core-rule list is handed to EVERY grammar parsed in this process,
+/// so each parse has to get its own copy. Without one, a consumer that
+/// annotated an `ALPHA` node would see the annotation on unrelated
+/// documents, and the "core rules carry no span" guarantee above would
+/// hold only until someone broke it for everyone.
+///
+/// Here the copy is enforced by ownership rather than by care:
+/// `core_rules` hands back a `&'static Vec<Production>` and
+/// `with_core_rules` clones out of it, so sharing would not compile.
+/// That is the mechanism, not the contract. What is pinned is the
+/// ANSWER, the same one `ts/test/abnf.test.js` pins under "hands out a
+/// fresh copy of each core rule", where the cache is a module-level
+/// object a returned reference really can reach.
+#[test]
+fn hands_out_a_fresh_copy_of_each_core_rule() {
+    let alpha_at = |grammar: &Grammar| {
+        grammar
+            .productions
+            .iter()
+            .position(|production| "ALPHA" == production.name)
+            .expect("ALPHA should have been pulled in")
+    };
+
+    let mut first = parse_abnf("doc = ALPHA").expect("the first parse succeeds");
+    let at = alpha_at(&first);
+    let planted = SrcSpan {
+        s: 999,
+        e: 1000,
+        r: Some(42),
+        c: Some(1),
+    };
+    first.productions[at].sp = Some(planted);
+    first.productions[at].alts[0][0].sp = Some(planted);
+
+    let second = parse_abnf("doc = ALPHA").expect("the second parse succeeds");
+    let at = alpha_at(&second);
+    assert_eq!(
+        second.productions[at].sp, None,
+        "a mutation leaked between parses"
+    );
+    assert_eq!(
+        second.productions[at].alts[0][0].sp, None,
+        "an element mutation leaked between parses"
+    );
+}
+
 /// A span whose offset and row/column disagree is worse than no span: a
 /// consumer picking either one gets a different answer.
 #[test]
@@ -148,6 +200,26 @@ fn compile_error_carries_a_range() {
     let span = emit.sp.expect("the compile error carries a range");
     assert_eq!(&src[span.s..span.e], "missing");
     assert_eq!(span.r, Some(2));
+}
+
+/// The fixture's `<free>` alternative is itself a compile failure, since
+/// prose may only stand alone as the whole definition of a built-in
+/// lexer token. It is one of the failures the front-end gives a range,
+/// and the range has to cover the prose rather than the whole rule: the
+/// shared compiler falls back to the production span when the element
+/// carries none, so a front-end that spanned productions only would
+/// still answer a range here, just a useless one. Mirrors the TS
+/// "ranges a prose-in-expression failure too".
+#[test]
+fn prose_in_expression_failure_carries_a_range() {
+    let error = abnf_convert(SPAN_SRC, None).expect_err("a prose-in-expression failure");
+    let AbnfError::Emit(emit) = &error else {
+        panic!("expected an emit error, got {error}");
+    };
+    let span = emit
+        .sp
+        .expect("the prose-in-expression failure carries a range");
+    assert_eq!(&SPAN_SRC[span.s..span.e], "<free>");
 }
 
 #[test]

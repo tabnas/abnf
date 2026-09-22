@@ -21,7 +21,7 @@ import (
 // Mirrors ts/test/abnf.test.js `describe('source spans')`.
 
 const spanSrc = "doc  = item\n" +
-	"item = \"hi\" / %s\"Yo\" / ref / (alt / two) / [opt] / %x41-5A\n" +
+	"item = \"hi\" / %s\"Yo\" / ref / (alt / two) / [opt] / %x41-5A / <free>\n" +
 	"ref  = ALPHA\n" +
 	"alt  = \"a\"\n" +
 	"two  = \"b\"\n" +
@@ -83,6 +83,14 @@ func TestRefNumericAndProseSpans(t *testing.T) {
 	}
 	if got := spanText(t, alts[5][0].Sp); got != "%x41-5A" {
 		t.Errorf("numeric span = %q, want %q", got, "%x41-5A")
+	}
+	// Prose too. This assertion is why the fixture carries a `<free>`
+	// alternative at all, and it is the one the name of this test has
+	// always claimed: a prose element that carries no span leaves the
+	// shared compiler nothing to underline, and that failure is one the
+	// front-end is supposed to place.
+	if got := spanText(t, alts[6][0].Sp); got != "<free>" {
+		t.Errorf("prose span = %q, want %q", got, "<free>")
 	}
 }
 
@@ -149,6 +157,52 @@ func TestCoreRulesCarryNoSpan(t *testing.T) {
 	}
 }
 
+// The core-rule list is handed to EVERY grammar parsed in this process,
+// so each parse has to get its own copy. Without one, a consumer that
+// annotated an ALPHA node would see the annotation on unrelated
+// documents, and the "core rules carry no span" guarantee above would
+// hold only until someone broke it for everyone.
+//
+// The guard here is a re-parse per call, which reads as pure waste to
+// anyone optimising it away. Mirrors the TS "hands out a fresh copy of
+// each core rule".
+func TestHandsOutAFreshCopyOfEachCoreRule(t *testing.T) {
+	alphaOf := func(g *abnfGrammar) *abnfProduction {
+		t.Helper()
+		for _, p := range g.Productions {
+			if p.Name == "ALPHA" {
+				return p
+			}
+		}
+		t.Fatal("ALPHA should have been pulled in")
+		return nil
+	}
+
+	first, err := ParseAbnf("doc = ALPHA")
+	if err != nil {
+		t.Fatalf("ParseAbnf: %v", err)
+	}
+	alphaFirst := alphaOf(first)
+	alphaFirst.Sp = &bnf.SrcSpan{S: 999, E: 1000, R: 42, C: 1}
+	alphaFirst.Alts[0][0].Sp = &bnf.SrcSpan{S: 999, E: 1000, R: 42, C: 1}
+
+	second, err := ParseAbnf("doc = ALPHA")
+	if err != nil {
+		t.Fatalf("ParseAbnf: %v", err)
+	}
+	alphaSecond := alphaOf(second)
+	if alphaFirst == alphaSecond {
+		t.Fatal("core rules must not be shared between parses")
+	}
+	if alphaSecond.Sp != nil {
+		t.Errorf("a mutation leaked between parses: %+v", alphaSecond.Sp)
+	}
+	if alphaSecond.Alts[0][0].Sp != nil {
+		t.Errorf("an element mutation leaked between parses: %+v",
+			alphaSecond.Alts[0][0].Sp)
+	}
+}
+
 // A span whose offset and row/column disagree is worse than no span: a
 // consumer picking either one gets a different answer.
 func TestSpanRowAndColumnAgreeWithTheOffset(t *testing.T) {
@@ -187,6 +241,31 @@ func TestCompileErrorCarriesARange(t *testing.T) {
 	}
 	if sp.R != 2 {
 		t.Errorf("row = %d, want 2", sp.R)
+	}
+}
+
+// The fixture's `<free>` alternative is itself a compile failure, since
+// prose may only stand alone as the whole definition of a built-in lexer
+// token. It is one of the failures the front-end gives a range, and the
+// range has to cover the prose rather than the whole rule: the shared
+// compiler falls back to the production span when the element carries
+// none, so a front-end that spanned productions only would still answer
+// a range here, just a useless one. Mirrors the TS "ranges a
+// prose-in-expression failure too".
+func TestProseInExpressionFailureCarriesARange(t *testing.T) {
+	_, err := Abnf(spanSrc, nil)
+	if err == nil {
+		t.Fatal("expected a prose-in-expression failure")
+	}
+	var emit *bnf.EmitError
+	if !errors.As(err, &emit) {
+		t.Fatalf("expected a *bnf.EmitError, got %T: %v", err, err)
+	}
+	if emit.Sp == nil {
+		t.Fatalf("prose-in-expression failure carried no range: %v", err)
+	}
+	if got := spanSrc[emit.Sp.S:emit.Sp.E]; got != "<free>" {
+		t.Errorf("range covers %q, want %q", got, "<free>")
 	}
 }
 
