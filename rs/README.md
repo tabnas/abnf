@@ -279,6 +279,12 @@ in the surface:
   `tn.abnf` member to the engine; Rust has no such thing, so the install
   path is the free function `abnf(&mut parser, src, opts)` and the
   convert-only path is `abnf_convert(src, opts)`.
+- **There is no command line tool.** TypeScript ships `tabnas-abnf` and
+  the Go module ships `cmd/tabnas-abnf`; this crate is a library only,
+  and ships no binary target. Everything either command does is a call
+  to `abnf_convert`, `abnf` or `abnf_compile`, so the gap is a packaging
+  decision rather than a capability one. `tests/compile_test.rs` covers
+  the pure-data path a command would print.
 - **Source spans count bytes.** A span's offsets are in the units the
   engine's own tokens use, and this engine counts bytes where TypeScript
   counts UTF-16 code units. Slicing the original source with a span
