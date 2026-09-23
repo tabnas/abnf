@@ -524,9 +524,15 @@ func abnfParserOptions() tabnas.Options {
 		TokenSet: map[string][]string{
 			"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI", "#PV"},
 		},
+		// ABNF uses `;` to start a line comment. Override the engine's
+		// default `hash` def (which used `#`) and disable the other comment
+		// styles so `//` and `/* */` aren't confused with the alternation
+		// operator. Mirrors ts/src/converter.ts. Line, Lex and EatLine are
+		// all *bool, so each is stated explicitly here, as TS states
+		// `line: true`, rather than left nil to fall back to a default.
 		Comment: &tabnas.CommentOptions{
 			Def: map[string]*tabnas.CommentDef{
-				"hash":  {Line: true, Start: ";", Lex: &boolTrue, EatLine: &f},
+				"hash":  {Line: &boolTrue, Start: ";", Lex: &boolTrue, EatLine: &f},
 				"slash": nil,
 				"multi": nil,
 			},
