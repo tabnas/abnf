@@ -178,10 +178,6 @@ that order exists to close.
   can be reached, rather than by a test under `tests/`. Do not delete
   that unit test on the grounds that an integration test covers it:
   none can.
-- **A probe and retry keeps the node it built**, where the canonical
-  runtime answers an empty one. That is the ENGINE's answer, not this
-  crate's: the emitted `GrammarSpec` is byte identical in all three
-  runtimes. Recorded in `../DIVERGENCE.md` as entry 5.
 
 ## What this crate does not have
 

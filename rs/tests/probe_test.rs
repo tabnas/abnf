@@ -152,3 +152,47 @@ fn probe_authority() {
         assert!(parser.parse(input).is_ok(), "expected accept {input:?}");
     }
 }
+
+/// The TREE a probe and retry builds, and not only what it accepts.
+///
+/// This was `../DIVERGENCE.md` entry 5 until tabnas/parser a801621
+/// ("keep the parent's child link on the rule it pushed", merged in
+/// tabnas/parser#206). The Rust engine refreshed the parent's child link
+/// from whichever rule POPPED, so `@capture$` merged the last link of the
+/// replacement chain and this port answered the whole subtree, where
+/// TypeScript and Go answer an empty node. The engine now writes the link
+/// in the push arm only, as the other two do, and all three agree.
+///
+/// Pinned here so the agreement cannot quietly regress. The empty node is
+/// what the canonical runtime builds today, with `builtins` both off and
+/// on. If the engine or the shared compiler ever makes the retry keep its
+/// subtree, this fails first, and the new answer belongs in the
+/// TypeScript and Go probe suites as well as here.
+#[test]
+fn probe_retry_tree_matches_the_canonical_runtime() {
+    let src = "g = [ user \"@\" ] host\nuser = 1*ALPHA\nhost = 1*ALPHA";
+    for builtins in [false, true] {
+        let options = tabnas_abnf::AbnfConvertOptions {
+            builtins,
+            ..tabnas_abnf::AbnfConvertOptions::default()
+        };
+        let spec = abnf_convert(src, Some(&options)).expect("compiles");
+        let parser = common::install(&spec).expect("installs");
+        for input in ["ab@cd", "abc"] {
+            let tree = parser.parse(input).expect("parses").to_json();
+            assert_eq!(
+                tree,
+                serde_json::json!({ "rule": "g", "src": "", "kids": [] }),
+                "builtins={builtins}, input {input:?}"
+            );
+        }
+    }
+
+    let parser = engine_for(AUTHORITY_GRAMMAR).expect("compiles");
+    let tree = parser.parse("user@example.com").expect("parses").to_json();
+    assert_eq!(
+        tree,
+        serde_json::json!({ "rule": "authority", "src": "", "kids": [] }),
+        "authority"
+    );
+}

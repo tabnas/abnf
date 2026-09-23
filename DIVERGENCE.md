@@ -7,7 +7,10 @@ first column; nothing here is inferred from reading the source.
 
 Each entry names who owns the repair. An entry that closes must be
 deleted, and the test that pins it fails until it is, so this file
-cannot quietly go stale.
+cannot quietly go stale. The entries left keep their numbers, because
+code cites them by number: entry 5, where a probe and retry kept the
+tree it built in Rust alone, closed when tabnas/parser#206 aligned the
+Rust engine with the other two, and was deleted.
 
 The conformance dial is NOT a divergence. All three runtimes accept and
 reject the same grammars in the third-party corpus, and every grammar
@@ -26,12 +29,11 @@ re-measured on 2026-09-21 and now agrees.
 
 ## Where the divergences are pinned
 
-There is no executable register in `test/spec` for these. Most are
+There is no executable register in `test/spec` for these. Half are
 invisible to a grammar-to-output fixture, which is what every file there
-compares: two concern the shape of a value no fixture reads, one
-concerns the API rather than any value, and one is about the parse tree
-a compiled grammar builds rather than about the grammar. So each one is
-pinned by a Rust test in `rs/tests/divergence_test.rs`, asserted in BOTH
+compares: two concern the shape of a value no fixture reads, and one
+concerns the API rather than any value. So each one is pinned by a Rust
+test in `rs/tests/divergence_test.rs`, asserted in BOTH
 directions: the behaviour recorded here, and the behaviour the canonical
 runtime has, so a port that starts agreeing fails as loudly as one that
 starts disagreeing.
@@ -40,8 +42,8 @@ starts disagreeing.
 entry below is measured by executing the canonical implementation:
 `rs/tests/divergence_test.rs` starts `node` on `ts/dist/abnf.js` once per
 run and compares each TypeScript cell in the tables below against what
-comes back. All seven entries are measured that way, the surrogate,
-span, nesting, API, probe, reversed-range and literal-size entries alike,
+comes back. All six entries are measured that way, the surrogate,
+span, nesting, API, reversed-range and literal-size entries alike,
 and every TypeScript cell in every table below has an assertion behind
 it. Each one is written so that the CANONICAL behaviour changing is what
 fails, and the failure names the entry, so an entry that closes from the
@@ -218,36 +220,6 @@ element belonged to was refused. Since tabnas/abnf#75 the recorder rides
 in the parse's own meta, as `rs/src/parser_abnf.rs` keeps it beside the
 parse, and the two sources are rows of
 `test/spec/alignment-abnf-errors.tsv` rather than a sentence here.
-
-## 5. A probe and retry keeps the node it built
-
-An optional prefix whose vocabulary overlaps what follows it is resolved
-with a probe and a retry pass. The canonical runtime discards whatever
-the retried alternative built and answers an EMPTY node; this port keeps
-it.
-
-| input | TypeScript | Go | Rust |
-|---|---|---|---|
-| `g = [ user "@" ] host`, `user = 1*ALPHA`, `host = 1*ALPHA`, parsing `ab@cd` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: 'ab@cd', kids: [user 'ab', host 'cd']}` |
-| the same grammar, parsing `abc` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: '', kids: []}` | `{rule: 'g', src: 'abc', kids: [host 'abc']}` |
-| RFC 3986 `authority`, parsing `user@example.com` | `{rule: 'authority', src: '', kids: []}` | `{rule: 'authority', src: '', kids: []}` | the full tree, `userinfo` and `host` under it |
-
-**Reason.** Not this crate. The `GrammarSpec` the three compilers emit
-for each of those grammars is BYTE IDENTICAL, and the difference shows
-with `builtins` both off, where the retry hooks are closures the shared
-compiler registers, and on, where they are the engine's own `$`
-builtins. What differs is what the engine does with the node across a
-rewind.
-
-Every runtime ACCEPTS and REJECTS the same inputs here, which is all
-`ts/test/probe.test.js`, `go/probe_test.go` and `rs/tests/probe_test.rs`
-assert, so this stayed invisible until the trees were compared.
-
-**Owner.** The engine port at `../../parser/rs`, with the shared
-compiler at `../../bnf/rs` as the other candidate. A consumer of this
-crate reads the difference as a populated tree where the canonical
-runtime gives an empty one, so it is recorded here until the engine
-settles which answer is right.
 
 ## 6. A reversed numeric range is refused in the regex engine's words
 
