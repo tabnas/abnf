@@ -606,10 +606,9 @@ A **Go job runs too** (`ubuntu`/`macos`): `run-ts` and `run-go` both
 default to `true` and this repo overrides neither.
 
 The Rust gate is **not** part of that workflow. It is a standalone
-workflow staged at [`ci/workflows/rust.yml`](ci/workflows/rust.yml)
-under admin ADR-8, running [`ci/rust/run.sh`](ci/rust/run.sh); a session
-cannot write `.github/workflows`, so a maintainer promotes it. See
-[`ci/README.md`](ci/README.md).
+workflow, [`.github/workflows/rust.yml`](.github/workflows/rust.yml),
+which clones the `parser`, `bnf` and `support` main branches beside this
+checkout and runs [`ci/rust/run.sh`](ci/rust/run.sh) under the MSRV.
 
 ## Releasing
 
