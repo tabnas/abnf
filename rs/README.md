@@ -256,16 +256,7 @@ compiler can finish, and agreed on all 66; that comparison needs a built
 TypeScript checkout, so it is a procedure a maintainer repeats rather
 than a committed test.
 
-One difference is in what a compiled grammar BUILDS, and the rest are
-in the surface:
-
-- **A probe and retry keeps the node it built.** Where an optional
-  prefix overlaps what follows it, the canonical runtime discards what
-  the retried alternative built and answers an empty node, and this port
-  answers the tree. Every runtime accepts and rejects the same inputs,
-  and the emitted grammar is byte identical, so the difference is in the
-  engine rather than in this crate. `DIVERGENCE.md` records it with the
-  measurements and names who owns the repair.
+The differences are in the surface:
 
 - **A failure is returned, never raised.** `parse_abnf`, `abnf_convert`,
   `abnf_compile` and `abnf` all answer a `Result`. The 35 diagnostics

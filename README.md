@@ -337,11 +337,8 @@ on a pinned row without going red. See
 
 Behaviour no row reaches can still differ, and each difference found so
 far is recorded with its measurement in
-[`DIVERGENCE.md`](DIVERGENCE.md). The parse tree is one: for a probe and
-retry grammar such as `g = [ user "@" ] host`, and for RFC 3986
-`authority`, `ts/` and `go/` answer an empty node where `rs/` answers
-the tree it built. Read that file before relying on any two of them
-agreeing about something no fixture row pins.
+[`DIVERGENCE.md`](DIVERGENCE.md). Read that file before relying on any
+two of them agreeing about something no fixture row pins.
 
 | Path | Description |
 |---|---|

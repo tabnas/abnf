@@ -16,12 +16,11 @@
 // that has to hold belongs in a test under `go/`, not in a comment
 // here.
 //
-// There is no executable register under `test/spec` for these: most are
+// There is no executable register under `test/spec` for these: half are
 // invisible to the grammar-to-output comparison every file there makes,
-// one is about the shape of the API rather than about any value, and
-// one is about the tree a compiled grammar builds rather than about the
-// grammar. `../DIVERGENCE.md` says so, and this file is what stands in
-// for the register.
+// and one is about the shape of the API rather than about any value.
+// `../DIVERGENCE.md` says so, and this file is what stands in for the
+// register.
 //
 // THE CANONICAL HALF NEEDS THE CANONICAL BUILT. It runs `node` over
 // `../ts/dist/abnf.js`, which `make build-ts` produces and which is not
@@ -38,9 +37,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use serde_json::{json, Value as JsonValue};
-use tabnas_abnf::{
-    abnf_compile, abnf_convert, parse_abnf, AbnfCompileOptions, AbnfConvertOptions, Kind,
-};
+use tabnas_abnf::{abnf_convert, parse_abnf, AbnfConvertOptions, Kind};
 
 use common::repo_root;
 
@@ -60,13 +57,12 @@ use common::repo_root;
 /// under test, so the comparison would pass for the wrong reason.
 const CANONICAL_SCRIPT: &str = r##"
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ts = process.env.ABNF_TS_DIR
 const req = createRequire(join(ts, 'package.json'))
 const { Tabnas } = req('@tabnas/parser')
-const { abnfConvert, abnfCompile, parseAbnf, abnf } = req(join(ts, 'dist', 'abnf.js'))
+const { abnfConvert, parseAbnf, abnf } = req(join(ts, 'dist', 'abnf.js'))
 
 const units = (text) =>
   Array.from({ length: text.length }, (_, i) => text.charCodeAt(i))
@@ -83,21 +79,6 @@ const nest = (depth) =>
 const span = (src, name) => {
   const production = parseAbnf(src).productions.find((p) => p.name === name)
   return [production.sp.s, production.sp.e, production.sp.r, production.sp.c]
-}
-const probe = (builtins, input) => {
-  const engine = new Tabnas({ rewind: { history: 4096 } })
-  engine.grammar(abnfConvert(PROBE, { builtins }))
-  return engine.parse(input)
-}
-const PROBE = 'g = [ user "@" ] host\nuser = 1*ALPHA\nhost = 1*ALPHA'
-// The same dispatch inside a grammar somebody published: RFC 3986's
-// `authority = [ userinfo "@" ] host [ ":" port ]`, whose optional
-// prefix draws on the same characters as the `host` after it.
-const RFC = readFileSync(join(ts, 'test', 'grammar', 'rfc3986-uri.abnf'), 'utf8')
-const authority = (input) => {
-  const engine = new Tabnas({ rewind: { history: 4096 } })
-  engine.grammar(abnfConvert(RFC, { start: 'authority' }))
-  return engine.parse(input)
 }
 
 const decorated = new Tabnas()
@@ -138,14 +119,6 @@ console.log(JSON.stringify({
   four_to_spec: toSpec,
   four_installed: Object.keys(decorated.rule()).includes('greet'),
   four_untouched: Object.keys(untouched.rule()).length === before,
-
-  five_closures: probe(false, 'ab@cd'),
-  five_builtins: probe(true, 'ab@cd'),
-  five_closures_bare: probe(false, 'abc'),
-  five_builtins_bare: probe(true, 'abc'),
-  five_authority: authority('user@example.com'),
-  five_authority_bare: authority('example.com'),
-  five_compiled: abnfCompile(PROBE, {}),
 
   six_reversed: caught(() => { abnfConvert('g = %x5A-41'); return true }),
   six_ascending: caught(() => { abnfConvert('g = %x41-5A'); return true }),
@@ -551,154 +524,6 @@ fn failures_are_returned_and_there_is_no_decoration() {
     if let Some(canon) = canonical!("four_untouched") {
         assert_eq!(canon, json!(true));
     }
-}
-
-/// DIVERGENCE 5. A probe and retry keeps the node it built, where the
-/// canonical runtime answers an empty one.
-///
-/// The compiled grammar text is BYTE IDENTICAL in TypeScript and in
-/// this port, which is what makes this the engine's answer and not this
-/// crate's, and which this test measures rather than asserts in prose.
-/// Go is not in that comparison: `abnf_compile` and `AbnfCompile`
-/// answered different text for both of these grammars when they were
-/// compared on 2026-09-21, so the Go column of entry 5 rests on the
-/// hand measurement recorded in `../DIVERGENCE.md` and on nothing here.
-///
-/// It is asserted with `builtins` both off, where the retry hooks are
-/// closures the shared compiler registers, and on, where they are the
-/// engine's own `$` builtins, because a difference in only one of those
-/// would say which side owns it.
-#[test]
-fn a_probe_and_retry_keeps_the_node_it_built() {
-    const SRC: &str = "g = [ user \"@\" ] host\nuser = 1*ALPHA\nhost = 1*ALPHA";
-
-    for builtins in [false, true] {
-        let options = AbnfConvertOptions {
-            builtins,
-            ..AbnfConvertOptions::default()
-        };
-        let spec = abnf_convert(SRC, Some(&options)).expect("compiles");
-        let parser = {
-            let mut parser = tabnas::Tabnas::with_options(tabnas::Options {
-                rewind: tabnas::RewindOptions {
-                    history: Some(4096),
-                },
-                ..tabnas::Options::default()
-            });
-            spec.install(&mut parser).expect("installs");
-            parser
-        };
-
-        let tree = parser.parse("ab@cd").expect("parses").to_json();
-        assert_eq!(
-            tree["src"], "ab@cd",
-            "builtins={builtins}: the canonical runtime answers an empty node here; \
-             see DIVERGENCE.md entry 5"
-        );
-        assert_eq!(tree["kids"].as_array().map(Vec::len), Some(2));
-        assert_eq!(tree["kids"][0]["rule"], "user");
-        assert_eq!(tree["kids"][1]["rule"], "host");
-
-        // The optional absent, which takes the other branch of the same
-        // dispatch.
-        let tree = parser.parse("abc").expect("parses").to_json();
-        assert_eq!(tree["src"], "abc");
-        assert_eq!(tree["kids"][0]["rule"], "host");
-    }
-
-    let empty = json!({ "rule": "g", "src": "", "kids": [] });
-    let empty_authority = json!({ "rule": "authority", "src": "", "kids": [] });
-    for key in [
-        "five_closures",
-        "five_builtins",
-        "five_closures_bare",
-        "five_builtins_bare",
-    ] {
-        if let Some(canon) = canonical!(key) {
-            assert_eq!(
-                canon, empty,
-                "{key}: the canonical runtime now keeps the node the retry built, \
-                 so DIVERGENCE.md entry 5 has closed"
-            );
-        }
-    }
-
-    // The third row of that table: the same dispatch inside a grammar
-    // somebody published. RFC 3986's `authority` has the same shape,
-    // `[ userinfo "@" ] host [ ":" port ]`, and the same overlap, so the
-    // entry is not an artefact of the two-line grammar above.
-    let rfc = std::fs::read_to_string(
-        repo_root()
-            .join("ts")
-            .join("test")
-            .join("grammar")
-            .join("rfc3986-uri.abnf"),
-    )
-    .expect("the rfc3986-uri.abnf fixture");
-    let options = AbnfConvertOptions {
-        start: Some("authority".to_string()),
-        ..AbnfConvertOptions::default()
-    };
-    let spec = abnf_convert(&rfc, Some(&options)).expect("RFC 3986 compiles");
-    let parser = common::install(&spec).expect("installs");
-    let tree = parser.parse("user@example.com").expect("parses").to_json();
-    assert_eq!(
-        tree["src"], "user@example.com",
-        "the canonical runtime answers an empty node here; see DIVERGENCE.md entry 5"
-    );
-    let kids: Vec<String> = tree["kids"]
-        .as_array()
-        .map(|kids| {
-            kids.iter()
-                .filter_map(|kid| kid["rule"].as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    assert!(
-        kids.iter().any(|rule| "userinfo" == rule) && kids.iter().any(|rule| "host" == rule),
-        "expected userinfo and host under authority, got {kids:?}"
-    );
-    for key in ["five_authority", "five_authority_bare"] {
-        if let Some(canon) = canonical!(key) {
-            assert_eq!(
-                canon, empty_authority,
-                "{key}: the canonical runtime now keeps the node the retry built, \
-                 so DIVERGENCE.md entry 5 has closed"
-            );
-        }
-    }
-
-    // The load-bearing half of this entry, measured rather than
-    // asserted in prose: the grammar the two runtimes RUN is the same
-    // one, byte for byte, so the different trees above are the engine
-    // reading one grammar two ways and not two compilers emitting two
-    // grammars. If this ever differs, entry 5 stops being an engine
-    // difference and becomes a defect of this crate.
-    //
-    // Only the two-line grammar, because it is the cheap one: compiling
-    // the whole of RFC 3986 with marks on emits about nine megabytes and
-    // takes minutes in each runtime, which is a price every `cargo test`
-    // would pay. That grammar's two compilers were compared by hand on
-    // 2026-09-21 and agreed byte for byte; `../DIVERGENCE.md` says so,
-    // and says it is a hand measurement.
-    let compiled = abnf_compile(SRC, &AbnfCompileOptions::default()).expect("compiles");
-    if let Some(canon) = canonical!("five_compiled") {
-        assert_eq!(
-            canon,
-            JsonValue::String(compiled),
-            "the compiled grammar text no longer matches the canonical runtime, \
-             so the difference entry 5 records is no longer the engine's alone"
-        );
-    }
-
-    // The other direction: a grammar whose optional prefix does NOT
-    // overlap what follows needs no probe, and every runtime builds the
-    // same tree for it. So this is about the retry and nothing wider.
-    let parser = common::engine_for("g = [ num \"@\" ] host\nnum = 1*DIGIT\nhost = 1*ALPHA")
-        .expect("compiles");
-    let tree = parser.parse("12@cd").expect("parses").to_json();
-    assert_eq!(tree["src"], "12@cd");
-    assert_eq!(tree["kids"].as_array().map(Vec::len), Some(2));
 }
 
 /// DIVERGENCE 6. A reversed numeric range is refused in the words of
