@@ -40,10 +40,12 @@ drift from the other:
 | `ts/test/docs.test.js` | `make test` | the banned list again, the no-em-dash rule, the first-person rules, the exclamation ration, and no emoji |
 | `ts/scripts/vale-counts.cjs` | `make prose` | that every count in `.vale.ini`, and the total below, are what Vale reports |
 
-The gated set is the reader-facing one: the language-neutral pages under
-`doc/`, the four Diátaxis kinds under `ts/doc/` and `go/doc/`, and the
-three package READMEs. The Rust-port series, the feasibility reports and
-the defect ledgers are working documents, and they are out.
+The gated set is the reader-facing one: the four Diátaxis kinds under
+`ts/doc/` and `go/doc/`, the root README, and the three package
+READMEs. The design notes under `docs/design/`, `DIVERGENCE.md` and the
+agent guides (`AGENTS.md`, `CLAUDE.md` and the nested `AGENTS.md`
+files) are working documents, and they are out, as is
+`go/clib/README.md`, whose text is stamped from an admin template.
 
 **Four checks live in the local gate rather than in Vale, and the reason
 is capability, not preference.**
@@ -315,9 +317,10 @@ that names a thing.
 ## Code snippets
 
 A fenced JavaScript or Go example that states a result carries that
-result as a `// =>` comment, and `ts/test/doc-examples.test.js` executes
-it. A snippet that cannot be executed says why in one sentence rather
-than being left to look executable.
+result as a `// =>` comment. `ts/test/doc-examples.test.js` executes the
+JavaScript ones; it does not read Go fences. A snippet that cannot be
+executed says why in one sentence rather than being left to look
+executable.
 
 ## Terminology
 
