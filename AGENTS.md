@@ -370,11 +370,15 @@ roughly 2.7x the budget on the host it was first measured on (four shared
 cores), and by 2026-09-24 GitHub's runners landed on both sides of 60 s on
 the same tree, so pinning it as `budget-exceeded` made the Rust gate fail
 at random, and deleting the row would only have flipped which runs fail.
-Its kind is therefore `budget-timing`: the Rust suite leaves this
-grammar's budget outcome unasserted, and still scores it like every other
-invalid grammar, so accepting it fails as usual. The kind is refused for
-anything but an invalid-half grammar, and for a key also pinned
-`budget-exceeded`. Fixing the engine quadratic is what closes the row.
+Its kind is therefore `budget-timing`, which waives exactly one outcome:
+a stop on the 60 s wall clock. The child reports the 256 MB resident cap
+with its own exit code, so a memory blow-up on this grammar still fails as
+a new over-budget entry. The grammar is still scored like every other
+invalid one, so accepting it fails as usual. The row expires by itself:
+if the grammar finishes in under half the budget, the suite fails and
+asks for the row to be deleted. The kind is refused for anything but an
+invalid-half grammar, and for a key also pinned `budget-exceeded`. Fixing
+the engine quadratic is what closes the row.
 
 The Rust column was measured on 2026-09-21, by the same instrument, and
 re-measured the same day once that instrument began reading the budget

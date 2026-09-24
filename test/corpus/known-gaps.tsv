@@ -17,7 +17,7 @@ go	mutation-leak	dangling-alt	49	appended `bad-rule = "a" /` accepted; alternati
 go	mutation-leak	digit-leading-rulename	1	appended `9bad-rule = "x"` accepted; rulename = ALPHA *(ALPHA / DIGIT / "-")
 rust	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s
 rust	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s
-rust	budget-timing	ex_abnf/test/resources/RFC5322.abnf	1	near the 60s budget in the debug test build, so a given host may finish it or not (CI runners have done both on one tree); all three reject it, TS in 13s and Go in 16s. Delete this row once the engine quadratic in rs/AGENTS.md is fixed
+rust	budget-timing	ex_abnf/test/resources/RFC5322.abnf	1	near the 60s budget in the debug test build, so a given host may finish it or not (CI runners have done both on one tree); all three reject it, TS in 13s and Go in 16s. Only a wall-clock stop is waived; the suite asks for this row's deletion once it finishes in under 30s
 rust	valid-not-accepted	go-abnf/testdata/void.abnf	1	rejected: abnf: no productions found
 rust	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded
 rust	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded
