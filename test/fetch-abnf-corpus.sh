@@ -33,10 +33,18 @@ set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)/abnf-corpus"
 
+# The release each pin corresponds to, for comparison against
+# `git ls-remote --tags <url>`. The commits are the source of truth:
+#   ex_abnf           v0.3.0
+#   go-abnf           v0.5.1
+#   node-abnf         v5.0.4-2-gff5965f: two dev-dependency commits past
+#                     v5.0.4, with .abnf files identical to v5.0.4's
+#   tree-sitter-abnf  1.0.0
+#
 # name|url|pinned commit
 CORPUS='
 ex_abnf|https://github.com/marcelog/ex_abnf|49bcca0fc736b239b44b200a1ae543c878ad8538
-go-abnf|https://github.com/pandatix/go-abnf|c5a80352df0a5efe44f11a73a2322a9b0fdbc661
+go-abnf|https://github.com/pandatix/go-abnf|fd3f0ab170acd8626436cdc64f77f89e969230e2
 node-abnf|https://github.com/hildjj/node-abnf|ff5965f960fed68f231e25b24ec31c13b8d00fc8
 tree-sitter-abnf|https://github.com/jmitchell/tree-sitter-abnf|f68bb6e3cfcc2a3eebf11f47e27efffb128c001f
 '
