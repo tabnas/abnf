@@ -355,21 +355,26 @@ but in **161s** in the Rust suite, which runs the unoptimised test
 profile and pays the engine quadratic `rs/AGENTS.md` records under "A
 long single rule is quadratic". So it exceeds the same 60s budget the
 other two clear, and the Rust half now counts it as over budget rather
-than as a rejection, which is what the row
-`rust budget-exceeded ex_abnf/test/resources/RFC5322.abnf` in
-`known-gaps.tsv` pins. It read 611/661 until 2026-09-21 only because
-`rs/tests/conformance_test.rs` scored the invalid half on `ok` alone: a
+than as a rejection. The row
+`rust budget-timing ex_abnf/test/resources/RFC5322.abnf` in
+`known-gaps.tsv` records that (see below). It read 611/661 until
+2026-09-21 only because `rs/tests/conformance_test.rs` scored the invalid half on `ok` alone: a
 child stopped by its own watchdog answers `{budget: true, ok: false}`,
 which is indistinguishable from a refusal unless the budget flag is
 read.
 
 **That row is the one timing-sensitive entry in `known-gaps.tsv`**, and
 it is the only one that is: the other two are Paull's blow-ups that
-never finish at all, while this one finishes at roughly 2.7x the budget
-on the host it was measured on (four shared cores). A host fast enough
-to bring it under 60 s will fail the suite with "If you FIXED one,
-delete its row", and deleting it is then the right answer. Fixing the
-engine quadratic is the other way it closes.
+never finish at all, while this one sits near the budget. It measured at
+roughly 2.7x the budget on the host it was first measured on (four shared
+cores), and by 2026-09-24 GitHub's runners landed on both sides of 60 s on
+the same tree, so pinning it as `budget-exceeded` made the Rust gate fail
+at random, and deleting the row would only have flipped which runs fail.
+Its kind is therefore `budget-timing`: the Rust suite leaves this
+grammar's budget outcome unasserted, and still scores it like every other
+invalid grammar, so accepting it fails as usual. The kind is refused for
+anything but an invalid-half grammar, and for a key also pinned
+`budget-exceeded`. Fixing the engine quadratic is what closes the row.
 
 The Rust column was measured on 2026-09-21, by the same instrument, and
 re-measured the same day once that instrument began reading the budget

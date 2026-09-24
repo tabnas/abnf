@@ -633,6 +633,10 @@ fn conformance() {
     let mut pinned_valid = BTreeSet::new();
     let mut pinned_invalid = BTreeSet::new();
     let mut pinned_budget = BTreeSet::new();
+    // `budget-timing`: an invalid-half grammar whose compile time sits near
+    // the budget, so whether it finishes depends on the host. Its budget
+    // outcome is not asserted either way; everything else about it is.
+    let mut pinned_timing: BTreeMap<String, String> = BTreeMap::new();
     let mut pinned_leaks: BTreeMap<String, usize> = BTreeMap::new();
     for row in load_corpus_tsv("known-gaps.tsv") {
         if "rust" != row[0] {
@@ -648,6 +652,9 @@ fn conformance() {
             "budget-exceeded" => {
                 pinned_budget.insert(row[2].clone());
             }
+            "budget-timing" => {
+                pinned_timing.insert(row[2].clone(), row[4].clone());
+            }
             "mutation-leak" => {
                 let count = row[3].parse::<usize>().unwrap_or_else(|_| {
                     panic!(
@@ -659,6 +666,17 @@ fn conformance() {
             }
             other => panic!("known-gaps.tsv row {:?} has unknown kind {other:?}", row[2]),
         }
+    }
+    for key in pinned_timing.keys() {
+        assert!(
+            invalid.contains(key),
+            "known-gaps.tsv: budget-timing {key:?} is not an invalid-half grammar in manifest.tsv; \
+             only a grammar every runtime rejects may have its budget outcome left open"
+        );
+        assert!(
+            !pinned_budget.contains(key),
+            "known-gaps.tsv: {key:?} is pinned both budget-exceeded and budget-timing; keep one"
+        );
     }
 
     assert!(
@@ -684,6 +702,13 @@ fn conformance() {
     let mut note = |kind: &str, key: &str, count: usize, text: &str| {
         recorded.push(format!("rust\t{kind}\t{key}\t{count}\t{text}"));
     };
+    // A budget-timing row is a declaration about the host, not a measurement,
+    // so recording carries it over unchanged whichever way this run went.
+    if record {
+        for (key, text) in &pinned_timing {
+            note("budget-timing", key, 1, text);
+        }
+    }
 
     let mut valid_gaps = BTreeSet::new();
     let mut invalid_gaps = BTreeSet::new();
@@ -768,7 +793,7 @@ fn conformance() {
         if Score::Budget == score {
             over_budget.insert(rel.clone());
             invalid_over_budget.insert(rel.clone());
-            if record {
+            if record && !pinned_timing.contains_key(rel) {
                 note(
                     "budget-exceeded",
                     rel,
@@ -865,7 +890,14 @@ fn conformance() {
     assert_set_equal(
         &mut failures,
         "grammars the compiler cannot finish within 256MB / 60s",
-        &over_budget,
+        // A budget-timing grammar may land on either side of the budget on
+        // a given host, so it is left out here; it is still scored above
+        // like every invalid grammar, and accepting it fails as usual.
+        &over_budget
+            .iter()
+            .filter(|rel| !pinned_timing.contains_key(*rel))
+            .cloned()
+            .collect(),
         &pinned_budget,
     );
     assert_set_equal(
