@@ -11,15 +11,5 @@ This directory exists because session credentials cannot write
 
 ## Pending
 
-- **`workflows/rust.yml`** — the Rust gate: `ci/rust/run.sh` on the
-  crate in `rs/`, which checks formatting, builds, runs the tests and
-  the doctests, runs clippy with `-D warnings`, and compares
-  `rs/Cargo.lock` against `rs/Cargo.toml` with each sibling crate's own
-  version exempted.
-
-  It needs the three sibling checkouts (`parser`, `bnf` and `support`),
-  which it clones, and the third-party ABNF corpus, which the script
-  fetches because the conformance suite fails rather than skips without
-  it. No secrets. `make test-rs` runs the fast inner loop locally and
-  `ci/rust/run.sh` runs the identical gate, so promoting this adds the
-  hosted run rather than the checks themselves.
+Nothing is pending. `docs.yml` and `rust.yml`, the last workflows
+staged here, were promoted to `.github/workflows/` on 2026-09-22.
