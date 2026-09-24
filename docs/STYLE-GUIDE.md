@@ -36,7 +36,7 @@ drift from the other:
 
 | Gate | Runs | Checks |
 |---|---|---|
-| `make prose` (Vale) | `ci/workflows/docs.yml` (staged) | spelling, Google's conventions, and the banned list, at the levels set in `.vale.ini` |
+| `make prose` (Vale) | `.github/workflows/docs.yml` | spelling, Google's conventions, and the banned list, at the levels set in `.vale.ini` |
 | `ts/test/docs.test.js` | `make test` | the banned list again, the no-em-dash rule, the first-person rules, the exclamation ration, and no emoji |
 | `ts/scripts/vale-counts.cjs` | `make prose` | that every count in `.vale.ini`, and the total below, are what Vale reports |
 
@@ -66,7 +66,7 @@ is capability, not preference.**
 
 **A Google rule sitting below error level was tried at error first and
 found wrong for these pages.** `.vale.ini` records what each produced on
-a clean run over the gated set: 457 alerts across 12 files. Those
+a clean run over the gated set: 609 alerts across 12 files. Those
 numbers were written by hand once, and this sentence and the one in
 `.vale.ini` drifted apart from each other and from a run.
 `node ts/scripts/vale-counts.cjs` now reads both against a live Vale run
@@ -74,11 +74,10 @@ and fails on any difference; `--write` re-measures. A rule switched off
 is measured with it switched back on, because the count is the evidence
 for switching it off.
 
-**The Vale gate is staged, not yet wired.** `ci/workflows/docs.yml`
-follows this repository's convention for proposed workflows (see
-`ci/README.md`): review it and move it to `.github/workflows/` to
-activate. `make prose` runs the same check locally today, and
-`ts/test/docs.test.js` runs in `make test` now.
+**The Vale gate runs in CI.** `.github/workflows/docs.yml` runs Vale and
+the recorded-count check on every push and pull request that changes a
+gated page or the Vale configuration. `make prose` runs the same two
+checks locally, and `ts/test/docs.test.js` runs in `make test`.
 
 ## The structure: Diátaxis, enforced by placement
 
@@ -102,10 +101,10 @@ explanation) but the normative statement lives in the reference and
 everything else links to it.
 
 **The two documented runtimes carry the same set.** A page present under
-`ts/doc/` and missing under `go/doc/` is a gap, and `gated-docs.cjs`
-throws on a declared page that is not on disk, so the gap shows up as a
-missing gate rather than a crash. A page only one port has is a
-deliberate exception and says so in its own opening lines.
+`ts/doc/` and missing under `go/doc/` is a gap. `gated-docs.cjs` throws on
+a declared page that is not on disk, so a gated page that is deleted or
+renamed fails the gate rather than dropping out of it. A page only one
+port has is a deliberate exception and says so in its own opening lines.
 
 The Rust port is the deliberate exception at the set level: it documents
 itself in `rs/README.md` alone, which is gated like the other READMEs,
@@ -377,12 +376,15 @@ notations" is. A rule demoted without that note reads later as an
 oversight, and gets re-promoted by somebody repeating the work.
 
 To accept a word the spelling gate does not know, add it to `accept.txt`
-in the same directory, one stem at a time. Never add a suffix pattern:
-`\w+ise` accepts `madeupise` too, and punches a hole through the gate the
-file exists to make usable. Write a case pair as one regular expression
-(`[Tt]abnas`), because two plain lines make Vale enforce one spelling
-over the other, and it will then report the directory `ts/` as a
-misspelling of `TS`.
+in the same directory, one word at a time. An entry matches a whole word,
+so `[Ee]nder` does not accept `enders`: a plural or a possessive is an
+entry of its own. Never add a suffix pattern: `\w+ise` accepts `madeupise`
+too, and punches a hole through the gate the file exists to make usable.
+Write a case pair as one regular expression (`[Tt]abnas`), because two
+plain lines make Vale enforce one spelling over the other. A name also
+written in lower case, as a package name is, puts its capitals in the same
+entry (`(?:[Jj]son|JSON)`); a name with one correct case is one exact
+entry (`TS`, `DOMPurify`), so Vale reports any other case of it.
 
 ## The fleet
 

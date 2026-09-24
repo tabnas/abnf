@@ -42,7 +42,7 @@ sweep, an install or a fetch, a release, a wait on CI, a benchmark, a
 script or loop you write, and anything sent to the background.
 
 - **Minimal is enough.** One line with the step and a count, such as
-  `conformance: 412/1500 (27%)`, meets it. When no total is known, print
+  `conformance: 412 of 1500 (27%)`, meets it. When no total is known, print
   what is known (the step, the current item, the elapsed time) and say the
   percentage is unknown rather than inventing one.
 - **Build it into what you write.** A script or loop prints a line per
@@ -711,8 +711,9 @@ itself, atomically, *after* npm accepts the publish.
    immutably. If you take it, say so.
 4. **Wait for the bump commit's CI to go green.** The release
    workflow runs no tests: it reads `main`, publishes it and tags it. An npm
-   version and a Go module tag are both immutable. Two workflows gate the
-   bump PR, not one: `ci.yml`, and `clib.yml`, which triggers on
+   version and a Go module tag are both immutable. Three workflows gate
+   the bump PR, not one: `ci.yml`; `rust.yml`, whose path filter matches
+   the bump's `ts/package.json` change; and `clib.yml`, which triggers on
    `pull_request` for `go/**` and so runs on every version bump. Note the
    asymmetry: `clib.yml` has no `push` trigger, so it runs on the PR and
    never on the merged commit — require it green *before* merging, and a
