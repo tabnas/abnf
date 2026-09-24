@@ -19,7 +19,7 @@ case-insensitive literals, and the value annotations a trailing comment
 can carry. Everything downstream of that IR lives in
 [`tabnas-bnf`](https://github.com/tabnas/bnf) and is shared with the
 GBNF and EBNF front-ends: desugaring, left-recursion elimination, probe
-dispatch, literal lifting, token allocation and chain emission.
+dispatch, literal lifting, token allocation, and chain emission.
 
 This is the Rust port of the canonical TypeScript implementation in
 [`../ts`](../ts); the TypeScript version is authoritative and this crate
