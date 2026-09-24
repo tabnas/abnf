@@ -68,11 +68,11 @@ const ENV_OUT: &str = "ABNF_CONFORMANCE_OUT";
 /// weakens nothing, it only reports.
 const ENV_RECORD: &str = "ABNF_CONFORMANCE_RECORD";
 
-/// The child's exit code when its OWN watchdog stops it: the resident
-/// cap or the wall clock, whichever it reached first.
+/// The child's exit code when its OWN watchdog stops it on the wall
+/// clock. `EXIT_BUDGET_MEMORY` is the same stop on the resident cap.
 ///
-/// This is the only exit status that means "the compiler did not
-/// finish", so it is the only one the sweep may score as a budget
+/// These are the only exit statuses that mean "the compiler did not
+/// finish", so they are the only ones the sweep may score as a budget
 /// failure. Everything else -- a panic, an abort, a stack that ran out,
 /// a loader failure, a binary rebuilt underneath the sweep -- is a
 /// CHILD CRASH, and a crash must fail the parent rather than be counted
@@ -82,6 +82,12 @@ const ENV_RECORD: &str = "ABNF_CONFORMANCE_RECORD";
 /// that refuses it, and the suite would stay green through the
 /// regression it exists to catch.
 const EXIT_BUDGET: i32 = 3;
+
+/// The child's exit code when its own watchdog stops it on the 256 MB
+/// resident cap. Scored exactly like `EXIT_BUDGET`; it is kept apart only
+/// so that a `budget-timing` row, which waives a host-dependent wall-clock
+/// stop, can never waive a memory blow-up.
+const EXIT_BUDGET_MEMORY: i32 = 4;
 
 /// The child could not read the grammar it was handed. A missing or
 /// unreadable corpus file is a fault in the harness, not a measurement,
@@ -126,7 +132,10 @@ fn conformance_child() {
         let deadline = Instant::now() + BUDGET;
         loop {
             std::thread::sleep(Duration::from_millis(50));
-            if BUDGET_BYTES < resident_bytes() || Instant::now() > deadline {
+            if BUDGET_BYTES < resident_bytes() {
+                std::process::exit(EXIT_BUDGET_MEMORY);
+            }
+            if Instant::now() > deadline {
                 std::process::exit(EXIT_BUDGET);
             }
         }
@@ -239,6 +248,8 @@ struct Outcome {
     names: BTreeSet<String>,
     error: String,
     budget: bool,
+    /// With `budget`: the stop was the resident cap, not the wall clock.
+    memory: bool,
 }
 
 /// How one budgeted compile is scored, in ONE place so the two halves
@@ -297,8 +308,9 @@ fn a_watchdog_stop_is_never_scored_as_a_rejection_or_a_pass() {
 enum Finish {
     /// The child ran the compiler to a verdict and wrote it out.
     Completed,
-    /// The child's own watchdog stopped it, or the parent's did.
-    Budget,
+    /// The child's own watchdog stopped it, or the parent's did. `memory`
+    /// is true only for the child's resident cap.
+    Budget { memory: bool },
     /// Anything else, described for the panic that follows.
     Crashed(String),
 }
@@ -402,7 +414,12 @@ fn compile_budgeted(exe: &Path, rel: &str, append: &str) -> Outcome {
     let finish = loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break Finish::Completed,
-            Ok(Some(status)) if Some(EXIT_BUDGET) == status.code() => break Finish::Budget,
+            Ok(Some(status)) if Some(EXIT_BUDGET) == status.code() => {
+                break Finish::Budget { memory: false }
+            }
+            Ok(Some(status)) if Some(EXIT_BUDGET_MEMORY) == status.code() => {
+                break Finish::Budget { memory: true }
+            }
             Ok(Some(status)) => {
                 break Finish::Crashed(format!(
                     "the child ended with {status}{}",
@@ -419,7 +436,7 @@ fn compile_budgeted(exe: &Path, rel: &str, append: &str) -> Outcome {
             Ok(None) if Instant::now() > deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break Finish::Budget;
+                break Finish::Budget { memory: false };
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(25)),
             Err(error) => break Finish::Crashed(format!("could not wait for the child: {error}")),
@@ -431,10 +448,11 @@ fn compile_budgeted(exe: &Path, rel: &str, append: &str) -> Outcome {
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
     let _ = fs::remove_file(&out);
     let crash = match finish {
-        Finish::Budget => {
+        Finish::Budget { memory } => {
             let _ = fs::remove_file(&errors);
             return Outcome {
                 budget: true,
+                memory,
                 ..Outcome::default()
             };
         }
@@ -457,7 +475,7 @@ fn compile_budgeted(exe: &Path, rel: &str, append: &str) -> Outcome {
         panic!(
             "the budgeted child for {rel:?}{} FAILED: {what}\n  \
              This is not budget exhaustion, and it must not be counted as one: \
-             only the child's own 256MB/60s watchdog (exit {EXIT_BUDGET}) is.\n  \
+             only the child's own 256MB/60s watchdog (exit {EXIT_BUDGET} or {EXIT_BUDGET_MEMORY}) is.\n  \
              The child said:\n{}",
             if append.is_empty() {
                 String::new()
@@ -489,6 +507,7 @@ fn compile_budgeted(exe: &Path, rel: &str, append: &str) -> Outcome {
             .unwrap_or_default(),
         error: parsed["error"].as_str().unwrap_or_default().to_string(),
         budget: false,
+        memory: false,
     }
 }
 
@@ -633,6 +652,11 @@ fn conformance() {
     let mut pinned_valid = BTreeSet::new();
     let mut pinned_invalid = BTreeSet::new();
     let mut pinned_budget = BTreeSet::new();
+    // `budget-timing`: an invalid-half grammar whose compile time sits near
+    // the 60s budget, so whether it finishes depends on the host. A
+    // wall-clock stop of it is not asserted; a resident-cap stop is, and so
+    // is finishing in under half the budget, which means the row is stale.
+    let mut pinned_timing: BTreeMap<String, String> = BTreeMap::new();
     let mut pinned_leaks: BTreeMap<String, usize> = BTreeMap::new();
     for row in load_corpus_tsv("known-gaps.tsv") {
         if "rust" != row[0] {
@@ -648,6 +672,9 @@ fn conformance() {
             "budget-exceeded" => {
                 pinned_budget.insert(row[2].clone());
             }
+            "budget-timing" => {
+                pinned_timing.insert(row[2].clone(), row[4].clone());
+            }
             "mutation-leak" => {
                 let count = row[3].parse::<usize>().unwrap_or_else(|_| {
                     panic!(
@@ -659,6 +686,17 @@ fn conformance() {
             }
             other => panic!("known-gaps.tsv row {:?} has unknown kind {other:?}", row[2]),
         }
+    }
+    for key in pinned_timing.keys() {
+        assert!(
+            invalid.contains(key),
+            "known-gaps.tsv: budget-timing {key:?} is not an invalid-half grammar in manifest.tsv; \
+             only a grammar every runtime rejects may have its budget outcome left open"
+        );
+        assert!(
+            !pinned_budget.contains(key),
+            "known-gaps.tsv: {key:?} is pinned both budget-exceeded and budget-timing; keep one"
+        );
     }
 
     assert!(
@@ -684,6 +722,13 @@ fn conformance() {
     let mut note = |kind: &str, key: &str, count: usize, text: &str| {
         recorded.push(format!("rust\t{kind}\t{key}\t{count}\t{text}"));
     };
+    // A budget-timing row is a declaration about the host, not a measurement,
+    // so recording carries it over unchanged whichever way this run went.
+    if record {
+        for (key, text) in &pinned_timing {
+            note("budget-timing", key, 1, text);
+        }
+    }
 
     let mut valid_gaps = BTreeSet::new();
     let mut invalid_gaps = BTreeSet::new();
@@ -762,13 +807,27 @@ fn conformance() {
     // being made, and a new member of that set fails the assertion below
     // whichever half it came from.
     let mut invalid_over_budget = BTreeSet::new();
+    // `budget-timing` grammars this run stopped on the WALL CLOCK: the one
+    // outcome such a row waives. A resident-cap stop is not waived.
+    let mut timing_waived = BTreeSet::new();
+    // `budget-timing` grammars that finished in under half the budget: the
+    // slowdown the row waives is gone, so the row must go too.
+    let mut timing_stale = Vec::new();
     for rel in &invalid {
+        let started = Instant::now();
         let result = compile_budgeted(exe, rel, "");
+        let elapsed = started.elapsed();
         let score = score_corpus(&result);
+        let timing = pinned_timing.contains_key(rel);
         if Score::Budget == score {
             over_budget.insert(rel.clone());
             invalid_over_budget.insert(rel.clone());
-            if record {
+            // Waived: a budget-timing row, stopped on the wall clock.
+            let waived = timing && !result.memory;
+            if waived {
+                timing_waived.insert(rel.clone());
+            }
+            if record && !waived {
                 note(
                     "budget-exceeded",
                     rel,
@@ -777,6 +836,14 @@ fn conformance() {
                 );
             }
             continue;
+        }
+        if timing && elapsed < BUDGET / 2 {
+            timing_stale.push(format!(
+                "known-gaps.tsv: budget-timing {rel:?} finished in {:.1}s, under half the {}s \
+                 budget. The slowdown that row waives is gone: delete the row.",
+                elapsed.as_secs_f64(),
+                BUDGET.as_secs()
+            ));
         }
         if Score::Accepted == score {
             invalid_gaps.insert(rel.clone());
@@ -865,9 +932,18 @@ fn conformance() {
     assert_set_equal(
         &mut failures,
         "grammars the compiler cannot finish within 256MB / 60s",
-        &over_budget,
+        // A budget-timing grammar may land on either side of the WALL CLOCK
+        // on a given host, so a wall-clock stop of one is left out here. A
+        // resident-cap stop is not, and it is still scored above like every
+        // invalid grammar, so accepting it fails as usual.
+        &over_budget
+            .iter()
+            .filter(|rel| !timing_waived.contains(*rel))
+            .cloned()
+            .collect(),
         &pinned_budget,
     );
+    failures.extend(timing_stale);
     assert_set_equal(
         &mut failures,
         "non-RFC-5234 corpus grammars this compiler accepts",
