@@ -158,3 +158,5 @@ test/abnf-corpus/
 # --- Rust ---
 # cargo's build directory, in rs/ and anywhere else a crate is built.
 target/
+
+.DS_Store
