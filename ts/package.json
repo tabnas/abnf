@@ -49,8 +49,8 @@
     ".": "./dist/abnf.js"
   },
   "peerDependencies": {
-    "@tabnas/parser": ">=0.9.7",
-    "@tabnas/bnf": ">=0.1.15"
+    "@tabnas/parser": ">=0.12.4",
+    "@tabnas/bnf": ">=0.1.22"
   },
   "devDependencies": {
     "@tabnas/debug": "*",
