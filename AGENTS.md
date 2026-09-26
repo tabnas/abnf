@@ -204,7 +204,8 @@ unconditionally and so overwrote whatever the parent was holding, the
 enclosing map or the enclosing list. Fixed in
 [tabnas/parser#169](https://github.com/tabnas/parser/pull/169) by writing
 back only to a parent building into the same container, and the floor
-here is `>=0.9.7` because of it.
+here first rose to `>=0.9.7` because of it. It now moves with each
+release, to the parser version `go/go.mod` requires.
 
 The last three rows of
 [`test/spec/alignment-abnf-ast.tsv`](test/spec/alignment-abnf-ast.tsv)
