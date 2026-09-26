@@ -11,8 +11,10 @@ package tabnasabnf
 // returns the regex crate's. Go used to PANIC out of regexp.MustCompile
 // in the shared compiler, which is the one outcome a compiler over
 // untrusted input may not have. The boundary in bnf_alias.go turns that
-// panic into an error return; this file pins the return and the
-// message, and pins that the well-ordered range still compiles.
+// panic into an error return, and from bnf 0.1.21 on the shared compiler
+// returns the error itself, so the boundary no longer sees one. This file
+// pins the return and the message, and pins that the well-ordered range
+// still compiles.
 
 import (
 	"fmt"
@@ -52,8 +54,13 @@ func TestReversedNumericRangeIsAnErrorReturn(t *testing.T) {
 			t.Fatalf("%q was refused by %s, want an error return: %s", src, how, msg)
 		}
 		// The wording is Go's regexp package's, prefixed with the
-		// notation tag like every other diagnostic here.
-		if !strings.HasPrefix(msg, "abnf: invalid regular expression: ") ||
+		// notation tag like every other diagnostic here. From bnf 0.1.21
+		// the shared compiler words the refusal and names the token
+		// (`abnf: invalid regular expression for token #RX_…: error
+		// parsing regexp: …`); before it, the boundary in bnf_alias.go
+		// did (`abnf: invalid regular expression: …`). Either carries the
+		// engine's own complaint.
+		if !strings.HasPrefix(msg, "abnf: invalid regular expression") ||
 			!strings.Contains(msg, "invalid character class range") {
 			t.Errorf("%q: got %q, want the regexp engine's class-range complaint under the abnf: prefix", src, msg)
 		}
