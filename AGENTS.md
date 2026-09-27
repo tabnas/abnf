@@ -249,7 +249,7 @@ What those elements become is `@tabnas/bnf`'s contract, recorded in its
 guide under this same title. When a tabnas alternate hands control to another rule, it either
 pushes a child rule (`p:`), opening a stack frame that closes when the
 child does, or replaces the current rule (`r:`), re-entering a rule in
-the same frame; a terminal-only or closing alternate does neither. Push
+the same frame; an alternate that only matches its tokens, or pops the frame to end the rule, does neither. Push
 is for structure and replace is for sequence, so every star, plus and
 unbounded rep desugars to a same-depth `r` loop and its iterations add
 no depth at all. Real recursion still nests, as it should: a grammar
