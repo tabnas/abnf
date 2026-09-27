@@ -237,6 +237,47 @@ same split the TypeScript and Go sides make: `rs/` holds the RFC 5234
 front-end and nothing else. Its own guide is
 [`rs/AGENTS.md`](rs/AGENTS.md).
 
+**Repetition is replacement, never a push chain.** The split above
+decides who owns a loop. This front end lowers `*A` to the IR's `star`, `1*A` to `plus`,
+`0*1A` and `[A]` to `opt`, and every other count (`m*nA`, `*nA`, `nA`)
+to `rep`; an exact single occurrence, `1A` or `1*1A`, is `A` itself
+with no wrapper (the `elem` close action in `converter.ts`,
+`kindStar`/`kindPlus`/`kindOpt`/`kindRep` in `go/parser_abnf.go`, the
+same four kinds in `rs/src/parser_abnf.rs`). It stops there: it emits no alternate of its
+own for a repetition, and no rewrite of its own spells one as recursion.
+What those elements become is `@tabnas/bnf`'s contract, recorded in its
+guide under this same title. When a tabnas alternate hands control to another rule, it either
+pushes a child rule (`p:`), opening a stack frame that closes when the
+child does, or replaces the current rule (`r:`), re-entering a rule in
+the same frame; an alternate that only matches its tokens, or pops the frame to end the rule, does neither. Push
+is for structure and replace is for sequence, so every star, plus and
+unbounded rep desugars to a same-depth `r` loop and its iterations add
+no depth at all. Real recursion still nests, as it should: a grammar
+with `node = "(" node ")" / "x"` is as deep as its input's brackets.
+What a repetition may never do is make depth grow with a list's
+length. The
+README's `csv = NR *( "," NR )` runs in one frame however long the row.
+The left-recursion rewrite that turns `P = P a / b` into `P = b *(a)`
+(below) hands its loop to that same desugaring, which is why the
+rewrite lives in bnf and is only re-exported here.
+
+The rule is written down here because the failure shows here first. A
+compiler that desugars a star as right recursion (`H = inner H /
+(empty)`, each item pushing a fresh `H`) parses everything it should and
+still costs a frame per item: a 1,500-line hosts file compiled through
+this front end was "nested deeper than aless reads" (its guard refuses past 3,000 open
+rules, tabnas-json's past 128 levels of nesting), the rule stack and
+memory grew with the line count, and the tree came out nested where the source is flat.
+That was bnf's `desugar`, in all three runtimes, found on 2026-09-27,
+and the fix is bnf's. What this repository owes is the check on a long
+input through real ABNF, beside the conformance dial, so that a
+regression in the shared compiler fails a suite here rather than a
+user's file: the observable is the engine's rule depth, `d` on every
+`Rule`. Rule depth over a repetition is constant; a test that repeats an item
+ten thousand times and asserts the maximum `d` stays what a single item
+needs is the proof. It proves the loop, not the grammar: depth from real
+recursion is measured by nesting, not by repeating.
+
 ## How the compiler is itself a tabnas grammar
 
 The ABNF source is parsed by a tabnas instance whose grammar is the
