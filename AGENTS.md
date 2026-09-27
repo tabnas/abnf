@@ -260,9 +260,9 @@ The rule is written down here because the failure shows here first. A
 compiler that desugars a star as right recursion (`H = inner H /
 (empty)`, each item pushing a fresh `H`) parses everything it should and
 still costs a frame per item: a 1,500-line hosts file compiled through
-this front end was "nested deeper than aless reads" (its guard refuses
-at 256 rules, tabnas-json's at 128), rule history and memory grew with
-the line count, and the tree came out nested where the source is flat.
+this front end was "nested deeper than aless reads" (its guard refuses past 3,000 open
+rules, tabnas-json's past 128 levels of nesting), the rule stack and
+memory grew with the line count, and the tree came out nested where the source is flat.
 That was bnf's `desugar`, in all three runtimes, found on 2026-09-27,
 and the fix is bnf's. What this repository owes is the check on a long
 input through real ABNF, beside the conformance dial, so that a
