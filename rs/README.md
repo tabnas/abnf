@@ -229,7 +229,7 @@ them:
 ```toml
 [dependencies]
 tabnas-abnf = { path = "../abnf/rs" }
-tabnas = { path = "../parser/rs" }
+tabnas = { package = "tabnas-parser", path = "../parser/rs" }
 ```
 
 Both entries are needed. A crate's dependencies are not passed on to its
