@@ -4,7 +4,7 @@ go 1.24.7
 
 require (
 	github.com/tabnas/bnf/go v0.1.22
-	github.com/tabnas/parser/go v0.12.7
+	github.com/tabnas/parser/go v0.12.8
 )
 
 require github.com/tabnas/support/go v0.3.5
