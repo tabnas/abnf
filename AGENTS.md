@@ -391,66 +391,29 @@ How it is judged, and by whom:
   regression it exists to catch. All three suites read the flag on both
   halves now, each through one `scoreCorpus` that both halves call and a
   unit test pins, so the reading cannot differ between the halves of one
-  suite or between the three. Rust reads a grammar over its budget on
-  the invalid half today and the other two do not, which is the whole of
-  the difference in the table below.
+  suite or between the three. The shared compiler now refuses the former
+  Rust invalid-half overrun before expansion, so all three columns agree.
 - The residual gaps are pinned as an **exact set** in
   `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
   as loudly as regressing one; the fix is to delete its row. Never edit a
   row to silence a failure you did not fix, and never narrow the corpus
   or loosen an assertion to raise the figure.
 
-Measured by the suites themselves, the TS and Go columns on 2026-09-22
-once both began reading the budget flag on the invalid half, and the
-Rust column on 2026-09-21 (run `make test` and read the dial the
-conformance tests print):
+Measured by the suites themselves on 2026-10-03 (run `make test` and read
+the dial the conformance tests print):
 
 |                                   | TS        | Go        | Rust      |
 | --------------------------------- | --------- | --------- | --------- |
 | valid accepted **and** value-correct | 48/52  | 48/52     | 48/52     |
-| invalid rejected                  | 611/661   | 611/661   | 610/661   |
+| invalid rejected                  | 611/661   | 611/661   | 611/661   |
 | excluded fragments                | 5         | 5         | 5         |
-| over budget (never scored a pass) | 2         | 2         | 3         |
+| over budget (never scored a pass) | 2         | 2         | 2         |
 
-**The Rust invalid figure is one lower, and it is a cost difference, not
-a disagreement.** `ex_abnf/test/resources/RFC5322.abnf` is rejected by
-all three with the same message (`abnf: rule 'ccontent' references
-unknown rule 'quoted-pair'`), in 13s under node and 16s under `go test`,
-but in **161s** in the Rust suite, which runs the unoptimised test
-profile and pays the engine quadratic `rs/AGENTS.md` records under "A
-long single rule is quadratic". So it exceeds the same 60s budget the
-other two clear, and the Rust half now counts it as over budget rather
-than as a rejection. The row
-`rust budget-timing ex_abnf/test/resources/RFC5322.abnf` in
-`known-gaps.tsv` records that (see below). It read 611/661 until
-2026-09-21 only because `rs/tests/conformance_test.rs` scored the invalid half on `ok` alone: a
-child stopped by its own watchdog answers `{budget: true, ok: false}`,
-which is indistinguishable from a refusal unless the budget flag is
-read.
-
-**That row is the one timing-sensitive entry in `known-gaps.tsv`**, and
-it is the only one that is: the other two are Paull's blow-ups that
-never finish at all, while this one sits near the budget. It measured at
-roughly 2.7x the budget on the host it was first measured on (four shared
-cores), and by 2026-09-24 GitHub's runners landed on both sides of 60 s on
-the same tree, so pinning it as `budget-exceeded` made the Rust gate fail
-at random, and deleting the row would only have flipped which runs fail.
-Its kind is therefore `budget-timing`, which waives exactly one outcome:
-a stop on the 60 s wall clock. The child reports the 256 MB resident cap
-with its own exit code, so a memory blow-up on this grammar still fails as
-a new over-budget entry. The grammar is still scored like every other
-invalid one, so accepting it fails as usual. The row expires by itself:
-if the grammar finishes in under half the budget, the suite fails and
-asks for the row to be deleted. The kind is refused for anything but an
-invalid-half grammar, and for a key also pinned `budget-exceeded`. Fixing
-the engine quadratic is what closes the row.
-
-The Rust column was measured on 2026-09-21, by the same instrument, and
-re-measured the same day once that instrument began reading the budget
-flag on both halves rather than only on the valid one. The TS and Go
-columns were re-measured on 2026-09-22, once the same reading reached
-those two suites; neither figure moved, because no invalid grammar
-exceeds their budget today. The Go column is no longer what it was:
+The Rust column now agrees with the other two because the shared compiler
+refuses oversized numeric-repetition expansion before allocating its
+helpers. The invalid `ex_abnf/test/resources/RFC5322.abnf` fixture reaches
+that bound in under a second, so its former `budget-timing` waiver expired
+and was removed. The Go column is no longer what it was:
 this table read `513/661` for Go, from 2026-08-09, and the dial
 `go/conformance_test.go` prints today reads `611/661`. Go used to accept
 an unclosed group `( "a" / "b"` and an unclosed option `[ "a"`, which
@@ -464,8 +427,7 @@ budget blow-ups, `go-abnf/testdata/void.abnf` (an empty grammar), and
 `tree-sitter-abnf/examples/elements.abnf` (the deliberate prose-val
 limit above). All three runtimes still accept a dangling alternation
 `"a" /` and a rulename opening with a digit, so `known-gaps.tsv` carries
-the same eight rows under `ts`, `go` and `rust`, plus the ninth `rust`
-row for the budget difference above.
+the same eight rows under `ts`, `go` and `rust`.
 
 ## The tabnas engine dependency
 

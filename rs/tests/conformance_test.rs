@@ -21,18 +21,15 @@
 //     `rule = rulename defined-as elements c-nl`) must be reachable in
 //     the compiled grammar as a rule, a fixed token or a match token.
 //
-//   - EVERY BASE COMPILE IS BUDGETED, in its own process. Two real
-//     published grammars in the corpus (RFC 5322 email, Dhall) do not
-//     terminate in this compiler, in any runtime, and one more
-//     (ex_abnf's RFC 5322) finishes here only at about 161s, well past
-//     the budget, where node and `go test` clear it in 13s and 16s.
-//     Exceeding the budget is recorded as a failure to accept, never as
-//     a pass and never as a skip. On the INVALID half that means it is
-//     never scored as a rejection either: the child reports
+//   - EVERY BASE COMPILE IS BUDGETED, in its own process. Two published
+//     grammars in the corpus do not terminate in this compiler and exhaust
+//     the shared budget in every implementation. Exceeding the budget is
+//     recorded as a failure to accept, never as a pass and never as a skip.
+//     On the INVALID half that means it is never scored as a rejection
+//     either: the child reports
 //     `{budget: true, ok: false}`, which is indistinguishable from a
 //     refusal unless the budget flag is read, and a nontermination on
-//     invalid input would otherwise leave this suite green. That third
-//     file is how the omission was found.
+//     invalid input would otherwise leave this suite green.
 //
 //   - THE RESIDUAL GAPS ARE AN EXACT SET, not a ratchet. Fixing one
 //     fails the suite as loudly as regressing one; the fix is to delete

@@ -15,17 +15,14 @@ Rust engine with the other two, and was deleted.
 The conformance dial is NOT a divergence. All three runtimes accept and
 reject the same grammars in the third-party corpus, and every grammar
 either compiler can finish emits byte-identical pure-data grammar text.
-The figures are 48/52 valid, 5 fragments, and 611/661 invalid with 2
-over budget in TypeScript and Go against 610/661 with 3 over budget in
-Rust. The one file behind that difference,
-`ex_abnf/test/resources/RFC5322.abnf`, is REJECTED by all three with the
-same message; the Rust suite runs the unoptimised test profile and takes
-161s over it where node takes 13s and `go test` 16s, so it exceeds the
-shared 60s budget and is counted as over budget rather than as the
-rejection it eventually is. That is cost, not behaviour, and
-`AGENTS.md` records it under "Conformance, as measured" beside the
-figures. Go's invalid figure used to be lower for a real reason; it was
-re-measured on 2026-09-21 and now agrees.
+Measured on 2026-10-03, the figures in every runtime are 48/52 valid, 5
+fragments, and 611/661 invalid with 2 over budget. The former Rust-only
+invalid-half overrun, `ex_abnf/test/resources/RFC5322.abnf`, is now
+refused by the shared compiler before oversized numeric-repetition
+expansion allocates its helpers. It finishes in under a second rather
+than crossing the shared 60-second budget. `AGENTS.md` records the live
+dial under "Conformance, as measured". Go's invalid figure used to be
+lower for a real reason; it was re-measured and now agrees.
 
 ## Where the divergences are pinned
 
