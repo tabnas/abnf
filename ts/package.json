@@ -39,7 +39,9 @@
   "license": "MIT",
   "files": [
     "dist",
+    "src",
     "bin",
+    "README.md",
     "LICENSE"
   ],
   "bin": {
