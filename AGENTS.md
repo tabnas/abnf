@@ -391,19 +391,16 @@ How it is judged, and by whom:
   regression it exists to catch. All three suites read the flag on both
   halves now, each through one `scoreCorpus` that both halves call and a
   unit test pins, so the reading cannot differ between the halves of one
-  suite or between the three. Rust reads a grammar over its budget on
-  the invalid half today and the other two do not, which is the whole of
-  the difference in the table below.
+  suite or between the three. The shared compiler now refuses the former
+  Rust invalid-half overrun before expansion, so all three columns agree.
 - The residual gaps are pinned as an **exact set** in
   `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
   as loudly as regressing one; the fix is to delete its row. Never edit a
   row to silence a failure you did not fix, and never narrow the corpus
   or loosen an assertion to raise the figure.
 
-Measured by the suites themselves, the TS and Go columns on 2026-09-22
-once both began reading the budget flag on the invalid half, and the
-Rust column on 2026-09-21 (run `make test` and read the dial the
-conformance tests print):
+Measured by the suites themselves on 2026-10-03 (run `make test` and read
+the dial the conformance tests print):
 
 |                                   | TS        | Go        | Rust      |
 | --------------------------------- | --------- | --------- | --------- |
