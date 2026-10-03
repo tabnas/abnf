@@ -243,7 +243,7 @@ Every grammar in the third-party corpus this suite can finish inside its
 budget is accepted or rejected here exactly as the other two
 implementations answer it, and that IS a test:
 `tests/conformance_test.rs` measures it over the same 68 published ABNF
-grammars the other two suites read. All three runtimes accept 576 of 578
+grammars the other two suites read. All three implementations accept 576 of 578
 valid fragments, reject 611 of 661 invalid fragments, and leave the same
 two grammars over the shared budget. A former Rust-only budget case now
 reaches the bounded-expansion refusal in under a second. `../AGENTS.md`
