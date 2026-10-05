@@ -461,7 +461,7 @@ npm run test-conformance                # the corpus dial, on its own
 
 `conformance.test.js` measures this compiler against 68 grammars from four
 third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
-on an older one — one of its cases alone is 64s. The other 53 suites finish
+on an older one — one of its cases alone is 64s. The other 54 suites finish
 in seconds.
 
 Run together with default concurrency, the fast suites drain and Node's
@@ -527,10 +527,10 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-Five of the fifteen files in `ts/test/*.test.js`, run against the built
-`dist`, need a word of explanation. The other ten name themselves:
+Five of the sixteen files in `ts/test/*.test.js`, run against the built
+`dist`, need a word of explanation. The other eleven name themselves:
 `class-overlap`, `compile`, `conformance`, `docs`, `lifting`, `parity`,
-`roundtrip`, `token`, `value-annotation` and `version`.
+`port-deps`, `roundtrip`, `token`, `value-annotation` and `version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
@@ -544,6 +544,12 @@ Five of the fifteen files in `ts/test/*.test.js`, run against the built
   rule-reference graph edges). It **dynamically resolves** `@tabnas/debug`
   and **skips** when absent (or when `TABNAS_DEBUG_PATH` is unset and the
   dep is missing), so it is safe outside the package.
+
+`port-deps` and `tools/port-deps.cjs` are stamped from tabnas/admin
+(ADR-24): the tabnas runtime dependencies of the TypeScript, Go and Rust
+ports must be the same, or the difference must be recorded in
+`tools/port-deps.json`. Change the admin template and restamp; never edit
+the stamped files here.
 
 ## Verify your work
 
