@@ -2,6 +2,7 @@
   "$schema": "https://tabnas.dev/schema/plugin.schema.json",
   "name": "@tabnas/abnf",
   "go": "github.com/tabnas/abnf/go",
+  "rust": "tabnas-abnf",
   "description": "ABNF (RFC 5234) grammar compiler for the tabnas engine.",
   "base": "@tabnas/bnf",
   "engine": "@tabnas/parser",
