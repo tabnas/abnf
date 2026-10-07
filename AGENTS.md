@@ -863,10 +863,15 @@ verify against the **published** packages, not local checkouts:
   ```bash
   (
     cd go
-    go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod still has a replace'; exit 1; }
+    go mod edit -json | jq -e '.Replace == null' >/dev/null || { echo 'go.mod still has a replace'; exit 1; }
     GOWORK=off go test ./...
   )
   ```
+
+  The check asks `jq`, not `grep`: current Go leaves the `Replace` key out
+  when there is no replace, where older Go printed `"Replace": null`, and
+  `jq` reads a missing key as null, so the check passes on a clean `go.mod`
+  and fails on a replace either way.
 - TypeScript: **delete `ts/package-lock.json` and `ts/node_modules`, then
   reinstall.** The lockfile is gitignored and pins the previous versions, but
   removing it alone changes nothing about what is already installed —

@@ -4,13 +4,14 @@ package tabnasabnf
 
 // conformance_test.go — third-party ABNF conformance, Go half.
 //
-// The mirror of ts/test/conformance.test.js. Both halves read the SAME corpus
-// (test/abnf-corpus/, fetched by test/fetch-abnf-corpus.sh at pinned commit
-// SHAs, never committed), the SAME third-party classification manifest
-// (test/corpus/manifest.tsv), the SAME mutation table
-// (test/corpus/mutations.tsv) and the SAME pinned residual gaps
-// (test/corpus/known-gaps.tsv, `go` rows). Neither runtime can report a
-// different conformance from the other without one of them going red.
+// The mirror of ts/test/conformance.test.js and rs/tests/conformance_test.rs.
+// All three halves read the SAME corpus (test/abnf-corpus/, fetched by
+// test/fetch-abnf-corpus.sh at pinned commit SHAs, never committed), the
+// SAME third-party classification manifest (test/corpus/manifest.tsv), the
+// SAME mutation table (test/corpus/mutations.tsv) and the SAME pinned
+// residual gaps (test/corpus/known-gaps.tsv, each its own rows; `go` here).
+// No runtime can report a different conformance from another without one
+// of them going red.
 //
 // See the TS file for the full rationale. Four things bear repeating:
 //
@@ -25,7 +26,7 @@ package tabnasabnf
 //
 //   - EVERY COMPILE IS BUDGETED, in its own process. Two real published
 //     grammars in the corpus (RFC 5322 email, Dhall) do not terminate in this
-//     compiler, in either runtime. Exceeding the budget is recorded as a
+//     compiler, in any runtime. Exceeding the budget is recorded as a
 //     failure to accept — never as a pass, never as a skip.
 //
 //   - THE RESIDUAL GAPS ARE AN EXACT SET, not a ratchet. Fixing one fails the
