@@ -7,9 +7,10 @@ package tabnasabnf
 //
 // The fixture loader, the escape codec, the ERROR: contract and the row
 // loop all come from github.com/tabnas/support/go, whose TypeScript half
-// ts/test/parity.test.js uses to run the SAME files — so the two
-// implementations cannot drift without one of them going red, and neither
-// can the two loaders. That is the check the repo previously lacked:
+// ts/test/parity.test.js and Rust half rs/tests/parity_test.rs use to run
+// the SAME files — so the three implementations cannot drift without one
+// of them going red, and neither can the loaders. That is the check the
+// repo previously lacked:
 // leftrec_test.go and rfc3986_test.go mirror the TS suite by hand, which
 // catches nothing when only one side changes.
 //

@@ -46,10 +46,11 @@
  *
  *  WHAT THE ASSERTIONS ARE. Not a ratchet and not a pass mark: the residual
  *  gaps are pinned as an EXACT SET, in test/corpus/known-gaps.tsv, shared
- *  with go/conformance_test.go. Fixing a gap fails the suite just as loudly
- *  as regressing one — the fix is to delete its row. That way the file always
- *  states what is true today, and neither runtime can drift without saying
- *  so. Never edit a row to silence a failure you did not fix.
+ *  with go/conformance_test.go and rs/tests/conformance_test.rs. Fixing a
+ *  gap fails the suite just as loudly as regressing one — the fix is to
+ *  delete its row. That way the file always states what is true today, and
+ *  no runtime can drift without saying so. Never edit a row to silence a
+ *  failure you did not fix.
  */
 'use strict'
 
@@ -99,8 +100,8 @@ const CORPUS_DIR = path.join(REPO, 'test', 'corpus')
 const COMPILE = path.join(__dirname, 'conformance-compile.js')
 
 // The budget a corpus grammar gets. Two real published grammars in the corpus
-// (RFC 5322 email, Dhall) do not terminate in this compiler — they grow the
-// heap until V8 aborts, in BOTH runtimes. Exceeding the budget is recorded as
+// (RFC 5322 email, Dhall) do not terminate in this compiler, in any runtime;
+// here they grow the heap until V8 aborts. Exceeding the budget is recorded as
 // a failure to accept, and its knock-on exclusion from the mutation half is
 // counted and pinned. It is never treated as a pass and never skipped.
 const BUDGET_MB = 256

@@ -7,11 +7,13 @@
 # no official IETF conformance suite for RFC 5234, so this is the closest
 # thing: the ABNF that real RFCs publish, as collected by other people.
 #
-# The conformance suites in BOTH runtimes read it (ts/test/conformance.test.js
-# and go/conformance_test.go) and FAIL LOUDLY when it is absent — they never
-# skip. You should not have to run this by hand: `npm test` fetches via the
-# `pretest` hook, `go test` fetches from TestMain, and `make test-go` depends
-# on `make abnf-corpus`.
+# The conformance suites in all three runtimes read it
+# (ts/test/conformance.test.js, go/conformance_test.go and
+# rs/tests/conformance_test.rs) and FAIL LOUDLY when it is absent — they
+# never skip. You should not have to run this by hand: `npm test` fetches
+# via the `pretest` hook, `go test` fetches from TestMain, `cargo test`
+# fetches from the suite itself, and `make test-go` and `make test-rs`
+# depend on `make abnf-corpus`.
 #
 # Each file's valid/invalid/fragment class lives in test/corpus/manifest.tsv,
 # decided by an independent third-party ABNF parser — see
