@@ -431,20 +431,30 @@ the same eight rows under `ts`, `go` and `rust`.
 
 ## The tabnas engine dependency
 
-The engine is consumed as a **sibling checkout** (the same model the rest
-of tabnas uses until `@tabnas/parser` publishes tagged releases):
+TypeScript takes its `@tabnas` packages from the npm registry, so it
+needs no sibling checkout; only the Rust crate does (see "Build &
+test"). What `ts/package.json` declares:
 
-- `@tabnas/parser` is a **`peerDependency`** (`"file:../../parser/ts"`)
-  and is mirrored as a `file:` **devDependency** so local builds resolve.
-- `@tabnas/debug` and `@tabnas/railroad` are **dev-only** `file:`
+- `@tabnas/parser` and `@tabnas/bnf` are **`peerDependencies`** with
+  version floors (`">=0.12.8"` and `">=0.1.24"` as of this writing; the
+  manifest is the authority), not the open `">=0"` most of the fleet
+  declares. npm ≥ 7 auto-installs them.
+- Both are mirrored as `"*"` **devDependencies**, and `@tabnas/debug`,
+  `@tabnas/railroad` and `@tabnas/support` are **dev-only** `"*"`
   devDependencies — `debug` for the `debug.model()` composition test,
-  `railroad` for regenerating the README railroad diagram. Neither is a
-  runtime dependency.
-- `engines.node` is `">=24"`; npm ≥ 7 auto-installs the peer.
+  `railroad` for regenerating the README railroad diagram, `support` for
+  the shared fixture runner `parity.test.js` uses. None of those three is
+  a runtime dependency.
+- `engines.node` is `">=24"`.
+- No entry is a `file:` path. Each `@tabnas` devDependency resolves to
+  whatever the install leaves in `ts/node_modules/@tabnas/`: a symlink to
+  the sibling checkout where admin's `scripts/link.sh` wired one, the
+  registry copy otherwise. Nothing that pins that wiring belongs in a
+  commit.
 
-Clone the sibling closure CI uses — `parser support bnf debug` — beside
-this repo and build their TS before working here. CI does this for you
-(see below).
+CI clones the closure `ci.yml` names (`parser support bnf debug`),
+builds it, and links each clone over its registry copy before building
+this repo (see below).
 
 ## Build & test
 
@@ -506,8 +516,9 @@ Rust gate: formatting, build, tests, doctests, clippy with `-D warnings`
 and the `Cargo.lock` check.
 
 The Rust crate takes `tabnas`, `tabnas-bnf` and (for tests)
-`tabnas-support` as **sibling checkouts**, the same model the TypeScript
-side uses for its `file:` dependencies. Clone `parser`, `bnf` and
+`tabnas-support` as **sibling checkouts**, through Cargo `path`
+dependencies, so unlike the TypeScript side, which falls back on the
+registry copy, it needs them on disk. Clone `parser`, `bnf` and
 `support` beside this repository before working in `rs/`.
 
 **Do not release with `make publish-ts` or `make publish-go`** — by
