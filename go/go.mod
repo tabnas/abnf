@@ -3,8 +3,8 @@ module github.com/tabnas/abnf/go
 go 1.24.7
 
 require (
-	github.com/tabnas/bnf/go v0.1.27
-	github.com/tabnas/parser/go v0.12.10
+	github.com/tabnas/bnf/go v0.1.28
+	github.com/tabnas/parser/go v0.12.11
 )
 
-require github.com/tabnas/support/go v0.3.8
+require github.com/tabnas/support/go v0.3.9
