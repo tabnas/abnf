@@ -436,7 +436,7 @@ needs no sibling checkout; only the Rust crate does (see "Build &
 test"). What `ts/package.json` declares:
 
 - `@tabnas/parser` and `@tabnas/bnf` are **`peerDependencies`** with
-  version floors (`">=0.12.8"` and `">=0.1.24"` as of this writing; the
+  version floors (`">=0.12.11"` and `">=0.1.28"` as of this writing; the
   manifest is the authority), not the open `">=0"` most of the fleet
   declares. npm ≥ 7 auto-installs them.
 - Both are mirrored as `"*"` **devDependencies**, and `@tabnas/debug`,
