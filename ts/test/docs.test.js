@@ -721,7 +721,7 @@ describe('doc-counts', () => {
 
     const WORDS = {
       twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
-      seventeen: 17,
+      seventeen: 17, eighteen: 18,
     }
     const m = /Five of the (\w+) files in `ts\/test\/\*\.test\.js`/.exec(AGENTS)
     Assert.ok(null != m,

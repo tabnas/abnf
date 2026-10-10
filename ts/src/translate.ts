@@ -53,7 +53,7 @@ const TRANSLATION: TranslationParts = Object.freeze({
     "loss": [
       "The grammar is written anew from its compiled spec: comments, blank lines and layout are not kept, each rule is written on one line, and the RFC 5234 core rules the compiler added (ALPHA, DIGIT and the rest) are not written, since the compiler adds them again wherever they are referenced.",
       "A rule is written as the compiler rewrote it: a reference that led an alternative is written back where the alternatives the compiler put in its place still stand together, each followed by one same tail, and is otherwise written as those alternatives; a left recursion is written as the repetition it became, and alternatives the compiler left-factored with their shared prefix written in each of them again.",
-      "Where the compiler reordered a rule's alternatives to tell them apart (a longer lookahead ahead of a shorter one that begins with the same character, a keyword ahead of a character class that can take it), the alternatives that push a helper of the compiler's are put back in the order its numbers record, and the others are written in the compiled order: the rule compiles back the same, and the spec compiled back can differ in the order of the alternates other rules build through it, in the numbers of the compiler's helpers and in the order of its tokens.",
+      "Where the compiler reordered a rule's alternatives to tell them apart (a longer lookahead ahead of a shorter one that begins with the same character, a keyword ahead of a character class that can take it), the alternatives that push a helper of the compiler's are put back in the order its numbers record, and the others are written in the compiled order: the rule compiles back the same, and the spec compiled back can differ in the order of the alternates other rules build through it, in the numbers of the compiler's helpers and in the order of its tokens, which is the order the lexer tries two tokens a place expects, so where a keyword and a class that can take it trade places the grammar compiled back accepts what the spec refused (start = ident / \\"if\\" ident with ident = %x61-7A: the spec refuses ifx, and the text compiles back to one that accepts it).",
       "A left recursion that ran through another rule (P = Q, Q = P \\"+\\" / NR) is written as the compiler rewrote it, with the leading reference that closed the cycle left in place, and compiles back to another spec, since the compiler now substitutes that reference.",
       "The start rule is written first, as ABNF's start rule is its first; a spec whose start rule was not its first rule compiles back with that rule moved first.",
       "Terminals are written in RFC 5234's forms: a literal as a quoted string (with %s where it matches exactly and holds a letter) or, where a quoted string cannot hold it, as a numeric value of its code points, a range as %x and its ends, and a rule the compiler made a token of (CR = %x0D, referenced as CR) as that rule, after the others.",
@@ -61,7 +61,7 @@ const TRANSLATION: TranslationParts = Object.freeze({
       "Repetitions are written in RFC 5234's forms, *A, 1*A, m*nA, [ A ] for an option over a group and 0*1A for an option over anything else; a repetition of a repetition, which another notation can write and RFC 5234 cannot, is put in a group of its own and compiles back with one more group.",
       "An empty alternative, which RFC 5234 has no syntax for, is written as nothing between its slashes, which the compiler reads as one; in a rule whose alternatives the compiler emits as its open alternates, where it puts the empty one last wherever it stood, it is written first.",
       "A spec compiled from another notation compiles back under ABNF's own settings: the group tag on every alternate, and lexer options the other notation adds (GBNF's exact lexing), are ABNF's, and a class of several members, which RFC 5234 cannot write, is written as the alternation of its members, each range a range and each character a string or a range of one, and compiles back as that alternation.",
-      "A spec the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming what it met: an action (a value annotation's builders, a user action, the probe dispatcher of an optional prefix), a condition or a counter other than a repetition's, a removal or a clear, a token no ABNF terminal matches (a negated class, a class holding a character past ASCII alone, a case-sensitive literal holding a letter and a character no quoted string holds, a character past U+FFFF), a rule name ABNF cannot spell, a repetition bounded past what the compiler numbers, or a repetition of no copies, whose item the spec does not keep."
+      "A spec the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming what it met: an action (a value annotation's builders, a user action, the probe dispatcher of an optional prefix), a condition or a counter other than a repetition's, an error generator or an alternate modifier, a function reference where a rule or a count is due, a set of tokens at one place, a removal, a clear or the form that edits a rule already installed, a token no ABNF terminal matches (a negated class, a class holding a character past ASCII alone, a class whose flags change what it matches, a pattern that is neither one class nor an escaped literal, a case-sensitive literal holding a letter and a character no quoted string holds, a character past U+FFFF), a rule name ABNF cannot spell, the empty name among them, a repetition bounded past what the compiler numbers, a repetition of no copies, whose item the spec does not keep, or a spec that gives its match tokens' order as a list of its own (Go's tokenOrder), whose rules' order, which ranks the tokens, is lost."
     ]
   }
 }
@@ -130,9 +130,17 @@ const TRANSLATION: TranslationParts = Object.freeze({
 ; TARGET_VALUE_UNREPRESENTABLE, naming the rule: an action other than the
 ; tree builders every compiled grammar carries (a value annotation's
 ; builders, a user action, the probe dispatcher's), a condition or a
-; counter other than a repeat loop's, a removal, and a token no ABNF
-; terminal matches (a negated class, a class holding a character past
-; ASCII alone).
+; counter other than a repeat loop's, an error generator or an alternate
+; modifier (\`e\`, \`h\`), a function reference where a rule or a count is
+; due, a set of tokens at one place, the form that edits a rule already
+; installed (\`{alts, inject}\`), a removal, and a token no ABNF terminal
+; matches (a negated class, a class holding a character past ASCII alone,
+; a class whose flags change what it matches, a pattern that is neither
+; one class nor an escaped literal). A spec serialized by Go, which writes
+; its rules in name order and its match tokens' order as a list of its
+; own (\`options.match.tokenOrder\`), is refused when that list holds two
+; tokens or more: the rules' order, which ranks the tokens (the order the
+; lexer tries two tokens a place expects), is lost.
 ;
 ; A spec compiled from another notation is written as far as ABNF can say
 ; it: a class of several members (GBNF's and EBNF's \`[a-zA-Z_]\`) as the
@@ -304,16 +312,22 @@ def abnf-has [cx name]
     case :record true
     case _ false
 
+; A rule's alternates in one phase, the falsy placeholders the engine
+; skips left out.
 def abnf-open [r]
-  abnf-vec (get "open" r)
+  filter (fn [alt] (match (kind alt) (case :record true) (case _ false))) (abnf-vec (get "open" r))
 
 def abnf-close [r]
-  abnf-vec (get "close" r)
+  filter (fn [alt] (match (kind alt) (case :record true) (case _ false))) (abnf-vec (get "close" r))
 
+; The tokens an alternate matches: its \`s\`, a string of token names
+; between spaces or a list of them.
 def abnf-s [alt]
-  match (abnf-str (get "s" alt))
-    case "" []
-    case s (split " " s)
+  let [s (get "s" alt)]
+    match (kind s)
+      case :string (filter abnf-full (split " " s))
+      case :vector (map abnf-str (as-vector s))
+      case _ []
 
 def abnf-b [alt]
   match (kind (get "b" alt))
@@ -330,6 +344,7 @@ def abnf-a [alt]
   match (kind (get "a" alt))
     case :string (get "a" alt)
     case :missing ""
+    case :null ""
     case _ "?"
 
 ; Whether the compiler made the rule: provenance names every rule it
@@ -360,25 +375,115 @@ def abnf-kind [r]
 ; ---- what the spec may hold
 
 ; Every alternate is one the compiler's tree-building grammars are made
-; of: the tree builders, a repeat loop's guard and counter, and nothing
-; else. Anything more is a construct the notation does not write.
-def abnf-check-alt [name alt]
+; of: the tokens it matches and gives back (\`s\`, \`b\`), the rule it pushes
+; or replaces itself with (\`p\`, \`r\`), the tree builders (\`a\`, \`k\`), group
+; tags, marks and per-rule scratch (\`g\`, \`m\`, \`u\`), and, in a repeat loop
+; alone, the loop's guard and counter (\`c\`, \`n\`). Anything more is a
+; construct the notation does not write: an error generator (\`e\`), an
+; alternate modifier (\`h\`), a function in place of a rule or a count, an
+; action other than the tree builders, another condition or counter.
+def abnf-alt-keys ["s" "b" "p" "r" "a" "c" "n" "k" "g" "m" "u"]
+
+def abnf-key-text [key]
+  match key
+    case "e" "e (an error generator)"
+    case "h" "h (an alternate modifier)"
+    case _ key
+
+def abnf-check-alt [cx name alt]
+  let [extra (filter (fn [key] (match (abnf-among key abnf-alt-keys) (case true false) (case false (abnf-given (get key alt))))) (keys alt))]
+    match (count extra)
+      case 0 (abnf-check-parts cx name alt)
+      case _ (abnf-fail (string-join "" ["rule " name " has an alternate carrying " (string-join ", " (map abnf-key-text extra)) ", which is not written"]))
+
+def abnf-check-parts [cx name alt]
   let [a (abnf-a alt)]
-    let [c (get "c" alt)]
-      let [n (get "n" alt)]
-        match (abnf-among a ["" "@node$" "@capture$" "@bubble$" "@fold$"])
-          case false
-            match (abnf-starts "@probe" (abnf-action-text alt))
-              case true (abnf-fail (string-join "" ["rule " name " is the probe dispatcher the compiler makes for an optional prefix ([ X D ] Y), which is not read back"]))
-              case false (abnf-fail (string-join "" ["rule " name " carries an action (" (abnf-action-text alt) "), which is not written"]))
-          case true
-            match (kind c)
-              case :missing (abnf-check-counter name n)
-              case :record
-                match (keys c)
-                  case ["n.rep"] (abnf-check-counter name n)
-                  case _ (abnf-fail (string-join "" ["rule " name " carries a condition on " (string-join ", " (keys c)) ", which is not written"]))
-              case _ (abnf-fail (string-join "" ["rule " name " carries a condition, which is not written"]))
+    match (abnf-among a ["" "@node$" "@capture$" "@bubble$" "@fold$"])
+      case false
+        match (abnf-starts "@probe" (abnf-action-text alt))
+          case true (abnf-fail (string-join "" ["rule " name " is the probe dispatcher the compiler makes for an optional prefix ([ X D ] Y), which is not read back"]))
+          case false (abnf-fail (string-join "" ["rule " name " carries an action (" (abnf-action-text alt) "), which is not written"]))
+      case true
+        let [tokens (abnf-check-s name (get "s" alt))]
+          let [next (count (map (fn [key] (abnf-check-next name key (get key alt))) ["p" "r"]))]
+            let [back (abnf-check-back name (get "b" alt))]
+              abnf-check-loop cx name alt
+
+; The tokens: a string of names between spaces, or a list of names, one
+; place each; a place holding a set of tokens (names between spaces, or a
+; list) chooses among them, which the render does not read back.
+def abnf-check-s [name s]
+  match (kind s)
+    case :missing true
+    case :null true
+    case :string true
+    case :vector
+      match (abnf-none (filter (fn [t] (match (kind t) (case :string (abnf-some (abnf-rest (split " " t)))) (case _ true))) (as-vector s)))
+        case true true
+        case false (abnf-fail (string-join "" ["rule " name " has an alternate whose s holds, at one place, a set of tokens or something other than a token's name, which is not written"]))
+    case _ (abnf-fail (string-join "" ["rule " name " has an alternate whose s is not tokens, which is not written"]))
+
+; The rule an alternate pushes or replaces itself with: a name, or none;
+; a function reference (\`@name\`) chooses at run time and is not written.
+def abnf-check-next [name key v]
+  match (kind v)
+    case :missing true
+    case :null true
+    case :boolean (match v (case false true) (case _ (abnf-fail (string-join "" ["rule " name " has an alternate whose " key " is not a rule, which is not written"]))))
+    case :string
+      match (abnf-starts "@" v)
+        case true (abnf-fail (string-join "" ["rule " name " has an alternate whose " key " is the function reference " v ", which is not written"]))
+        case false true
+    case _ (abnf-fail (string-join "" ["rule " name " has an alternate whose " key " is not a rule, which is not written"]))
+
+def abnf-check-back [name v]
+  match (kind v)
+    case :missing true
+    case :null true
+    case :number true
+    case :boolean (match v (case false true) (case _ (abnf-fail (string-join "" ["rule " name " has an alternate whose b is not a count, which is not written"]))))
+    case _ (abnf-fail (string-join "" ["rule " name " has an alternate whose b is not a count (" (abnf-str v) "), which is not written"]))
+
+; A repeat loop's guard (\`c: {n.rep: 0}\`) and counter (\`n: {rep: 0}\` or
+; \`{rep: 1}\`), in the loop the compiler makes for a repetition and the
+; steps of its item, and nowhere else.
+def abnf-loop-rule [cx name]
+  abnf-same (abnf-helper-kind cx (abnf-at (split "$" name) 0)) "star"
+
+def abnf-check-loop [cx name alt]
+  let [c (get "c" alt)]
+    let [n (get "n" alt)]
+      match (match (abnf-given c) (case true true) (case false (abnf-given n)))
+        case false true
+        case true
+          match (abnf-loop-rule cx name)
+            case false (abnf-fail (string-join "" ["rule " name " carries a condition or a counter outside a repetition's loop, which is not written"]))
+            case true
+              match (match (abnf-given c) (case false true) (case true (match (kind c) (case :record (abnf-loop-value c "n.rep" [0])) (case _ false))))
+                case false (abnf-fail (string-join "" ["rule " name " carries a condition other than its loop's, which is not written"]))
+                case true
+                  match (match (abnf-given n) (case false true) (case true (match (kind n) (case :record (abnf-loop-value n "rep" [0 1])) (case _ false))))
+                    case false (abnf-fail (string-join "" ["rule " name " carries a counter other than its loop's, which is not written"]))
+                    case true true
+
+; Whether an alternate gives a field: the engine reads a field that is
+; missing, null or false as one it does not give.
+def abnf-given [v]
+  match (kind v)
+    case :missing false
+    case :null false
+    case :boolean (match v (case false false) (case _ true))
+    case _ true
+
+def abnf-loop-value [rec key allowed]
+  match (keys rec)
+    case [only]
+      match (abnf-same only key)
+        case false false
+        case true
+          let [v (get-path (as-path [key]) rec)]
+            abnf-some (filter (fn [x] (match (compare v x) (case :equal true) (case _ false))) allowed)
+    case _ false
 
 def abnf-action-text [alt]
   match (kind (get "a" alt))
@@ -386,26 +491,44 @@ def abnf-action-text [alt]
     case :vector (string-join " " (map abnf-str (as-vector (get "a" alt))))
     case _ "a function"
 
-def abnf-check-counter [name n]
-  match (kind n)
+; A rule's phases: a list of alternates each, or none; the form that edits
+; a rule already installed (\`{alts, inject}\`) is not written.
+def abnf-check-phase [name phase v]
+  match (kind v)
     case :missing true
-    case :record
-      match (keys n)
-        case ["rep"] true
-        case _ (abnf-fail (string-join "" ["rule " name " carries a counter " (string-join ", " (keys n)) ", which is not written"]))
-    case _ (abnf-fail (string-join "" ["rule " name " carries a counter, which is not written"]))
+    case :null true
+    case :vector true
+    case :record (abnf-fail (string-join "" ["rule " name " gives its " phase " alternates as alts and an inject, which edits a rule already installed and is not written"]))
+    case _ (abnf-fail (string-join "" ["rule " name " gives its " phase " alternates in a form that is not a list, which is not written"]))
 
 def abnf-check-rule [cx name]
   let [r (abnf-rule cx name)]
     match (kind r)
       case :record
-        count (map (fn [alt] (abnf-check-alt name alt)) (abnf-cat (abnf-open r) (abnf-close r)))
-      case _ (abnf-fail (string-join "" ["rule " name " is removed, which is not written"]))
+        let [phases (count (map (fn [phase] (abnf-check-phase name phase (get phase r))) ["open" "close"]))]
+          count (map (fn [alt] (abnf-check-alt cx name alt)) (abnf-cat (abnf-open r) (abnf-close r)))
+      case :null (abnf-fail (string-join "" ["rule " name " is removed, which is not written"]))
+      case _ (abnf-fail (string-join "" ["rule " name " is not a rule's alternates, which is not written"]))
+
+; A spec serialized by Go writes its keys in name order and its match
+; tokens' order in a list of its own (\`options.match.tokenOrder\`): the
+; rules' order, which decides the order the compiler gives the tokens
+; again, is lost, and with it which of two tokens that both match wins.
+def abnf-check-order [spec]
+  let [order (get-path (as-path ["options" "match" "tokenOrder"]) spec)]
+    match (kind order)
+      case :vector
+        match (abnf-less (count (as-vector order)) 2)
+          case true true
+          case false (abnf-fail "it gives its match tokens' order as a list of its own (tokenOrder, Go's serialization, whose keys are in name order), and the order of the rules, which their precedence follows, is lost")
+      case _ true
 
 def abnf-check [spec cx]
-  match (kind (get "clear" spec))
-    case :boolean (abnf-fail "it clears the grammar it is installed on, which is not written")
-    case _ (count (map (fn [name] (abnf-check-rule cx name)) (keys (get :rules cx))))
+  match (get "clear" spec)
+    case true (abnf-fail "it clears the grammar it is installed on, which is not written")
+    case _
+      let [order (abnf-check-order spec)]
+        count (map (fn [name] (abnf-check-rule cx name)) (keys (get :rules cx)))
 
 ; ---- tokens
 
@@ -440,11 +563,84 @@ def abnf-match-token [t m]
           case true
             let [body (abnf-after "^" src)]
               match (abnf-starts "[" body)
-                case true (abnf-class body flags)
+                case true
+                  match (abnf-class-pattern body)
+                    case false (abnf-fail (string-join "" ["the token " t " is the pattern " m ", which is not one class the render reads, and no ABNF terminal matches it"]))
+                    case true
+                      match (abnf-among flags ["" "u"])
+                        case true (abnf-class body flags)
+                        case false (abnf-fail (string-join "" ["the token " t " is the class " m ", whose flags (" flags ") change what it matches, and no ABNF terminal matches it"]))
                 case false
                   match flags
-                    case "i" (abnf-lit (abnf-unescape body) false)
+                    case "i"
+                      match (abnf-escaped-literal body)
+                        case true (abnf-lit (abnf-unescape body) false)
+                        case false (abnf-fail (string-join "" ["the token " t " is the pattern " m ", which is not a literal the render reads, and no ABNF terminal matches it"]))
                     case _ (abnf-fail (string-join "" ["the token " t " is the pattern " m ", which no ABNF terminal matches"]))
+
+; Whether a pattern's body is one class as the compiler writes one:
+; \`[\`, an optional \`^\`, members each a \`\\uXXXX\` or \`\\u{X...}\` escape, alone
+; or the low end of a range, and \`]\` ending it; or \`[\\s\\S]\`, which
+; another notation's \`.\` compiles to.
+def abnf-class-pattern [body]
+  match body
+    case "[\\\\s\\\\S]" true
+    case _
+      match (abnf-ends "]" body)
+        case false false
+        case true
+          let [inner (abnf-before "]" (abnf-after "[" body))]
+            match (abnf-some (filter (fn [c] (abnf-some (abnf-rest (split c inner)))) ["[" "]"]))
+              case true false
+              case false
+                let [pieces (split "\\\\u" (match (abnf-starts "^" inner) (case true (abnf-after "^" inner)) (case false inner)))]
+                  match (abnf-empty (abnf-at pieces 0))
+                    case false false
+                    case true
+                      let [members (abnf-rest pieces)]
+                        match (count members)
+                          case 0 false
+                          case _
+                            match (abnf-ends "-" (top members))
+                              case true false
+                              case false (abnf-none (filter (fn [m] (abnf-not (abnf-member-piece m))) members))
+
+def abnf-member-piece [piece]
+  let [core (match (abnf-ends "-" piece) (case true (abnf-before "-" piece)) (case false piece))]
+    match (abnf-starts "{" core)
+      case true
+        match (abnf-ends "}" core)
+          case false false
+          case true
+            let [h (abnf-before "}" (abnf-after "{" core))]
+              match (abnf-among (abnf-num (length h)) ["1" "2" "3" "4" "5" "6"])
+                case false false
+                case true (abnf-hex-only h)
+      case false
+        match (length core)
+          case 4 (abnf-hex-only core)
+          case _ false
+
+def abnf-hex-only [h]
+  match h
+    case "" false
+    case _ (chars-within [[48 57] [65 70] [97 102]] h)
+
+; Whether a pattern's body is a literal as the compiler escapes one: every
+; character a pattern reads otherwise (\`\\ ^ $ . * + ? ( ) [ ] { } |\`)
+; after a backslash, and a backslash before nothing else.
+def abnf-meta-chars ["^" "$" "." "*" "+" "?" "(" ")" "[" "]" "{" "}" "|"]
+
+def abnf-escaped-literal [body]
+  let [rest (abnf-strip-escapes abnf-strip-escapes abnf-meta-chars (string-join "" (split "\\\\\\\\" body)))]
+    match (abnf-some (abnf-rest (split "\\\\" rest)))
+      case true false
+      case false (abnf-none (filter (fn [c] (abnf-some (abnf-rest (split c rest)))) abnf-meta-chars))
+
+def abnf-strip-escapes [self cs s]
+  match (count cs)
+    case 0 s
+    case _ (self self (pop cs) (string-join "" (split (string-join "" ["\\\\" (top cs)]) s)))
 
 ; A token set's class, read back from its name, which the compiler gives
 ; the class it lays over the atoms (\`rx_\` and the pattern, each character
@@ -664,18 +860,6 @@ def abnf-dispatch-alts [cx name r]
 def abnf-dispatches [cx name r]
   abnf-some (filter (fn [alt] (abnf-starts (string-join "" [name "$alt"]) (abnf-target alt))) (abnf-open r))
 
-; A repeat loop: its first open alternate is the entry, guarded by the
-; loop's counter, replacing the rule with itself.
-def abnf-is-loop [name r]
-  let [o (abnf-open r)]
-    match (count o)
-      case 0 false
-      case _
-        let [e (abnf-at o 0)]
-          match (kind (get-path (as-path ["c" "n.rep"]) e))
-            case :number (abnf-same (abnf-r e) name)
-            case _ false
-
 ; A loop's item: what its continue alternate takes, a token it consumes,
 ; or the rule its iteration (\`<loop>$alt0\`) pushes.
 def abnf-loop-item [cx name r]
@@ -753,12 +937,6 @@ def abnf-before-digits [p]
   match (abnf-starts "fact" p)
     case true (match (abnf-digits (abnf-after "fact" p)) (case true "fact") (case false p))
     case false p
-
-def abnf-same-el [a b]
-  match (get :k a)
-    case :tok (match (get :k b) (case :tok (abnf-same (get :name a) (get :name b))) (case _ false))
-    case :ref (match (get :k b) (case :ref (abnf-same (get :name a) (get :name b))) (case _ false))
-    case _ false
 
 ; An alternative with its factored tails expanded back: one whose last
 ; element is a left-factored tail (\`<rule>$fact<k>\`) is the prefix before
@@ -911,9 +1089,10 @@ def abnf-seq-keys [cx seq]
 ; The ASCII characters, each with its two hexadecimal digits.
 def abnf-ascii [["\\u0000" "00"] ["\\u0001" "01"] ["\\u0002" "02"] ["\\u0003" "03"] ["\\u0004" "04"] ["\\u0005" "05"] ["\\u0006" "06"] ["\\u0007" "07"] ["\\b" "08"] ["\\t" "09"] ["\\n" "0A"] ["\\u000b" "0B"] ["\\f" "0C"] ["\\r" "0D"] ["\\u000e" "0E"] ["\\u000f" "0F"] ["\\u0010" "10"] ["\\u0011" "11"] ["\\u0012" "12"] ["\\u0013" "13"] ["\\u0014" "14"] ["\\u0015" "15"] ["\\u0016" "16"] ["\\u0017" "17"] ["\\u0018" "18"] ["\\u0019" "19"] ["\\u001a" "1A"] ["\\u001b" "1B"] ["\\u001c" "1C"] ["\\u001d" "1D"] ["\\u001e" "1E"] ["\\u001f" "1F"] [" " "20"] ["!" "21"] ["\\"" "22"] ["#" "23"] ["$" "24"] ["%" "25"] ["&" "26"] ["'" "27"] ["(" "28"] [")" "29"] ["*" "2A"] ["+" "2B"] ["," "2C"] ["-" "2D"] ["." "2E"] ["/" "2F"] ["0" "30"] ["1" "31"] ["2" "32"] ["3" "33"] ["4" "34"] ["5" "35"] ["6" "36"] ["7" "37"] ["8" "38"] ["9" "39"] [":" "3A"] [";" "3B"] ["<" "3C"] ["=" "3D"] [">" "3E"] ["?" "3F"] ["@" "40"] ["A" "41"] ["B" "42"] ["C" "43"] ["D" "44"] ["E" "45"] ["F" "46"] ["G" "47"] ["H" "48"] ["I" "49"] ["J" "4A"] ["K" "4B"] ["L" "4C"] ["M" "4D"] ["N" "4E"] ["O" "4F"] ["P" "50"] ["Q" "51"] ["R" "52"] ["S" "53"] ["T" "54"] ["U" "55"] ["V" "56"] ["W" "57"] ["X" "58"] ["Y" "59"] ["Z" "5A"] ["[" "5B"] ["\\\\" "5C"] ["]" "5D"] ["^" "5E"] ["_" "5F"] ["\`" "60"] ["a" "61"] ["b" "62"] ["c" "63"] ["d" "64"] ["e" "65"] ["f" "66"] ["g" "67"] ["h" "68"] ["i" "69"] ["j" "6A"] ["k" "6B"] ["l" "6C"] ["m" "6D"] ["n" "6E"] ["o" "6F"] ["p" "70"] ["q" "71"] ["r" "72"] ["s" "73"] ["t" "74"] ["u" "75"] ["v" "76"] ["w" "77"] ["x" "78"] ["y" "79"] ["z" "7A"] ["{" "7B"] ["|" "7C"] ["}" "7D"] ["~" "7E"] ["\\u007f" "7F"]]
 
-; A string of ASCII characters as their code points, in order: the string
-; is cut at each character it holds, in turn, and the character put back
-; as its code point between the pieces.
+; A piece of a literal's text: a run of its characters (\`:raw\`), or one
+; character as its code point (\`:cp\`). A run is cut at each place it
+; holds a character, which is put back as its code point between the
+; pieces, and the empty runs are left out.
 def abnf-raw-seg [s]
   record
     entry :raw s
@@ -929,6 +1108,8 @@ def abnf-cut-seg [c h seg]
         abnf-flat (map (fn [i] (match i (case 0 [(abnf-raw-seg (abnf-at pieces 0))]) (case _ [(abnf-cp-seg h) (abnf-raw-seg (abnf-at pieces i))]))) (indices pieces))
     case _ [seg]
 
+; A string's pieces with each of the characters given cut out as its code
+; point, in turn.
 def abnf-code-walk [self chars segs]
   match (count chars)
     case 0 segs
@@ -941,48 +1122,65 @@ def abnf-kept-seg [seg]
     case "" false
     case _ true
 
+; A literal's characters as their code points, in order: its ASCII
+; characters cut out first, then each run of other characters taken
+; apart.
 def abnf-codes [text]
   let [present (filter (fn [ch] (abnf-some (abnf-rest (split (abnf-at ch 0) text)))) abnf-ascii)]
     let [segs (abnf-code-walk abnf-code-walk present [(abnf-raw-seg text)])]
-      map (fn [seg] (abnf-wide-code text seg)) segs
+      abnf-flat (map (fn [seg] (abnf-wide-codes text seg)) segs)
 
-; A character past ASCII and inside the Basic Multilingual Plane, as its
-; code point: its block of 256 is the last whose start it is not below,
-; and its place in the block the one \`\\uXXXX\` escape there that spells it.
+; The sixteen hexadecimal digits, and the 256 pairs of them.
 def abnf-hex-digits ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "A" "B" "C" "D" "E" "F"]
 
 def abnf-hex-pairs
   abnf-flat (map (fn [a] (map (fn [b] (string-join "" [a b])) abnf-hex-digits)) abnf-hex-digits)
 
+; The start of each block of 256 code points in the Basic Multilingual
+; Plane, by which a character past ASCII is found.
 def abnf-blocks [0 256 512 768 1024 1280 1536 1792 2048 2304 2560 2816 3072 3328 3584 3840 4096 4352 4608 4864 5120 5376 5632 5888 6144 6400 6656 6912 7168 7424 7680 7936 8192 8448 8704 8960 9216 9472 9728 9984 10240 10496 10752 11008 11264 11520 11776 12032 12288 12544 12800 13056 13312 13568 13824 14080 14336 14592 14848 15104 15360 15616 15872 16128 16384 16640 16896 17152 17408 17664 17920 18176 18432 18688 18944 19200 19456 19712 19968 20224 20480 20736 20992 21248 21504 21760 22016 22272 22528 22784 23040 23296 23552 23808 24064 24320 24576 24832 25088 25344 25600 25856 26112 26368 26624 26880 27136 27392 27648 27904 28160 28416 28672 28928 29184 29440 29696 29952 30208 30464 30720 30976 31232 31488 31744 32000 32256 32512 32768 33024 33280 33536 33792 34048 34304 34560 34816 35072 35328 35584 35840 36096 36352 36608 36864 37120 37376 37632 37888 38144 38400 38656 38912 39168 39424 39680 39936 40192 40448 40704 40960 41216 41472 41728 41984 42240 42496 42752 43008 43264 43520 43776 44032 44288 44544 44800 45056 45312 45568 45824 46080 46336 46592 46848 47104 47360 47616 47872 48128 48384 48640 48896 49152 49408 49664 49920 50176 50432 50688 50944 51200 51456 51712 51968 52224 52480 52736 52992 53248 53504 53760 54016 54272 54528 54784 55040 55296 55552 55808 56064 56320 56576 56832 57088 57344 57600 57856 58112 58368 58624 58880 59136 59392 59648 59904 60160 60416 60672 60928 61184 61440 61696 61952 62208 62464 62720 62976 63232 63488 63744 64000 64256 64512 64768 65024 65280]
 
-def abnf-bmp-code [c]
-  let [h (top (filter (fn [i] (chars-within [[(abnf-at abnf-blocks i) 65535]] c)) (indices abnf-blocks)))]
-    let [hh (abnf-at abnf-hex-pairs h)]
-      let [found (filter (fn [l] (abnf-same (unquoted (string-join "" ["\\"\\\\u" hh l "\\""])) c)) abnf-hex-pairs)]
-        match (count found)
-          case 0 ""
-          case _
-            match hh
-              case "00" (abnf-at found 0)
-              case _ (string-join "" [hh (abnf-at found 0)])
-
-; A piece of a literal that is no ASCII character: one character of the
-; Basic Multilingual Plane, as its code point, and nothing else.
-def abnf-wide-code [text seg]
+; A piece of a literal that holds no ASCII character: characters of the
+; Basic Multilingual Plane, each as its code point, in order. The run is
+; cut at each character it holds, found a block of 256 at a time: the
+; block of its least character is the last whose start that character is
+; not below, the characters of that block the run holds are the escapes
+; there it holds, and the rest of the run is taken the same way.
+def abnf-wide-codes [text seg]
   match (kind (get :raw seg))
     case :string
       let [raw (get :raw seg)]
-        match (length raw)
-          case 1
-            match (chars-within [[128 55295] [57344 65535]] raw)
-              case true
-                match (abnf-bmp-code raw)
-                  case "" (abnf-fail (string-join "" ["the literal " (quoted text) " holds a character the render cannot spell"]))
-                  case code code
-              case false (abnf-fail (string-join "" ["the literal " (quoted text) " holds a character past U+FFFF, which the render does not spell as a numeric value"]))
-          case _ (abnf-fail (string-join "" ["the literal " (quoted text) " holds two characters past U+007F in a row, which the render does not spell as numeric values"]))
-    case _ (get :cp seg)
+        match (chars-within [[128 55295] [57344 65535]] raw)
+          case false (abnf-fail (string-join "" ["the literal " (quoted text) " holds a character past U+FFFF, which the render does not spell as a numeric value"]))
+          case true
+            let [found (abnf-wide-chars abnf-wide-chars text raw [])]
+              map (fn [piece] (get :cp piece)) (abnf-code-walk abnf-code-walk found [(abnf-raw-seg raw)])
+    case _ [(get :cp seg)]
+
+def abnf-wide-chars [self text run acc]
+  match run
+    case "" acc
+    case _
+      let [b (top (filter (fn [i] (chars-within [[(abnf-at abnf-blocks i) 65535]] run)) (indices abnf-blocks)))]
+        let [hh (abnf-at abnf-hex-pairs b)]
+          let [found (filter (fn [ch] (abnf-some (abnf-rest (split (abnf-at ch 0) run)))) (map (fn [l] [(unquoted (string-join "" ["\\"\\\\u" (abnf-hex-lower hh) (abnf-hex-lower l) "\\""])) (abnf-point-hex hh l)]) abnf-hex-pairs))]
+            match (count found)
+              case 0 (abnf-fail (string-join "" ["the literal " (quoted text) " holds a character the render cannot spell"]))
+              case _ (self self text (abnf-strip-chars abnf-strip-chars found run) (abnf-cat acc found))
+
+; A code point's digits as ABNF writes them, without leading zeros.
+def abnf-point-hex [hh l]
+  match hh
+    case "00" l
+    case _
+      match (abnf-starts "0" hh)
+        case true (string-join "" [(abnf-after "0" hh) l])
+        case false (string-join "" [hh l])
+
+def abnf-strip-chars [self chars s]
+  match (count chars)
+    case 0 s
+    case _ (self self (pop chars) (string-join "" (split (abnf-at (top chars) 0) s)))
 
 def abnf-has-letter [text]
   abnf-not (chars-within [[0 64] [91 96] [123 1114111]] text)
@@ -1043,7 +1241,7 @@ def abnf-used [cx]
           map
             fn [name]
               let [r (get-path (as-path [name]) rules)]
-                string-join " " (map (fn [alt] (abnf-str (get "s" alt))) (abnf-cat (abnf-open r) (abnf-close r)))
+                string-join " " (abnf-flat (map abnf-s (abnf-cat (abnf-open r) (abnf-close r))))
             keys rules
         " "
 
@@ -1264,17 +1462,20 @@ def abnf-trim-ends [t]
 
 ; A rule name ABNF can spell: a letter, then letters, digits and hyphens.
 def abnf-legal-name [name]
-  match (chars-within [[45 45] [48 57] [65 90] [97 122]] name)
-    case false false
-    case true
-      match (abnf-starts "-" name)
-        case true false
-        case false (abnf-none (filter (fn [d] (abnf-starts d name)) ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]))
+  match name
+    case "" false
+    case _
+      match (chars-within [[45 45] [48 57] [65 90] [97 122]] name)
+        case false false
+        case true
+          match (abnf-starts "-" name)
+            case true false
+            case false (abnf-none (filter (fn [d] (abnf-starts d name)) ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]))
 
 def abnf-ref-text [name]
   match (abnf-legal-name name)
     case true name
-    case false (abnf-fail (string-join "" ["the rule " name " has a name ABNF cannot spell"]))
+    case false (abnf-fail (string-join "" ["the rule " (quoted name) " has a name ABNF cannot spell"]))
 
 ; Whether a token is a rule the compiler lifted: a literal's token whose
 ; name is not the one the literal gives it, or that nothing references.

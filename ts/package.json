@@ -42,6 +42,7 @@
     "dist",
     "src",
     "bin",
+    "embed-translate.js",
     "README.md",
     "LICENSE"
   ],
