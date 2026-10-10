@@ -289,3 +289,22 @@ test('the render refuses a case-insensitive literal whose numeric value matches 
     return spec
   }, /the case-insensitive literal "\u00e9" holds a character past ASCII that may have cases and no ASCII letter/)
 })
+
+// A spec without `meta.provenance` is read by the names the compiler gives
+// its helpers, `_gen<n>_<kind>`, each with the shape the compiler gives
+// its kind. ABNF spells no name that begins with `_`, so a rule the author
+// named `_general`, or named as a helper and shaped otherwise, is refused
+// by its name rather than read as a helper or left out.
+test('the render reads the compiler\'s helpers by name and shape where the spec names no provenance', { skip }, () => {
+  const noProvenance = (spec) => {
+    delete spec.meta
+    return spec
+  }
+  const HELPERS = 'start = ( "a" / "b" ) word [ "c" ] word *"d" word 1*"e" word 2*3"f" word\nword = %x61-7A\n'
+  writes(HELPERS, HELPERS, noProvenance)
+  for (const name of ['_general', '_gen9_opt_x', '_gen9_plus_x']) {
+    refuses('start = word other\nword = %x61-7A\nother = "x" "y"\n',
+      (spec) => JSON.parse(JSON.stringify(noProvenance(spec)).split('"other"').join(`"${name}"`)),
+      new RegExp(`the rule "${name}" has a name ABNF cannot spell`))
+  }
+})

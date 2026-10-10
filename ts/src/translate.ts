@@ -87,8 +87,9 @@ const TRANSLATION: TranslationParts = Object.freeze({
 ;
 ; - A rule the author wrote is a rule of the spec that the spec's
 ;   \`meta.provenance\` does not name (a spec without it is read by the
-;   names the compiler gives its rules, and the start wrapper by its
-;   shape); every rule it names is the compiler's: a repetition's, an
+;   names the compiler gives its rules, a helper's only where it has
+;   the shape of its kind too, and the start wrapper by its shape);
+;   every rule it names is the compiler's: a repetition's, an
 ;   option's or a group's helper (\`_gen<n>_star_...\`, \`_plus_\`, \`_opt_\`,
 ;   \`_rep_\`, \`_group\`), a sequence's chain steps (\`$alt<i>\`,
 ;   \`$step<j>\`), a left-factored tail (\`$fact<k>\`) and the start
@@ -371,12 +372,120 @@ def abnf-made [cx name]
         case :string true
         case _ false
     case _
-      match (abnf-starts "_gen" name)
-        case true true
+      match (abnf-some (abnf-rest (split "$" name)))
+        case true (abnf-split-name name)
         case false
-          match (abnf-same name (get :start cx))
-            case true (abnf-wrapper (abnf-rule cx name))
-            case false (abnf-some (abnf-rest (split "$" name)))
+          match (abnf-gen-kind name)
+            case ""
+              match (abnf-same name (get :start cx))
+                case true (abnf-wrapper (abnf-rule cx name))
+                case false false
+            case k (abnf-helper-shape cx name k)
+
+; The kind of helper a name gives, as the compiler names the helpers it
+; makes, \`_gen<n>_<kind>...\` with the kind a repetition's, an option's or
+; a group's (\`_gen3_star_x\`, \`_gen4_group\`), or "" for any other name: a
+; rule the author wrote may begin with \`_gen\` too (\`_general\`).
+def abnf-gen-kind [name]
+  match (abnf-starts "_gen" name)
+    case false ""
+    case true
+      let [parts (split "_" (abnf-after "_gen" name))]
+        match (count parts)
+          case 1 ""
+          case _
+            match (match (abnf-digits (abnf-at parts 0)) (case true (abnf-among (abnf-at parts 1) ["star" "plus" "opt" "rep" "group"])) (case false false))
+              case true (abnf-at parts 1)
+              case false ""
+
+; Whether a name is one the compiler gives a rule it splits off another,
+; every part after a \`$\` one of its own: a dispatcher's alternative
+; (\`$alt<i>\`), a chain's step (\`$step<j>\`), a left-factored tail
+; (\`$fact<k>\`), a probe dispatcher (\`$pd<i>\`) and its parts (\`$probe\`,
+; \`$with\`, \`$no\`, numbered where the name was taken).
+def abnf-split-name [name]
+  abnf-none (filter (fn [p] (abnf-not (abnf-split-part p))) (abnf-rest (split "$" name)))
+
+def abnf-split-part [p]
+  abnf-some (filter (fn [k] (abnf-split-fits k p)) ["alt" "step" "fact" "pd" "probe" "with" "no"])
+
+def abnf-split-fits [k p]
+  match (abnf-starts k p)
+    case false false
+    case true
+      match (abnf-after k p)
+        case "" (abnf-among k ["probe" "with" "no"])
+        case rest (abnf-digits rest)
+
+; A rule named as the compiler names a helper, in a spec that names no
+; provenance, is the compiler's where it has the shape the compiler gives
+; that kind, and the author's otherwise: a repetition's loop has its
+; guarded entry (\`{c: {n.rep: 0}, r: <self>}\`); a plus is its item and the
+; loop after it; an option one element and the empty alternative; a
+; counted repetition copies of one element, and the option or the loop
+; after them; a group any alternatives.
+def abnf-helper-shape [cx name k]
+  match k
+    case "group" true
+    case "star" (abnf-some (filter (fn [alt] (abnf-loop-entry name alt)) (abnf-open (abnf-rule cx name))))
+    case _
+      let [alts (abnf-raw-alts cx name)]
+        match k
+          case "plus" (abnf-plus-shape alts)
+          case "opt" (abnf-opt-shape alts)
+          case _ (abnf-rep-shape alts)
+
+def abnf-loop-entry [name alt]
+  match (abnf-same (abnf-r alt) name)
+    case false false
+    case true
+      let [c (get "c" alt)]
+        match (kind c)
+          case :record (abnf-loop-value c "n.rep" [0])
+          case _ false
+
+def abnf-plus-shape [alts]
+  match (count alts)
+    case 1
+      let [seq (abnf-vec (abnf-at alts 0))]
+        match (count seq)
+          case 2 (abnf-same (abnf-helper-ref (abnf-at seq 1)) "star")
+          case _ false
+    case _ false
+
+def abnf-opt-shape [alts]
+  match (count alts)
+    case 2
+      let [counts (map count alts)]
+        match (abnf-among "0" (map abnf-num counts))
+          case true (abnf-among "1" (map abnf-num counts))
+          case false false
+    case _ false
+
+def abnf-rep-shape [alts]
+  match (count alts)
+    case 1
+      let [seq (abnf-vec (abnf-at alts 0))]
+        match (count seq)
+          case 0 true
+          case _
+            let [lead (match (abnf-among (abnf-helper-ref (top seq)) ["star" "opt"]) (case true (pop seq)) (case false seq))]
+              let [keys (map abnf-el-name lead)]
+                abnf-none (filter (fn [key] (match key (case "" true) (case _ (abnf-not (abnf-same key (abnf-at keys 0)))))) keys)
+    case _ false
+
+; The kind of helper an element references by name, or "".
+def abnf-helper-ref [el]
+  match (get :k el)
+    case :ref (abnf-gen-kind (get :name el))
+    case _ ""
+
+; A token or a reference by its name, any other element "".
+def abnf-el-name [el]
+  match (get :k el)
+    case :tok (string-join "" ["#" (get :name el)])
+    case :ref (string-join "" ["@" (get :name el)])
+    case _ ""
 
 ; The start wrapper the compiler adds, which \`options.rule.start\` names:
 ; one open alternate that consumes nothing and pushes the grammar's start
