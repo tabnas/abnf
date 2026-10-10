@@ -275,3 +275,86 @@ pub fn plugin() -> Plugin {
             .map_err(|error| PluginError(error.to_string()))
     })
 }
+
+/// One optional alchemy translation source and its explicit entry point.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TranslationPart {
+    /// The definition a host calls after linking the source.
+    pub entry: &'static str,
+    /// The source text, or `None` for an entry supplied by alchemy.
+    pub source: Option<&'static str>,
+}
+
+/// The package-local structural translation interface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TranslationParts {
+    /// The complete `tabnas.plugin.json` text.
+    pub manifest: &'static str,
+    /// An optional lift from the grammar's events to its first read shape.
+    pub lift: Option<TranslationPart>,
+    /// An optional embedding of a plain tree in the format's schema, with its reverse.
+    pub embed: Option<TranslationPart>,
+    /// An optional render from the write shape to text.
+    pub render: Option<TranslationPart>,
+}
+
+const TRANSLATION: TranslationParts = TranslationParts {
+    manifest: include_str!("../translate/manifest.json"),
+    lift: None,
+    embed: None,
+    render: Some(TranslationPart {
+        entry: "abnf-render",
+        source: Some(include_str!("../translate/render.alc")),
+    }),
+};
+
+/// Return the translation parts of ABNF documents: the manifest, and the
+/// render that writes a grammar spec, the GrammarSpec the compiler emits
+/// for a grammar, back as ABNF. There is no lift and no embed: a host
+/// reads a document by compiling it ([`abnf_compile`] with `recognition`
+/// false and `strict` true, the text the TypeScript compiler writes byte
+/// for byte), and the tree is the spec's own shape, the schema
+/// `grammar-spec`, which EBNF and GBNF share.
+///
+/// ```
+/// let parts = tabnas_abnf::translate().expect("abnf carries translation parts");
+/// assert_eq!(parts.render.map(|part| part.entry), Some("abnf-render"));
+/// assert_eq!(parts.embed, None);
+/// ```
+#[must_use]
+pub const fn translate() -> Option<TranslationParts> {
+    Some(TRANSLATION)
+}
+
+/// The plugin's manifest, `tabnas.plugin.json`, as the repository carries
+/// it. Its `translate` object is what a host that translates reads: the
+/// shape a document is read as and written from (`tree`), the schema of
+/// that tree (`grammar-spec`), the root the render needs (`object`), the
+/// file that holds the render, and the sentences that say what a written
+/// grammar does not keep. The crate embeds its own copy,
+/// `translate/manifest.json`, since a packaged crate holds nothing outside
+/// `rs/`; `tests/translate_test.rs` holds the copy to the file.
+///
+/// ```
+/// assert!(tabnas_abnf::manifest_text().contains("\"grammar-spec\""));
+/// ```
+pub fn manifest_text() -> &'static str {
+    TRANSLATION.manifest
+}
+
+/// The render, `alchemy/render.alc`, the file the manifest's
+/// `translate.render` names: a library of alchemy definitions, with no
+/// `export`, whose entry point `abnf-render` writes a grammar spec's
+/// events as one ABNF document that compiles back to the same spec. A
+/// host links it with its own program. The crate embeds its own copy,
+/// `translate/render.alc`, held to the file as the manifest's is.
+///
+/// ```
+/// assert!(tabnas_abnf::render_text().contains("def abnf-render [input]"));
+/// ```
+pub fn render_text() -> &'static str {
+    match TRANSLATION.render {
+        Some(part) => part.source.unwrap_or_default(),
+        None => "",
+    }
+}

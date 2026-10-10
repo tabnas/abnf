@@ -226,6 +226,8 @@ the point: they are what would have caught this.
 | [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
 | [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`), tracking the TS implementation; front-end in [`rs/src/converter.rs`](rs/src/converter.rs), ABNF meta-grammar in [`rs/src/parser_abnf.rs`](rs/src/parser_abnf.rs), public surface in [`rs/src/lib.rs`](rs/src/lib.rs). No CLI. |
 | [`DIVERGENCE.md`](DIVERGENCE.md) | Every input on which a port answers something the canonical TypeScript does not, each one measured and each one pinned by a test in [`rs/tests/divergence_test.rs`](rs/tests/divergence_test.rs) so it cannot go stale. |
+| [`alchemy/render.alc`](alchemy/render.alc) | The render: a grammar spec written back as ABNF (entry `abnf-render`). See "Translation". |
+| [`ts/embed-translate.js`](ts/embed-translate.js) | Copies `tabnas.plugin.json` and the render into `ts/src/translate.ts`, `go/translate/` and `rs/translate/`, all three GENERATED; `npm run embed` runs it, and so does the build. |
 
 The usual tabnas "the port tracks TS" contract applies: `go/` and `rs/`
 mirror the TypeScript implementation (`Abnf` / `abnf_convert`,
@@ -277,6 +279,118 @@ user's file: the observable is the engine's rule depth, `d` on every
 ten thousand times and asserts the maximum `d` stays what a single item
 needs is the proof. It proves the loop, not the grammar: depth from real
 recursion is measured by nesting, not by repeating.
+
+## Translation
+
+A host that translates between formats (aless, `alchemy translate`, the
+design in tabnas/transduce `docs/translation.md`) reads this format's
+parts from the `translate` object of
+[`tabnas.plugin.json`](tabnas.plugin.json): an ABNF document is read as a
+tree and written from one (`reads`, `writes`), an object (`root`), of the
+schema `grammar-spec` (`schema`), which EBNF and GBNF share, since the
+three compile through the one compiler, so a host can translate a grammar
+from one notation to another. There is no embed, so the target is
+schema-only: a host composes into the render only from a source of the
+same schema, or from a program that builds a grammar spec, and refuses
+any other source before reading it.
+
+There is no `lift` either. A lift is an alchemy program a composition runs
+over a source's events; reading an ABNF document means compiling it,
+which is the host's registry concern, as aless and alchemy-cli wire each
+format's reader. The tree a host reads is the pure-data GrammarSpec of
+`abnfCompile(src, { recognition: false, strict: true })` (`abnf_compile`
+with `recognition: false` and `strict: true` in Rust, `AbnfCompile` with
+`Recognition` false and `Strict` true in Go), parsed as JSON: the
+compiled rules with their tree builders as `$`-builtins, the options,
+and `meta.provenance`, which names the rule each synthesized rule came
+from. The TypeScript and Rust compilers write that text byte for byte
+alike (tabnas-bnf's `rs/tests/oracle_test.rs` holds its emitter to the
+TypeScript one), its keys in the order the compiler emits them, which is
+the grammar's rule order and its tokens' order, and the render reads
+both. Go's serializer writes the same spec with its keys in name order and
+the match tokens' order in a `tokenOrder` list, so a spec a Go host
+serializes has lost the rule order, which ranks the tokens (the order the
+lexer tries two tokens a place expects); the render refuses such a spec
+when its `tokenOrder` holds two tokens or more, rather than write rules
+whose tokens rank otherwise.
+
+[`alchemy/render.alc`](alchemy/render.alc) is the render, an
+[alchemy](https://github.com/tabnas/alchemy) library whose entry point
+`abnf-render` writes a grammar spec as one ABNF document. Its contract is
+the round trip: the text compiles back to the spec it was written from.
+The spec is a compiled grammar, not the grammar's text, so the render
+reads the compiler's shapes back into the notation:
+
+- A rule the spec's provenance does not name is one the author wrote. A
+  repetition's, an option's or a group's helper (`_gen<n>_star_...`) is
+  written where it is referenced, as the construct it compiles: the
+  replace loop every `*A` becomes, read by its guarded entry, as `*A`,
+  and a counted repetition's nested options counted from the helpers'
+  numbers rather than walked.
+- A sequence is read from its chain of `$step` rules, a dispatcher's
+  alternatives from its `$alt` rules (the gap in their numbers is the
+  empty alternative), and a rule whose alternatives are each one segment
+  from its open alternates, the lookahead copies the dispatch made of one
+  alternative read as one. There the empty alternative is written first,
+  since the compiler puts it last wherever it stood, and the alternatives
+  that push a helper are put back in the order of the helpers' numbers,
+  which the compiler gives them before it reorders alternatives to tell
+  them apart.
+- A left-factored tail is expanded back into the alternatives it was
+  factored from, and alternatives that were each a group, which the
+  compiler factors into the first (`( A x ) / ( A y )`), are read back as
+  the groups they were.
+- A leading reference the compiler substituted by the referenced rule's
+  alternatives is written back where those alternatives, each followed by
+  one same tail, still stand together: the candidate with the most
+  alternatives, then the one the spec defines first. A rule that would be
+  left one reference is not written back, since the compiler does not
+  substitute into a pure alias.
+- A token is written as the terminal it matches, and a token the compiler
+  made of a rule (`CR = %x0D`) as that rule. The RFC 5234 core rules are
+  not written, since the compiler adds them again.
+
+The reading is the same, definition for definition, in tabnas/ebnf's and
+tabnas/gbnf's renders, under their own prefixes, and only the writing is
+each notation's: a fix to how a shape is read belongs in all three.
+
+The manifest's `loss` list says, a sentence each, what a written grammar
+does not keep, and what the render refuses with
+TARGET_VALUE_UNREPRESENTABLE: an action (a value annotation's builders, a
+user action, the probe dispatcher of an optional prefix), a condition or
+a counter other than a repetition's, an error generator or an alternate
+modifier (`e`, `h`), a function reference where a rule or a count is due,
+a set of tokens at one place, a removal, a clear or the form that edits a
+rule already installed (`{alts, inject}`), a token no ABNF terminal
+matches (a class whose flags change what it matches and a pattern that is
+neither one class nor an escaped literal among them), a rule name ABNF
+cannot spell, and Go's `tokenOrder`. The file's header comment says how
+each shape is read.
+
+Measured with the `alchemy` command (alchemy-cli) over every grammar this
+repository's corpora hold: the 68 files of `test/abnf-corpus/`, the 7 of
+`ts/test/grammar/` and the 95 distinct grammars of `test/spec/*.tsv`,
+170 in all. 115 compile; of those, 87 come back as the same spec, byte
+for byte. Three come back as another spec, each covered by a loss
+sentence: `ipv6.abnf` and `toml.abnf`, whose alternatives the compiler
+reordered with no helper's number to restore their order (the third
+sentence), and the indirect left recursion of `P = Q`, `Q = P PL / NR`
+(the fourth). The other 25 are refused, each naming its cause: 21 value
+annotations, 2 probe dispatchers (`jid.abnf`, `ts/test/grammar/rfc3986-uri.abnf`),
+a literal past U+FFFF and a removal.
+
+`npm run embed` in `ts/` (the build runs it) copies the manifest and the
+render into every runtime: `ts/src/translate.ts`, `go/translate/` and
+`rs/translate/`, served as `translate()` in TypeScript, `Translate()` in
+Go and `translate()`, `manifest_text()` and `render_text()` in Rust. The
+translation tests (`ts/test/translate.test.js`, `go/translate_test.go`,
+`rs/tests/translate_test.rs`) hold the copies to the files and the tree to
+what the compiler writes, so change the files at the root and run the
+embed. Running the render needs alchemy, which this repository does not
+depend on: `ts/test/translate-render.test.js` runs it through the
+`alchemy` command `TABNAS_ALCHEMY` names, over specs the compiler writes
+and specs changed to hold what the render must refuse, and skips without
+it; the round trip over the corpora is the hosts'.
 
 ## How the compiler is itself a tabnas grammar
 
@@ -538,10 +652,12 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-Five of the sixteen files in `ts/test/*.test.js`, run against the built
-`dist`, need a word of explanation. The other eleven name themselves:
+Five of the eighteen files in `ts/test/*.test.js`, run against the built
+`dist`, need a word of explanation. The other thirteen name themselves:
 `class-overlap`, `compile`, `conformance`, `docs`, `lifting`, `parity`,
-`port-deps`, `roundtrip`, `token`, `value-annotation` and `version`.
+`port-deps`, `roundtrip`, `token`, `translate`, `translate-render` (the
+render run through the `alchemy` command `TABNAS_ALCHEMY` names, skipped
+without it), `value-annotation` and `version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
