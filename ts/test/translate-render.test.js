@@ -179,3 +179,151 @@ test('the render refuses a spec that gives its match tokens\' order as a list', 
     return spec
   }, /tokenOrder/)
 })
+
+// A class is matched by code points with `u` and by UTF-16 code units
+// without it, which differ for a negated class, a class past U+FFFF and
+// `[\s\S]`, and for a class holding a surrogate. Every compiler here gives
+// a class the flags its text compiles back with, so a class whose flags
+// are others is refused, and a class of other characters, matched alike
+// either way, is written whatever its flags.
+test('the render refuses a class whose flags are not the ones its text compiles back with', { skip }, () => {
+  refuses(KEYWORD, (spec) => {
+    spec.options.match.token[CLASS] = '@~/^[\\s\\S]/'
+    return spec
+  }, /is the class @~\/\^\[\\s\\S\]\/, whose flags \(none\) change what it matches/)
+  refuses(KEYWORD, (spec) => {
+    spec.options.match.token[CLASS] = '@~/^[\\ud800-\\udbff]/u'
+    return spec
+  }, /whose flags \(u\) change what it matches/)
+  writes(KEYWORD, KEYWORD, (spec) => {
+    spec.options.match.token[CLASS] = '@~/^[\\u0061-\\u007a]/u'
+    return spec
+  })
+})
+
+// GBNF's `.` compiles to `[\s\S]` with `u`, every code point, which ABNF
+// writes as the range of them all.
+test('the render writes the class of every code point as the range of them all', { skip }, () => {
+  const out = render((() => {
+    const spec = compile(KEYWORD)
+    spec.options.match.token[CLASS] = '@~/^[\\s\\S]/u'
+    return spec
+  })())
+  Assert.equal(out.text, 'start = "if" word\nword = 1*%x0-10FFFF\n', JSON.stringify(out))
+})
+
+// `meta.provenance` names the rules the compiler made; where a spec has
+// none, the start wrapper `options.rule.start` names is read by its shape.
+test('the render reads the start wrapper by its shape where the spec names no provenance', { skip }, () => {
+  writes(KEYWORD, KEYWORD, (spec) => {
+    delete spec.meta
+    return spec
+  })
+})
+
+// The compiler lays a contested class over the atoms of a partition, a
+// token set named for the class; the render writes the class the name
+// gives, so the set's tokens must be that class.
+const SETS = 'start = a / b\na = %x61-7A\nb = %x30-39 / %x61-66\n'
+test('the render refuses a token set whose tokens are not the class its name gives', { skip }, () => {
+  writes(SETS, SETS)
+  refuses(SETS, (spec) => {
+    spec.options.tokenSet[CLASS.slice(1)].push('#RX___U0030__U0039')
+    return spec
+  }, /the token set #RX___U0061__U007A lays tokens over its class \[\\u0061-\\u007a\] that match other characters than the class does/)
+  refuses(SETS, (spec) => {
+    spec.options.tokenSet[CLASS.slice(1)].pop()
+    return spec
+  }, /the token set #RX___U0061__U007A lays tokens over its class/)
+})
+
+test('the render refuses a rule with no alternate to open with', { skip }, () => {
+  refuses(KEYWORD, (spec) => {
+    spec.rule.word.open = []
+    spec.rule.word.close = []
+    return spec
+  }, /rule word has no alternate to open with/)
+})
+
+// A sequence compiles to a chain of steps, each one open alternate and at
+// most one close alternate naming the next step.
+test('the render refuses a sequence\'s step with more alternates than a step', { skip }, () => {
+  const SEQ = 'start = "a" w "b" w\nw = %x61-7A\n'
+  writes(SEQ, SEQ)
+  refuses(SEQ, (spec) => {
+    const other = JSON.parse(JSON.stringify(spec.rule.start.open[0]))
+    other.s = '#B'
+    spec.rule.start.open.push(other)
+    return spec
+  }, /rule start replaces itself in its close as a sequence's step does, and has more alternates than a step/)
+})
+
+// A token named for a rule the compiler lifted is written as that rule,
+// and two rules of one name would be one.
+test('the render refuses a lifted rule whose name another rule holds', { skip }, () => {
+  refuses(KEYWORD, (spec) => {
+    spec.options.match.token['#word'] = spec.options.match.token['#IF']
+    delete spec.options.match.token['#IF']
+    alt(spec).s = '#word'
+    return spec
+  }, /the token #word is written as a rule named word, the name of another rule the spec holds/)
+})
+
+// A dispatch's lookahead copies of one alternative consume and push the
+// same and differ in what they look ahead at; alternates alike in every
+// token are as many alternatives.
+test('the render keeps alternatives that are alike', { skip }, () => {
+  writes('start = "a" / "a"\n', 'start = "a" / "a"\n')
+  writes('start = "a" "b" / "a" "b"\n', 'start = "a" "b" / "a" "b"\n')
+})
+
+// The compiler reads a numeric value as a case-insensitive literal where
+// it holds a letter of ASCII, with the folding the pattern has, and as an
+// exact one where it holds none; so a case-insensitive literal past ASCII
+// with no such letter would come back matching the one case it spells.
+test('the render refuses a case-insensitive literal whose numeric value matches exactly', { skip }, () => {
+  const MIXED = 'start = %x41.E9 word\nword = 1*%x61-7A\n'
+  writes(MIXED, MIXED)
+  refuses(KEYWORD, (spec) => {
+    spec.options.match.token['#IF'] = '@~/^\u00e9/i'
+    return spec
+  }, /the case-insensitive literal "\u00e9" holds a character past ASCII that may have cases and no ASCII letter/)
+})
+
+// A spec without `meta.provenance` is read by the names the compiler gives
+// its helpers, `_gen<n>_<kind>`, each with the shape the compiler gives
+// its kind. ABNF spells no name that begins with `_`, so a rule the author
+// named `_general`, or named as a helper and shaped otherwise, is refused
+// by its name rather than read as a helper or left out.
+test('the render reads the compiler\'s helpers by name and shape where the spec names no provenance', { skip }, () => {
+  const noProvenance = (spec) => {
+    delete spec.meta
+    return spec
+  }
+  const HELPERS = 'start = ( "a" / "b" ) word [ "c" ] word *"d" word 1*"e" word 2*3"f" word\nword = %x61-7A\n'
+  writes(HELPERS, HELPERS, noProvenance)
+  for (const name of ['_general', '_gen9_opt_x', '_gen9_plus_x']) {
+    refuses('start = word other\nword = %x61-7A\nother = "x" "y"\n',
+      (spec) => JSON.parse(JSON.stringify(noProvenance(spec)).split('"other"').join(`"${name}"`)),
+      new RegExp(`the rule "${name}" has a name ABNF cannot spell`))
+  }
+})
+
+// Every grammar text compiles to a start wrapper closed by the end of the
+// source, and that close lets the end come after what the lexer skips. A
+// spec that starts at another rule, or at a wrapper without its close,
+// would come back accepting what it refuses, so it is refused, with its
+// provenance or without.
+test('the render refuses a start that is not the wrapper every grammar text compiles to', { skip }, () => {
+  for (const provenance of [true, false]) {
+    refuses(KEYWORD, (spec) => {
+      spec.rule.__start__.close = []
+      if (!provenance) delete spec.meta
+      return spec
+    }, /the start rule __start__ is not the start wrapper every grammar text compiles to/)
+  }
+  refuses(KEYWORD, (spec) => {
+    spec.options.rule.start = 'start'
+    return spec
+  }, /the start rule start is not the start wrapper every grammar text compiles to/)
+})
