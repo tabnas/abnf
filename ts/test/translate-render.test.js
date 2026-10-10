@@ -308,3 +308,22 @@ test('the render reads the compiler\'s helpers by name and shape where the spec 
       new RegExp(`the rule "${name}" has a name ABNF cannot spell`))
   }
 })
+
+// Every grammar text compiles to a start wrapper closed by the end of the
+// source, and that close lets the end come after what the lexer skips. A
+// spec that starts at another rule, or at a wrapper without its close,
+// would come back accepting what it refuses, so it is refused, with its
+// provenance or without.
+test('the render refuses a start that is not the wrapper every grammar text compiles to', { skip }, () => {
+  for (const provenance of [true, false]) {
+    refuses(KEYWORD, (spec) => {
+      spec.rule.__start__.close = []
+      if (!provenance) delete spec.meta
+      return spec
+    }, /the start rule __start__ is not the start wrapper every grammar text compiles to/)
+  }
+  refuses(KEYWORD, (spec) => {
+    spec.options.rule.start = 'start'
+    return spec
+  }, /the start rule start is not the start wrapper every grammar text compiles to/)
+})

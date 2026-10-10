@@ -374,7 +374,9 @@ holding a character past ASCII and no ASCII letter, whose numeric value
 the compiler reads as exact, among them), a token set whose
 tokens are not the class its name gives, a rule with no alternate to open
 with, a sequence's step with more alternates than a step, a rule the
-compiler lifted to a token whose name another rule holds, a rule name
+compiler lifted to a token whose name another rule holds,
+a start that is not the start wrapper every grammar text compiles
+to, a rule name
 ABNF cannot spell, and Go's `tokenOrder`. The tree builders every
 compiled grammar carries, and its marks, are not written, as the plan's
 declared subset says (an action or a mark is not written): the compiler
