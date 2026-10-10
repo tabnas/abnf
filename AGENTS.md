@@ -362,10 +362,18 @@ a counter other than a repetition's, an error generator or an alternate
 modifier (`e`, `h`), a function reference where a rule or a count is due,
 a set of tokens at one place, a removal, a clear or the form that edits a
 rule already installed (`{alts, inject}`), a token no ABNF terminal
-matches (a class whose flags change what it matches and a pattern that is
-neither one class nor an escaped literal among them), a rule name ABNF
-cannot spell, and Go's `tokenOrder`. The file's header comment says how
-each shape is read.
+matches (a class whose flags change what it matches, a pattern that is
+neither one class nor an escaped literal, and a case-insensitive literal
+holding a character past ASCII and no ASCII letter, whose numeric value
+the compiler reads as exact, among them), a token set whose
+tokens are not the class its name gives, a rule with no alternate to open
+with, a sequence's step with more alternates than a step, a rule the
+compiler lifted to a token whose name another rule holds, a rule name
+ABNF cannot spell, and Go's `tokenOrder`. The tree builders every
+compiled grammar carries, and its marks, are not written, as the plan's
+declared subset says (an action or a mark is not written): the compiler
+makes them again from the rules, and a loss sentence says so. The file's
+header comment says how each shape is read.
 
 Measured with the `alchemy` command (alchemy-cli) over every grammar this
 repository's corpora hold: the 68 files of `test/abnf-corpus/`, the 7 of
