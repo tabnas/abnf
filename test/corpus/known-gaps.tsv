@@ -1,25 +1,25 @@
 runtime	kind	key	count	note
-ts	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s
-ts	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s
+ts	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s, or refuses it at its emit bound
+ts	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s, or refuses it at its emit bound
 ts	valid-not-accepted	go-abnf/testdata/void.abnf	1	rejected: abnf: no productions found
-ts	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded
-ts	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded
+ts	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded, or refused at the emit bound
+ts	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded, or refused at the emit bound
 ts	valid-not-accepted	tree-sitter-abnf/examples/elements.abnf	1	rejected: prose-val is only accepted as a whole rule definition, not inside an expression
 ts	mutation-leak	dangling-alt	49	appended `bad-rule = "a" /` accepted; alternation needs a concatenation after each "/"
 ts	mutation-leak	digit-leading-rulename	1	appended `9bad-rule = "x"` accepted; rulename = ALPHA *(ALPHA / DIGIT / "-")
-go	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s
-go	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s
+go	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s, or refuses it at its emit bound
+go	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s, or refuses it at its emit bound
 go	valid-not-accepted	go-abnf/testdata/void.abnf	1	rejected: abnf: no productions found
-go	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded
-go	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded
+go	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded, or refused at the emit bound
+go	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded, or refused at the emit bound
 go	valid-not-accepted	tree-sitter-abnf/examples/elements.abnf	1	rejected: prose-val is only accepted as a whole rule definition, not inside an expression
 go	mutation-leak	dangling-alt	49	appended `bad-rule = "a" /` accepted; alternation needs a concatenation after each "/"
 go	mutation-leak	digit-leading-rulename	1	appended `9bad-rule = "x"` accepted; rulename = ALPHA *(ALPHA / DIGIT / "-")
-rust	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s
-rust	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s
+rust	budget-exceeded	node-abnf/examples/email.abnf	1	compiler does not terminate within 256MB / 60s, or refuses it at its emit bound
+rust	budget-exceeded	tree-sitter-abnf/examples/dhall.abnf	1	compiler does not terminate within 256MB / 60s, or refuses it at its emit bound
 rust	valid-not-accepted	go-abnf/testdata/void.abnf	1	rejected: abnf: no productions found
-rust	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded
-rust	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded
+rust	valid-not-accepted	node-abnf/examples/email.abnf	1	budget exceeded, or refused at the emit bound
+rust	valid-not-accepted	tree-sitter-abnf/examples/dhall.abnf	1	budget exceeded, or refused at the emit bound
 rust	valid-not-accepted	tree-sitter-abnf/examples/elements.abnf	1	rejected: prose-val is only accepted as a whole rule definition, not inside an expression
 rust	mutation-leak	dangling-alt	49	appended `bad-rule = "a" /` accepted; alternation needs a concatenation after each "/"
 rust	mutation-leak	digit-leading-rulename	1	appended `9bad-rule = "x"` accepted; rulename = ALPHA *(ALPHA / DIGIT / "-")

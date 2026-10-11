@@ -214,6 +214,17 @@ function compileBudgeted(rel, { half, n, total }, append) {
   })
 }
 
+// The compiler's refusal at its emit bound: tabnas/bnf bounds what its
+// emitter may write (`MAX_EMIT_UNITS`), and refuses a grammar whose
+// compiled spec would pass it, naming the bound. The two grammars over
+// budget below are refused there in well under a second once that bound
+// ships, so the refusal is the same failure to finish as the budget, met
+// sooner and named. Only a refusal (`rejected: true`) can be one: a crash
+// is never laundered into it.
+const EMIT_BOUND = /exceeds the emit limit of \d+ units/
+const refusedAtEmitBound = (r) =>
+  !r.ok && true === r.rejected && EMIT_BOUND.test(String(r.error ?? ''))
+
 // How one budgeted compile is scored, in ONE place so the two halves
 // cannot disagree about what a watchdog stop means. A child stopped by its
 // own watchdog answers `{budget:true}` and a refusal answers `{ok:false}`,
@@ -221,10 +232,22 @@ function compileBudgeted(rel, { half, n, total }, append) {
 // half did read it alone, so a grammar that never terminated was scored as
 // the compiler correctly rejecting it (tabnas/abnf#74). Budget exhaustion
 // is a failure to finish on BOTH halves, never a pass and never a skip.
+//
+// A refusal at the emit bound (`bound`) is the same failure to finish, so
+// both halves score it with the budget: it is pinned by the
+// `budget-exceeded` rows, never a pass, and never a rejection on the
+// invalid half. Those rows therefore accept either outcome, and still fail
+// if the grammar compiles. Once tabnas/bnf ships the bound, they tighten to
+// the refusal alone.
 function scoreCorpus(r) {
   if (r.budget) return 'budget'
+  if (refusedAtEmitBound(r)) return 'bound'
   return r.ok ? 'accepted' : 'rejected'
 }
+
+// Both ways a compile can fail to finish: stopped by the budget, or
+// refused at the emit bound.
+const unfinished = (score) => 'budget' === score || 'bound' === score
 
 const manifest = loadTSV(path.join(CORPUS_DIR, 'manifest.tsv'))
 const mutations = loadTSV(path.join(CORPUS_DIR, 'mutations.tsv'))
@@ -294,6 +317,14 @@ describe('conformance: third-party ABNF corpus', () => {
     assert.equal(scoreCorpus({ budget: true, ok: false }), 'budget')
     assert.equal(scoreCorpus({ ok: true, names: [] }), 'accepted')
     assert.equal(scoreCorpus({ ok: false, error: 'no', rejected: true }), 'rejected')
+    const atBound = "abnf: rule 'x' exceeds the emit limit of 3500000 units " +
+      'while writing its alternates, which would add more than 10 units to ' +
+      'the 3499990 already written.'
+    assert.equal(scoreCorpus({ ok: false, error: atBound, rejected: true }), 'bound')
+    // A crash is a crash, whatever it says.
+    assert.equal(scoreCorpus({ ok: false, error: atBound, rejected: false }), 'rejected')
+    assert.ok(unfinished('budget') && unfinished('bound'))
+    assert.ok(!unfinished('accepted') && !unfinished('rejected'))
   })
 
   // --- half 1: valid grammars compile, and yield every declared rule ---
@@ -306,13 +337,15 @@ describe('conformance: third-party ABNF corpus', () => {
       const src = readCorpus(rel)
       const r = await compileBudgeted(rel, { half: 'valid', n: i + 1, total: VALID.length })
       const score = scoreCorpus(r)
-      if ('budget' === score) {
+      if (unfinished(score)) {
         overBudget.push(rel)
         validGaps.push(rel)
         if (RECORD) {
-          record('budget-exceeded', rel, 1,
-            `compiler did not finish within ${BUDGET_MB}MB / ${BUDGET_MS}ms`)
-          record('valid-not-accepted', rel, 1, 'budget exceeded')
+          record('budget-exceeded', rel, 1, 'budget' === score
+            ? `compiler did not finish within ${BUDGET_MB}MB / ${BUDGET_MS}ms`
+            : 'compiler refused it at its emit bound')
+          record('valid-not-accepted', rel, 1,
+            'budget' === score ? 'budget exceeded' : 'refused at the emit bound')
         }
         continue
       }
@@ -363,12 +396,13 @@ describe('conformance: third-party ABNF corpus', () => {
       // against the `budget-exceeded` rows, which is the claim being made,
       // and a new member fails that assertion whichever half it came from.
       const score = scoreCorpus(r)
-      if ('budget' === score) {
+      if (unfinished(score)) {
         overBudget.push(rel)
         invalidOverBudget.push(rel)
         if (RECORD) {
-          record('budget-exceeded', rel, 1,
-            `compiler did not finish within ${BUDGET_MB}MB / ${BUDGET_MS}ms`)
+          record('budget-exceeded', rel, 1, 'budget' === score
+            ? `compiler did not finish within ${BUDGET_MB}MB / ${BUDGET_MS}ms`
+            : 'compiler refused it at its emit bound')
         }
         continue
       }

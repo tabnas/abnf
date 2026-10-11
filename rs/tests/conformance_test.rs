@@ -256,6 +256,36 @@ enum Score {
     Budget,
     Accepted,
     Rejected,
+    /// The compiler's refusal at its emit bound: tabnas/bnf bounds what
+    /// its emitter may write (`MAX_EMIT_UNITS`) and refuses a grammar
+    /// whose compiled spec would pass it, naming the bound. The two
+    /// grammars over budget are refused there in well under a second once
+    /// that bound ships, so the refusal is the same failure to finish as
+    /// the budget, met sooner and named: both halves score it with the
+    /// budget, the `budget-exceeded` rows pin either outcome and still fail
+    /// if the grammar compiles, and it is never a rejection on the invalid
+    /// half. Once tabnas/bnf ships the bound, those rows tighten to the
+    /// refusal alone.
+    Bound,
+}
+
+impl Score {
+    /// A compile that did not finish: stopped by the budget, or refused at
+    /// the emit bound.
+    fn unfinished(&self) -> bool {
+        matches!(self, Score::Budget | Score::Bound)
+    }
+}
+
+/// Whether a refusal is the compiler's at its emit bound, which reads
+/// `exceeds the emit limit of <n> units`.
+fn refused_at_emit_bound(error: &str) -> bool {
+    const AT: &str = "exceeds the emit limit of ";
+    error.match_indices(AT).any(|(at, _)| {
+        let rest = &error[at + AT.len()..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        0 < digits && rest[digits..].starts_with(" units")
+    })
 }
 
 /// Reads the budget flag BEFORE `ok`. A child stopped by its own watchdog
@@ -270,6 +300,8 @@ fn score_corpus(result: &Outcome) -> Score {
         Score::Budget
     } else if result.ok {
         Score::Accepted
+    } else if refused_at_emit_bound(&result.error) {
+        Score::Bound
     } else {
         Score::Rejected
     }
@@ -294,6 +326,21 @@ fn a_watchdog_stop_is_never_scored_as_a_rejection_or_a_pass() {
         ..Outcome::default()
     };
     assert_eq!(score_corpus(&rejected), Score::Rejected);
+    let at_bound = Outcome {
+        error: "abnf: rule 'x' exceeds the emit limit of 3500000 units while writing its \
+                alternates, which would add more than 10 units to the 3499990 already written."
+            .to_string(),
+        ..Outcome::default()
+    };
+    assert_eq!(score_corpus(&at_bound), Score::Bound);
+    for near in [
+        "exceeds the emit limit of units",
+        "exceeds the emit limit of 12 elements",
+    ] {
+        assert!(!refused_at_emit_bound(near), "{near}");
+    }
+    assert!(Score::Budget.unfinished() && Score::Bound.unfinished());
+    assert!(!Score::Accepted.unfinished() && !Score::Rejected.unfinished());
 }
 
 /// How one budgeted child ended.
@@ -740,17 +787,28 @@ fn conformance() {
     // --- half 1: valid grammars compile AND yield every declared rule ---
     for rel in &valid {
         let result = compile_budgeted(exe, rel, "");
-        if Score::Budget == score_corpus(&result) {
+        let score = score_corpus(&result);
+        if score.unfinished() {
             over_budget.insert(rel.clone());
             valid_gaps.insert(rel.clone());
             if record {
-                note(
-                    "budget-exceeded",
-                    rel,
-                    1,
-                    "compiler does not terminate within 256MB / 60s",
-                );
-                note("valid-not-accepted", rel, 1, "budget exceeded");
+                if Score::Budget == score {
+                    note(
+                        "budget-exceeded",
+                        rel,
+                        1,
+                        "compiler does not terminate within 256MB / 60s",
+                    );
+                    note("valid-not-accepted", rel, 1, "budget exceeded");
+                } else {
+                    note(
+                        "budget-exceeded",
+                        rel,
+                        1,
+                        "compiler refused it at its emit bound",
+                    );
+                    note("valid-not-accepted", rel, 1, "refused at the emit bound");
+                }
             }
             continue;
         }
@@ -816,11 +874,13 @@ fn conformance() {
         let elapsed = started.elapsed();
         let score = score_corpus(&result);
         let timing = pinned_timing.contains_key(rel);
-        if Score::Budget == score {
+        if score.unfinished() {
             over_budget.insert(rel.clone());
             invalid_over_budget.insert(rel.clone());
-            // Waived: a budget-timing row, stopped on the wall clock.
-            let waived = timing && !result.memory;
+            // Waived: a budget-timing row, stopped on the wall clock. A
+            // refusal at the emit bound is no stop on the clock, so it is
+            // never waived.
+            let waived = timing && Score::Budget == score && !result.memory;
             if waived {
                 timing_waived.insert(rel.clone());
             }
@@ -829,7 +889,11 @@ fn conformance() {
                     "budget-exceeded",
                     rel,
                     1,
-                    "compiler does not terminate within 256MB / 60s",
+                    if Score::Budget == score {
+                        "compiler does not terminate within 256MB / 60s"
+                    } else {
+                        "compiler refused it at its emit bound"
+                    },
                 );
             }
             continue;
