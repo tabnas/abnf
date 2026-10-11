@@ -189,6 +189,9 @@ func TestConformanceScoring(t *testing.T) {
 		{"watchdog stop, not ok", conformanceResult{Budget: true, OK: false}, scoreBudget},
 		{"compiled", conformanceResult{OK: true}, scoreAccepted},
 		{"refused", conformanceResult{OK: false, Error: "no"}, scoreRejected},
+		{"refused at the emit bound", conformanceResult{OK: false, Error: "abnf: rule 'x' " +
+			"exceeds the emit limit of 3500000 units while writing its alternates, which " +
+			"would add more than 10 units to the 3499990 already written."}, scoreBound},
 	} {
 		if got := scoreCorpus(c.res); got != c.want {
 			t.Errorf("%s: scoreCorpus = %v, want %v", c.name, got, c.want)
@@ -204,7 +207,27 @@ const (
 	scoreBudget conformanceScore = iota
 	scoreAccepted
 	scoreRejected
+	// scoreBound is the compiler's refusal at its emit bound: tabnas/bnf
+	// bounds what its emitter may write (MaxEmitUnits) and refuses a
+	// grammar whose compiled spec would pass it, naming the bound. The two
+	// grammars over budget are refused there in well under a second once
+	// that bound ships, so the refusal is the same failure to finish as the
+	// budget, met sooner and named: both halves score it with the budget,
+	// the `budget-exceeded` rows pin either outcome and still fail if the
+	// grammar compiles, and it is never a rejection on the invalid half.
+	// Once tabnas/bnf ships the bound, those rows tighten to the refusal
+	// alone.
+	scoreBound
 )
+
+// emitBound is how the compiler's refusal at its emit bound reads.
+var emitBound = regexp.MustCompile(`exceeds the emit limit of \d+ units`)
+
+// unfinished reports a compile that did not finish: stopped by the budget,
+// or refused at the emit bound.
+func unfinished(score conformanceScore) bool {
+	return scoreBudget == score || scoreBound == score
+}
 
 // scoreCorpus reads the budget flag BEFORE OK. A child stopped by its own
 // watchdog answers OK=false with Budget set, which is indistinguishable
@@ -219,6 +242,9 @@ func scoreCorpus(res conformanceResult) conformanceScore {
 	}
 	if res.OK {
 		return scoreAccepted
+	}
+	if emitBound.MatchString(res.Error) {
+		return scoreBound
 	}
 	return scoreRejected
 }
@@ -404,12 +430,17 @@ func TestConformance(t *testing.T) {
 	// --- half 1: valid grammars compile AND yield every declared rule ---
 	for _, rel := range c.valid {
 		res := compileBudgeted(t, rel, "")
-		if scoreBudget == scoreCorpus(res) {
+		if score := scoreCorpus(res); unfinished(score) {
 			c.overBudget = append(c.overBudget, rel)
 			c.validGaps = append(c.validGaps, rel)
 			if c.record {
-				c.note("budget-exceeded", rel, 1, "compiler does not terminate within 256MB / 60s")
-				c.note("valid-not-accepted", rel, 1, "budget exceeded")
+				if scoreBudget == score {
+					c.note("budget-exceeded", rel, 1, "compiler does not terminate within 256MB / 60s")
+					c.note("valid-not-accepted", rel, 1, "budget exceeded")
+				} else {
+					c.note("budget-exceeded", rel, 1, "compiler refused it at its emit bound")
+					c.note("valid-not-accepted", rel, 1, "refused at the emit bound")
+				}
 			}
 			continue
 		}
@@ -458,13 +489,17 @@ func TestConformance(t *testing.T) {
 	// from.
 	var invalidOverBudget []string
 	for _, rel := range c.invalid {
-		switch scoreCorpus(compileBudgeted(t, rel, "")) {
-		case scoreBudget:
+		switch score := scoreCorpus(compileBudgeted(t, rel, "")); score {
+		case scoreBudget, scoreBound:
 			c.overBudget = append(c.overBudget, rel)
 			invalidOverBudget = append(invalidOverBudget, rel)
 			if c.record {
-				c.note("budget-exceeded", rel, 1,
-					"compiler does not terminate within 256MB / 60s")
+				if scoreBudget == score {
+					c.note("budget-exceeded", rel, 1,
+						"compiler does not terminate within 256MB / 60s")
+				} else {
+					c.note("budget-exceeded", rel, 1, "compiler refused it at its emit bound")
+				}
 			}
 		case scoreAccepted:
 			c.invalidGaps = append(c.invalidGaps, rel)

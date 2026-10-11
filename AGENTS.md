@@ -534,6 +534,17 @@ How it is judged, and by whom:
   unit test pins, so the reading cannot differ between the halves of one
   suite or between the three. The shared compiler now refuses the former
   Rust invalid-half overrun before expansion, so all three columns agree.
+- tabnas/bnf is gaining a bound on what its emitter writes
+  (`MAX_EMIT_UNITS`), and refuses those two grammars at it in well under a
+  second, with an `EmitError` that reads `exceeds the emit limit of <n>
+  units`. That refusal is the same failure to finish as the budget, met
+  sooner and named, so each `scoreCorpus` scores it with the budget: it is
+  never a pass and never a rejection on the invalid half, and it keeps the
+  base out of the mutation half. Until a bnf with the bound is the one
+  every runtime builds against, the two `budget-exceeded` rows accept
+  either outcome. They are a tolerant pin, not a removal: either grammar
+  compiling still fails the suite, and so does any other grammar reaching
+  the bound. Once bnf ships it, the rows tighten to the refusal alone.
 - The residual gaps are pinned as an **exact set** in
   `test/corpus/known-gaps.tsv`, per runtime. Fixing one fails the suite
   as loudly as regressing one; the fix is to delete its row. Never edit a
