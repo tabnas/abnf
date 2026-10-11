@@ -465,10 +465,11 @@ Non-obvious things an agent should know before touching `converter.ts`:
   to collect the multi-token `altPrefixes` that populate tcol, so it
   cannot yet be scoped to the cyclic rules, and a cycle of k rules, each
   with two alternatives led by the next, doubles the alternatives at every
-  substitution. So tabnas/bnf#108 also bounds what substitution may add
-  to one rule, at 512 alternatives (`MAX_LEFT_RECURSION_EXPANSION`), and
-  refuses a grammar past the bound with an `EmitError`. Keep grammars
-  reasonably small.
+  substitution. tabnas/bnf#108, from bnf 0.1.29 on, also bounds what
+  substitution may add to one rule, at 512 alternatives
+  (`MAX_LEFT_RECURSION_EXPANSION`), and refuses a grammar past the bound
+  with an `EmitError`. With an earlier bnf, such a cycle runs out of
+  memory. Keep grammars reasonably small.
 - **Alt dispatch is one-token lookahead plus the probe pattern.** Two
   alternatives sharing an arbitrarily deep prefix with no terminal
   tie-breaker (`S = A Z / A Y`), or an `[X B] C` whose disambiguator is a
