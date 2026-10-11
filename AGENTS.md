@@ -452,12 +452,22 @@ Non-obvious things an agent should know before touching `converter.ts`:
   prose such as RFC 3986's `path-empty = 0<pchar>` is an error, since
   there is no definition behind it — see the notes at the top of
   `ts/test/grammar/rfc3986-uri.abnf` for the rewrite that fixture needed.
-- **Paull's substitution can blow up on large mutually-recursive
-  grammars.** The full RFC 5322 (`email.abnf`) and Dhall grammars do not
-  finish compiling. This is the "pathological grammars grow" caveat the
-  README already states, not a separate bug: substitution runs over every
-  production to collect the multi-token `altPrefixes` that populate tcol,
-  so it cannot yet be scoped to the cyclic SCCs. Keep grammars
+- **Two large grammars run out of budget in lookahead dispatch, not in
+  Paull's substitution.** The full RFC 5322 (`email.abnf`) and Dhall
+  grammars do not finish compiling within the conformance budget, and
+  tabnas/bnf#108 measured why. Left-recursion elimination finishes in
+  milliseconds on both: it adds at most 8 alternatives to one rule of
+  `email.abnf`, 78 in all, and at most 85 to one rule of `dhall.abnf`,
+  359 in all. The time goes to lookahead dispatch in `@tabnas/bnf`, where
+  `dispatchPrefixes` and `depthOf` take 75% of a profile of `email.abnf`.
+  Substitution can still grow a grammar, which is the "pathological
+  grammars grow" caveat the README states. It runs over every production
+  to collect the multi-token `altPrefixes` that populate tcol, so it
+  cannot yet be scoped to the cyclic rules, and a cycle of k rules, each
+  with two alternatives led by the next, doubles the alternatives at every
+  substitution. So tabnas/bnf#108 also bounds what substitution may add
+  to one rule, at 512 alternatives (`MAX_LEFT_RECURSION_EXPANSION`), and
+  refuses a grammar past the bound with an `EmitError`. Keep grammars
   reasonably small.
 - **Alt dispatch is one-token lookahead plus the probe pattern.** Two
   alternatives sharing an arbitrarily deep prefix with no terminal
@@ -509,7 +519,7 @@ How it is judged, and by whom:
   rejected by that same third-party oracle before its class was
   admitted.
 - Every corpus compile runs **in its own process, under a 256 MB / 60 s
-  budget**. The two grammars that hit the Paull's blow-up above
+  budget**. The two grammars above whose time goes to lookahead dispatch
   (`node-abnf/examples/email.abnf`, `tree-sitter-abnf/examples/dhall.abnf`)
   exceed it, in every runtime. That is recorded as a failure to accept —
   never a pass, never a skip — and it is the only reason those two are
