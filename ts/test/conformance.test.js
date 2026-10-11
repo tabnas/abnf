@@ -54,11 +54,11 @@
  */
 'use strict'
 
-const { describe, it } = require('node:test')
+const { describe, it, after } = require('node:test')
 const assert = require('node:assert')
 const fs = require('node:fs')
 const path = require('node:path')
-const { spawnSync } = require('node:child_process')
+const { spawn } = require('node:child_process')
 
 const { abnfConvert } = require('../dist/abnf')
 const { AbnfParseError } = require('../dist/converter')
@@ -107,6 +107,41 @@ const COMPILE = path.join(__dirname, 'conformance-compile.js')
 const BUDGET_MB = 256
 const BUDGET_MS = 60000
 
+// What a budgeted compile may write before it is stopped, as spawnSync's
+// `maxBuffer` bounded it: a child that writes more is scored `budget`.
+const MAX_OUTPUT = 64 * 1024 * 1024
+
+// Every transient task reports progress at least every 30 seconds
+// (AGENTS.md), and the two grammars over budget keep a compile out for up
+// to BUDGET_MS each. So the compiles run asynchronously, and while one is
+// out a line names it, its place in its half and the time it has taken,
+// every BEAT_MS. The in-process mutation half yields between compiles so
+// the same line reports it.
+const BEAT_MS = 25000
+let current = null
+let beat = null
+after(() => {
+  if (beat) clearInterval(beat)
+})
+
+// The compile now running: the `n`th of `total` in `half`. A child
+// compile reports its seconds so far; an in-process one is over before
+// the line can be written.
+function progress(half, n, total, what, child) {
+  if (null == beat) {
+    beat = setInterval(() => {
+      if (null == current) return
+      const c = current
+      console.log(`conformance ${c.half}: ${c.n} of ${c.total} ` +
+        `(${Math.floor((100 * c.n) / c.total)}%), ${c.what}` +
+        (c.child ? `, ${Math.round((Date.now() - c.start) / 1000)}s so far` : ''))
+    }, BEAT_MS)
+    beat.unref()
+  }
+  current = { half, n, total, what, child, start: Date.now() }
+  return current
+}
+
 const FETCH_HINT =
   '\n  Fetch it with:  sh test/fetch-abnf-corpus.sh   (or: make abnf-corpus)' +
   '\n  `npm test` does this for you via the `pretest` hook.' +
@@ -138,23 +173,45 @@ function readCorpus(rel) {
   return fs.readFileSync(path.join(CORPUS, rel), 'utf8')
 }
 
-// One corpus compile, isolated and budgeted. Returns
+// One corpus compile, isolated and budgeted, the `n`th of `total` in its
+// `half`. Resolves to
 //   {ok:true, names:[...]} | {ok:false, error} | {budget:true}
-function compileBudgeted(rel, append) {
+function compileBudgeted(rel, { half, n, total }, append) {
   const args = ['--max-old-space-size=' + BUDGET_MB, COMPILE, path.join(CORPUS, rel)]
   if (append) args.push(append)
-  const r = spawnSync(process.execPath, args, {
-    timeout: BUDGET_MS,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  })
-  try {
-    return JSON.parse(r.stdout)
-  } catch {
-    // Aborted (heap) or killed (wall clock): the compiler did not finish.
-    return { budget: true }
+  const now = progress(half, n, total, rel, true)
+  const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'ignore'] })
+  // Stopped as spawnSync stopped it: killed, and its output closed.
+  const kill = () => {
+    child.kill('SIGKILL')
+    child.stdout.destroy()
   }
+  const out = []
+  let size = 0
+  child.stdout.on('data', (d) => {
+    out.push(d)
+    size += d.length
+    if (MAX_OUTPUT < size) kill()
+  })
+  const stop = setTimeout(kill, BUDGET_MS)
+  return new Promise((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(stop)
+      if (current === now) current = null
+      if (MAX_OUTPUT < size) return resolve({ budget: true })
+      try {
+        resolve(JSON.parse(Buffer.concat(out).toString('utf8')))
+      } catch {
+        // Aborted (heap) or killed (wall clock): the compiler did not finish.
+        resolve({ budget: true })
+      }
+    }
+    child.on('error', done)
+    child.on('close', done)
+  })
 }
 
 // How one budgeted compile is scored, in ONE place so the two halves
@@ -244,10 +301,10 @@ describe('conformance: third-party ABNF corpus', () => {
   const overBudget = []
   const validCrashes = []
 
-  it('valid: every declared rule survives into the GrammarSpec', () => {
-    for (const rel of VALID) {
+  it('valid: every declared rule survives into the GrammarSpec', async () => {
+    for (const [i, rel] of VALID.entries()) {
       const src = readCorpus(rel)
-      const r = compileBudgeted(rel)
+      const r = await compileBudgeted(rel, { half: 'valid', n: i + 1, total: VALID.length })
       const score = scoreCorpus(r)
       if ('budget' === score) {
         overBudget.push(rel)
@@ -286,11 +343,11 @@ describe('conformance: third-party ABNF corpus', () => {
   const invalidGaps = []
   const invalidOverBudget = []
 
-  it('invalid: grammars the third-party oracle rejects are rejected', () => {
+  it('invalid: grammars the third-party oracle rejects are rejected', async () => {
     const leaked = invalidGaps
     const crashes = []
-    for (const rel of INVALID) {
-      const r = compileBudgeted(rel)
+    for (const [i, rel] of INVALID.entries()) {
+      const r = await compileBudgeted(rel, { half: 'invalid', n: i + 1, total: INVALID.length })
       // A compile that never finished is NOT a rejection. This half scores
       // on `!ok`, and a child stopped by its own watchdog answers
       // `{budget:true}`, which is indistinguishable from a refusal unless
@@ -337,13 +394,19 @@ describe('conformance: third-party ABNF corpus', () => {
   // cannot quietly grow.
   const mutationLeaks = {}
 
-  it('invalid: mutants violating a named RFC 5234 production are rejected', () => {
+  it('invalid: mutants violating a named RFC 5234 production are rejected', async () => {
     const bases = VALID.filter((rel) => !overBudget.includes(rel))
     const leaks = mutationLeaks
     const crashes = []
+    const total = mutations.length * bases.length
+    let k = 0
     for (const [name, append] of mutations) {
       let n = 0
       for (const rel of bases) {
+        // One compile is quick and the half is not, so the progress line
+        // gets its turn between them.
+        progress('mutants', ++k, total, `${name} on ${rel}`, false)
+        await new Promise((resolve) => setImmediate(resolve))
         const src = readCorpus(rel).replace(/\r?\n*$/, '') + '\r\n' + append + '\r\n'
         try {
           abnfConvert(src)
@@ -367,6 +430,7 @@ describe('conformance: third-party ABNF corpus', () => {
         }
       }
     }
+    current = null
     // Reported BEFORE the leak counts, and before the recording return: a
     // recording run that swallowed these would emit mutation-leak rows
     // measured against crashed compiles.
