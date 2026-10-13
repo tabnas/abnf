@@ -92,4 +92,4 @@ export type { TranslationPart, TranslationParts } from './translate'
 // VERSION is this package's version. It MUST equal package.json "version":
 // the release orchestrator rewrites both, and the version test fails the
 // build if they drift. Mirrors `const VERSION` in go/abnf.go.
-const VERSION = '0.4.23'
+const VERSION = '0.4.24'
