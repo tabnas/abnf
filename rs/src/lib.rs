@@ -49,10 +49,10 @@ pub use parser_abnf::abnf_rules;
 
 pub use tabnas_bnf::{
     attach_action_slots, attach_actions, eliminate_left_recursion, mark_listing, to_jsonic,
-    to_pure_spec, to_recognition_spec, ActionError as AbnfActionError, ActionFn, ActionsMap,
-    AltSpec, CompileError as AbnfCompileError, ConvertOptions as AbnfConvertOptions, Element,
-    EmitError, Grammar, GrammarSpec, JsonicOptions, Kind, NodeKind, Production, RefAction,
-    RuleSpec, Sequence, SrcSpan, ValueAnnotation,
+    to_pure_spec, to_recognition_spec, transduce_alc, ActionError as AbnfActionError, ActionFn,
+    ActionsMap, AltSpec, CompileError as AbnfCompileError, ConvertOptions as AbnfConvertOptions,
+    Element, EmitError, Grammar, GrammarSpec, JsonicOptions, Kind, NodeKind, Production, RefAction,
+    RuleSpec, Sequence, SrcSpan, TransducePart, ValueAnnotation,
 };
 
 /// This crate's version. It MUST equal `ts/package.json` "version": the
@@ -220,6 +220,20 @@ pub fn abnf_convert(
 ) -> Result<GrammarSpec, AbnfError> {
     let grammar = parse_abnf(src)?;
     Ok(emit_grammar_spec(&grammar, opts)?)
+}
+
+/// The transducer part of an ABNF grammar, `<name>-transduce`: the alchemy
+/// program that streams the JSON events of the value its `; @object` and
+/// `; @array` annotations build, from its rule passes, or why its
+/// documents are read whole ([`transduce_alc`] says when). Converts as
+/// [`abnf_convert`] does, with `opts`. The Rust spelling of
+/// `abnfTransduce`.
+pub fn abnf_transduce(
+    src: &str,
+    name: &str,
+    opts: Option<&AbnfConvertOptions>,
+) -> Result<TransducePart, AbnfError> {
+    Ok(transduce_alc(&abnf_convert(src, opts)?, name))
 }
 
 /// Convert ABNF source and install the resulting grammar on `parser`.

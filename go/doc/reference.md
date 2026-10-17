@@ -134,6 +134,26 @@ default spec-dump.
 Render a spec as JSON text (the CLI default output); `ToJsonic` in
 strict mode.
 
+## Streaming the value
+
+### `AbnfTransduce(src string, name string, opts *AbnfConvertOptions) (TransducePart, error)`
+
+Convert ABNF source as `Abnf` does, with `opts`, and write the grammar's
+transducer part: `<name>-transduce`, an alchemy program that makes the
+JSON events of the value the `; @object` and `; @array` annotations
+build, from the grammar's rule passes. The part is alchemy's
+`transduce-tree`, with a spec read off the value actions the annotations
+attach. A `TransducePart` sets `Entry` and `Source`, or `Whole` alone,
+with the reason a host reads the grammar's documents whole instead. One
+reason is a start rule with no annotation, whose value is the
+`{rule, src, kids}` tree. The error is the conversion's.
+
+### `TransduceAlc(spec *tabnas.GrammarSpec, name string) TransducePart`
+
+The same for a spec already converted: `TransduceAlc` of
+`github.com/tabnas/bnf/go`, whose text is the TypeScript `transduceAlc`'s
+byte for byte.
+
 ## Errors
 
 ```go

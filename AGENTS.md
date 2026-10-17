@@ -623,7 +623,7 @@ npm run test-conformance                # the corpus dial, on its own
 
 `conformance.test.js` measures this compiler against 68 grammars from four
 third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
-on an older one — one of its cases alone is 64s. The other 54 suites finish
+on an older one — one of its cases alone is 64s. The other 55 suites finish
 in seconds.
 
 Run together with default concurrency, the fast suites drain and Node's
@@ -690,12 +690,14 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-Five of the eighteen files in `ts/test/*.test.js`, run against the built
-`dist`, need a word of explanation. The other thirteen name themselves:
+Five of the nineteen files in `ts/test/*.test.js`, run against the built
+`dist`, need a word of explanation. The other fourteen name themselves:
 `class-overlap`, `compile`, `conformance`, `docs`, `lifting`, `parity`,
-`port-deps`, `roundtrip`, `token`, `translate`, `translate-render` (the
-render run through the `alchemy` command `TABNAS_ALCHEMY` names, skipped
-without it), `value-annotation` and `version`.
+`port-deps`, `roundtrip`, `token`, `transduce` (the transducer part
+`abnfTransduce` writes from the value annotations), `translate`,
+`translate-render` (the render run through the `alchemy` command
+`TABNAS_ALCHEMY` names, skipped without it), `value-annotation` and
+`version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
