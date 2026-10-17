@@ -3,7 +3,8 @@
 package tabnasabnf
 
 // facade.go — the public facade: Abnf (ABNF source -> GrammarSpec), ParseAbnf,
-// EmitGrammarSpec, EliminateLeftRecursion, plus the Plugin form
+// EmitGrammarSpec, EliminateLeftRecursion, AbnfTransduce and TransduceAlc
+// (the grammar's transducer part), plus the Plugin form
 // (decorates a *tabnas.Tabnas, installing the grammar). The Go port of
 // the exported surface of ts/src/abnf.ts + converter.ts.
 
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 
+	bnf "github.com/tabnas/bnf/go"
 	tabnas "github.com/tabnas/parser/go"
 )
 
@@ -84,3 +86,27 @@ func intToStr(n int) string { return strconv.Itoa(n) }
 func sortStrings(s []string) { sort.Strings(s) }
 
 var _ = tabnas.Undefined
+
+// TransducePart is the transducer part of an emitted grammar, or why its
+// documents are read whole: bnf's TransducePart.
+type TransducePart = bnf.TransducePart
+
+// TransduceAlc is the transducer part of an emitted grammar, defining
+// `<name>-transduce`, or why its documents are read whole: bnf's
+// TransduceAlc, which reads the value actions the `; @object` and
+// `; @array` annotations attach.
+func TransduceAlc(spec *tabnas.GrammarSpec, name string) TransducePart {
+	return bnf.TransduceAlc(spec, name)
+}
+
+// AbnfTransduce converts src as Abnf does, with opts, and writes the
+// transducer part of the grammar: the alchemy program that streams the
+// JSON events of the value its annotations build, from its rule passes.
+// Mirrors the TS `abnfTransduce`.
+func AbnfTransduce(src string, name string, opts *AbnfConvertOptions) (TransducePart, error) {
+	spec, err := Abnf(src, opts)
+	if err != nil {
+		return TransducePart{}, err
+	}
+	return TransduceAlc(spec, name), nil
+}

@@ -160,6 +160,27 @@ Serialise a function-free value as jsonic text. `opts:
 `@/source/flags` (or `@~/…/` to carry the eager-matcher flag), which the
 engine's `resolveFuncRefs` reconstructs on load.
 
+## Streaming the value
+
+### `abnfTransduce(src, name, opts?) => TransducePart`
+
+Convert ABNF source as `abnfConvert` does, with `opts`, and write the
+grammar's transducer part: `<name>-transduce`, an alchemy program that
+makes the JSON events of the value the `; @object` and `; @array`
+annotations build, from the grammar's rule passes. The part is
+alchemy's `transduce-tree`, with a spec read off the value actions the
+annotations attach, so a host streams a document of the grammar. The
+result is `{ entry, source }`, or `{ whole }` with the reason a host
+reads the grammar's documents whole instead. One reason is a start rule
+with no annotation: its value is the `{rule, src, kids}` tree, whose `src`
+holds the text of every node beneath it. Throws what `abnfConvert` throws.
+
+### `transduceAlc(spec, name) => TransducePart`
+
+The same for a spec already converted: @tabnas/bnf's `transduceAlc`,
+re-exported. It reads only the value actions, so a spec compiled with
+`builtins` on writes the same part as one compiled with it off.
+
 ## Errors
 
 | Class | Thrown by | Notable fields |

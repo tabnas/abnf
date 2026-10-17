@@ -21,6 +21,7 @@ import {
   attachActions,
   attachActionSlots,
   markListing,
+  transduceAlc,
   CompileError,
   ActionError,
 } from '@tabnas/bnf'
@@ -29,9 +30,11 @@ import type {
   CompileOptions,
   JsonicOptions,
   ActionsMap,
+  TransducePart,
 } from '@tabnas/bnf'
 
 import { abnf as abnfConvert } from './converter'
+import type { AbnfConvertOptions } from './converter'
 
 // Historical names for the shared errors and options. These are
 // re-exports, not `const` aliases: a `const` would carry only the value
@@ -50,6 +53,20 @@ export function abnfCompile(src: string, opts: AbnfCompileOptions = {}): string 
 }
 
 
+// The transducer part of an ABNF grammar, `<name>-transduce`: the alchemy
+// program that streams the JSON events of the value its `; @object` and
+// `; @array` annotations build, from its rule passes, or why its documents
+// are read whole (`transduceAlc` in @tabnas/bnf says when). Converts as
+// `abnfConvert` does, with `opts`.
+export function abnfTransduce(
+  src: string,
+  name: string,
+  opts?: AbnfConvertOptions,
+): TransducePart {
+  return transduceAlc(abnfConvert(src, opts), name)
+}
+
+
 export {
   toRecognitionSpec,
   toPureSpec,
@@ -57,6 +74,7 @@ export {
   attachActions,
   attachActionSlots,
   markListing,
+  transduceAlc,
 }
 
-export type { AbnfCompileOptions, JsonicOptions, ActionsMap }
+export type { AbnfCompileOptions, JsonicOptions, ActionsMap, TransducePart }
