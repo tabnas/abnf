@@ -33,10 +33,13 @@ import {
   attachActions,
   attachActionSlots,
   markListing,
+  abnfTransduce,
+  transduceAlc,
   AbnfCompileError,
   AbnfActionError,
   AbnfCompileOptions,
   ActionsMap,
+  TransducePart,
 } from './compile'
 
 
@@ -79,11 +82,13 @@ export {
   attachActions,
   attachActionSlots,
   markListing,
+  abnfTransduce,
+  transduceAlc,
   AbnfCompileError,
   AbnfActionError,
 }
 
-export type { AbnfConvertOptions, AbnfCompileOptions, ActionsMap }
+export type { AbnfConvertOptions, AbnfCompileOptions, ActionsMap, TransducePart }
 
 export { translate } from './translate'
 export type { TranslationPart, TranslationParts } from './translate'
