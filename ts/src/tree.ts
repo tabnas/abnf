@@ -335,12 +335,60 @@ function treeRules(): typeof abnfRules {
 const abnfTreeRules = treeRules()
 
 
-// The engine options the tree parser reads with: the meta-grammar's, and
-// the codes above.
+// Where ABNF's own matchers stop reading, in `w`, the text from the cursor:
+// the index of the unit that decides how far their token runs, past which
+// none of them reads. A numeric value and the `%s` and `%i` prefixes read
+// the run of a base letter, hex digits, `.` and `-` that follows `%`, and
+// the unit after it; prose reads to the first unit no prose holds, `>`
+// among them; a repetition count reads its digits and the unit after.
+// Every other token is the engine's, whose matchers read the window
+// themselves.
+function abnfReach(w: string): number {
+  const c = w[0]
+  const run =
+    '%' === c ? /^%[A-Za-z]?[0-9A-Fa-f.-]*/.exec(w)
+      : '<' === c ? /^<[\x20-\x3D\x3F-\x7E]*/.exec(w)
+        : c >= '0' && c <= '9' ? /^[0-9]*/.exec(w)
+          : null
+  return null == run ? 0 : run[0].length
+}
+
+
+// A lexer matcher that runs before every other one and cuts no token: in a
+// parse from a reader a window at a time (`lex.window`, admin ADR-30), the
+// text after the cursor is the window's, which may end inside a token, so
+// that a match token's expression would match a shorter token, or none,
+// where the whole text has a longer one. It reads the window on, twice as
+// far each time, until the unit that decides where the token ends lies
+// inside it (`reach`) or the source has ended, so that every matcher after
+// it sees what the whole text shows it. A whole text is all read.
+function reachMatcher(reach: (w: string) => number): any {
+  return {
+    order: 9e5,
+    make: () => (lex: any) => {
+      if (!lex.windowOpen) return undefined
+      let ahead = 1
+      for (;;) {
+        lex.fill(ahead)
+        const w: string = lex.window()
+        const decides = reach(w)
+        if (decides < w.length || !lex.windowOpen) return undefined
+        ahead = Math.max(decides + 1, 2 * w.length)
+      }
+    },
+  }
+}
+
+
+// The engine options the tree parser reads with: the meta-grammar's, the
+// codes above, and the window. The tree parser reads a source a window at
+// a time when it is parsed from a reader: its matchers read the text only
+// through the window, the meta-grammar's match tokens behind `abnfReach`.
 function treeOptions(): any {
   const options = abnfOptions(NUMERIC_VALUE)
   options.error = { ...TREE_OPTIONS.error }
   options.hint = { ...TREE_OPTIONS.hint }
+  options.lex = { window: true, match: { 'abnf-reach': reachMatcher(abnfReach) } }
   return options
 }
 
