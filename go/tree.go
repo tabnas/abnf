@@ -21,8 +21,10 @@ package tabnasabnf
 // cannot hold, each with a code of its own: a numeric value past U+10FFFF
 // (abnf_code_point), a range that ends below where it starts
 // (abnf_reversed_range), a repetition count past 2^53 - 1 (abnf_count), a
-// repetition whose most is below its least (abnf_reversed_repetition) and
-// a group or an option left open (abnf_unclosed).
+// repetition whose most is below its least (abnf_reversed_repetition), a
+// group or an option left open (abnf_unclosed), and a concatenation
+// holding half of a surrogate pair alone, which names no character
+// (abnf_surrogate).
 
 import (
 	"strconv"
@@ -36,22 +38,25 @@ import (
 // maxCount is the largest repetition count the tree holds exactly: 2^53 - 1.
 const maxCount = 9007199254740991
 
-// treeErrors and treeHints are the codes the tree parser refuses a source
-// with, beside the engine's.
-var treeErrors = map[string]string{
-	"abnf_code_point":          "the numeric value {src} names no Unicode code point (the largest is %x10FFFF)",
-	"abnf_reversed_range":      "the numeric range {src} ends below where it starts",
-	"abnf_reversed_repetition": "the repetition allows fewer than it requires: its most is below its least",
-	"abnf_count":               "the repetition count {src} is past 9007199254740991, the largest whole number the tree holds",
-	"abnf_unclosed":            "a group or an option is not closed",
-}
-
-var treeHints = map[string]string{
-	"abnf_code_point":          "A numeric value names a code point from %x0 to %x10FFFF.",
-	"abnf_reversed_range":      "Write the range from its lower end to its higher, as %x61-7A.",
-	"abnf_reversed_repetition": "In m*n the n is the most and the m the least, so n is not below m.",
-	"abnf_count":               "A repetition count is a whole number no larger than 9007199254740991.",
-	"abnf_unclosed":            "Close the group with ) and the option with ].",
+// treeOptions is the codes the tree parser refuses a source with, beside
+// the engine's: the Error and Hint options Make gives the parser.
+var treeOptions = tabnas.Options{
+	Error: map[string]string{
+		"abnf_code_point":          "the numeric value {src} names no Unicode code point (the largest is %x10FFFF)",
+		"abnf_reversed_range":      "the numeric range {src} ends below where it starts",
+		"abnf_reversed_repetition": "the repetition allows fewer than it requires: its most is below its least",
+		"abnf_count":               "the repetition count {src} is past 9007199254740991, the largest whole number the tree holds",
+		"abnf_unclosed":            "a group or an option is not closed",
+		"abnf_surrogate":           "the numeric value {src} holds half of a surrogate pair standing alone, which names no character",
+	},
+	Hint: map[string]string{
+		"abnf_code_point":          "A numeric value names a code point from %x0 to %x10FFFF.",
+		"abnf_reversed_range":      "Write the range from its lower end to its higher, as %x61-7A.",
+		"abnf_reversed_repetition": "In m*n the n is the most and the m the least, so n is not below m.",
+		"abnf_count":               "A repetition count is a whole number no larger than 9007199254740991.",
+		"abnf_unclosed":            "Close the group with ) and the option with ].",
+		"abnf_surrogate":           "A concatenation holds a surrogate as one half of a pair, as %xD83D.DE00; one value alone, as %xD800, is a code point of its own.",
+	},
 }
 
 // treeObject is an object of the tree, its members in the order given.
@@ -143,6 +148,18 @@ func numericElement(src string) (*tabnas.OrderedMap, string) {
 		if 0xd800 <= n && n <= 0xdfff {
 			units[len(units)-1] = uint16(n)
 		}
+	}
+	// A surrogate pair is the character it encodes; a half standing alone
+	// names no character, and a literal's text is characters.
+	for i := 0; i < len(units); i++ {
+		if units[i] < 0xd800 || 0xdfff < units[i] {
+			continue
+		}
+		if units[i] < 0xdc00 && i+1 < len(units) && 0xdc00 <= units[i+1] && units[i+1] <= 0xdfff {
+			i++
+			continue
+		}
+		return nil, "abnf_surrogate"
 	}
 	text := utf16.Decode(units)
 	// A concatenation that spells one character (a surrogate pair's two
@@ -352,7 +369,7 @@ func treeRef() map[tabnas.FuncRef]any {
 // passes the part reads, and whose value is the tree, an
 // *tabnas.OrderedMap (nil for an empty source, which makes no pass).
 func Make() *tabnas.Tabnas {
-	j, err := newAbnfParser(treeRef(), tabnas.Options{Error: treeErrors, Hint: treeHints})
+	j, err := newAbnfParser(treeRef(), treeOptions)
 	if err != nil {
 		// The meta-grammar is this package's own, so it always installs.
 		panic("abnf: the tree parser does not install: " + err.Error())

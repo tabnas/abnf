@@ -168,8 +168,8 @@ members keep the order the schema gives them, and each number a
 Read ABNF source whole as the tree, as the TypeScript `parseAbnfTree`
 does. The error is an `*AbnfParseError` whose `Cause` is the engine's
 error, with its code: `abnf_code_point`, `abnf_reversed_range`,
-`abnf_count`, `abnf_reversed_repetition`, `abnf_unclosed` or the
-engine's own.
+`abnf_count`, `abnf_reversed_repetition`, `abnf_unclosed`,
+`abnf_surrogate` or the engine's own.
 
 ### `Make() *tabnas.Tabnas`
 

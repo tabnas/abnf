@@ -18,9 +18,10 @@
 //! (`abnf_code_point`), a range that ends below where it starts
 //! (`abnf_reversed_range`), a repetition count past 2^53 - 1
 //! (`abnf_count`), a repetition whose most is below its least
-//! (`abnf_reversed_repetition`) and a group or an option left open
-//! (`abnf_unclosed`). The IR parser's nesting cap holds here too
-//! (`abnf_group_depth`).
+//! (`abnf_reversed_repetition`), a group or an option left open
+//! (`abnf_unclosed`), and a concatenation holding half of a surrogate pair
+//! alone, which names no character (`abnf_surrogate`). The IR parser's
+//! nesting cap holds here too (`abnf_group_depth`).
 
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -39,7 +40,7 @@ const MAX_COUNT: u64 = 9_007_199_254_740_991;
 
 /// The codes the tree parser refuses a source with, beside the engine's:
 /// each with its message and its hint.
-const TREE_ERRORS: [(&str, &str, &str); 5] = [
+const TREE_ERRORS: [(&str, &str, &str); 6] = [
     (
         "abnf_code_point",
         "the numeric value {src} names no Unicode code point (the largest is %x10FFFF)",
@@ -64,6 +65,13 @@ const TREE_ERRORS: [(&str, &str, &str); 5] = [
         "abnf_unclosed",
         "a group or an option is not closed",
         "Close the group with ) and the option with ].",
+    ),
+    (
+        "abnf_surrogate",
+        "the numeric value {src} holds half of a surrogate pair standing alone, which names no \
+         character",
+        "A concatenation holds a surrogate as one half of a pair, as %xD83D.DE00; one value \
+         alone, as %xD800, is a code point of its own.",
     ),
 ];
 
@@ -108,7 +116,7 @@ fn leading_int(text: &str, radix: u32, limit: u64) -> Option<u64> {
 /// The digits are read as the canonical runtime reads them, the longest
 /// prefix valid in the stated base, and a concatenation's code points as
 /// one UTF-16 sequence, so that a surrogate pair in it is the character
-/// it encodes and a lone surrogate the replacement character.
+/// it encodes; a half standing alone names no character, and is refused.
 pub(crate) fn numeric_element(src: &str) -> Result<Value, &'static str> {
     let radix = match src.as_bytes().get(1).map(u8::to_ascii_lowercase) {
         Some(b'd') => 10,
@@ -156,7 +164,7 @@ pub(crate) fn numeric_element(src: &str) -> Result<Value, &'static str> {
             None => units.push(n as u16),
         }
     }
-    let text = String::from_utf16_lossy(&units);
+    let text = String::from_utf16(&units).map_err(|_| "abnf_surrogate")?;
     // A concatenation that spells one character (a surrogate pair's two
     // halves) is that character.
     let mut chars = text.chars();

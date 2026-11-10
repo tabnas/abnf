@@ -43,8 +43,10 @@
  *  cannot hold, each with a code of its own: a numeric value past
  *  U+10FFFF (abnf_code_point), a range that ends below where it starts
  *  (abnf_reversed_range), a repetition count past 2^53 - 1 (abnf_count),
- *  a repetition whose most is below its least (abnf_reversed_repetition)
- *  and a group or an option left open (abnf_unclosed).
+ *  a repetition whose most is below its least (abnf_reversed_repetition),
+ *  a group or an option left open (abnf_unclosed), and a concatenation
+ *  holding half of a surrogate pair alone, which names no character
+ *  (abnf_surrogate).
  */
 
 import type { Rule } from '@tabnas/parser'
@@ -71,31 +73,37 @@ type AbnfTreeRule = {
 type AbnfTree = { type: 'grammar'; rules: AbnfTreeRule[] }
 
 
-// The codes the tree parser refuses a source with, beside the engine's.
-const TREE_ERRORS: Record<string, string> = {
-  abnf_code_point:
-    'the numeric value {src} names no Unicode code point (the largest is %x10FFFF)',
-  abnf_reversed_range:
-    'the numeric range {src} ends below where it starts',
-  abnf_reversed_repetition:
-    'the repetition allows fewer than it requires: its most is below its least',
-  abnf_count:
-    'the repetition count {src} is past 9007199254740991, the largest whole number the tree holds',
-  abnf_unclosed:
-    'a group or an option is not closed',
-}
-
-const TREE_HINTS: Record<string, string> = {
-  abnf_code_point:
-    'A numeric value names a code point from %x0 to %x10FFFF.',
-  abnf_reversed_range:
-    'Write the range from its lower end to its higher, as %x61-7A.',
-  abnf_reversed_repetition:
-    'In m*n the n is the most and the m the least, so n is not below m.',
-  abnf_count:
-    'A repetition count is a whole number no larger than 9007199254740991.',
-  abnf_unclosed:
-    'Close the group with ) and the option with ].',
+// The codes the tree parser refuses a source with, beside the engine's:
+// the `error` and `hint` options `make()` gives the parser.
+const TREE_OPTIONS = {
+  error: {
+    abnf_code_point:
+      'the numeric value {src} names no Unicode code point (the largest is %x10FFFF)',
+    abnf_reversed_range:
+      'the numeric range {src} ends below where it starts',
+    abnf_reversed_repetition:
+      'the repetition allows fewer than it requires: its most is below its least',
+    abnf_count:
+      'the repetition count {src} is past 9007199254740991, the largest whole number the tree holds',
+    abnf_unclosed:
+      'a group or an option is not closed',
+    abnf_surrogate:
+      'the numeric value {src} holds half of a surrogate pair standing alone, which names no character',
+  },
+  hint: {
+    abnf_code_point:
+      'A numeric value names a code point from %x0 to %x10FFFF.',
+    abnf_reversed_range:
+      'Write the range from its lower end to its higher, as %x61-7A.',
+    abnf_reversed_repetition:
+      'In m*n the n is the most and the m the least, so n is not below m.',
+    abnf_count:
+      'A repetition count is a whole number no larger than 9007199254740991.',
+    abnf_unclosed:
+      'Close the group with ) and the option with ].',
+    abnf_surrogate:
+      'A concatenation holds a surrogate as one half of a pair, as %xD83D.DE00; one value alone, as %xD800, is a code point of its own.',
+  },
 }
 
 
@@ -123,9 +131,18 @@ function numericElement(src: string): AbnfTreeElement | string {
 
   const points = body.split('.').map(point)
   if (points.some((n) => n < 0)) return 'abnf_code_point'
-  const text = String.fromCodePoint(...points)
-  // A value, or a concatenation that spells one character (a surrogate
-  // pair's two halves), is that character.
+  // One value is a character, its code point a surrogate's or not.
+  if (1 === points.length) return { type: 'char', value: points[0] }
+  // A concatenation's code points are one UTF-16 sequence, as the compiler
+  // reads them, so a surrogate pair in it is the character it encodes; a
+  // half standing alone names no character, and a literal's text is
+  // characters. Built a point at a time: a concatenation can hold more
+  // points than a call takes arguments.
+  let text = ''
+  for (const n of points) text += String.fromCodePoint(n)
+  if (/\p{Cs}/u.test(text)) return 'abnf_surrogate'
+  // A concatenation that spells one character (a surrogate pair's two
+  // halves) is that character.
   const chars = [...text]
   if (1 === chars.length) return { type: 'char', value: chars[0].codePointAt(0) as number }
   return { type: 'literal', text, caseSensitive: true }
@@ -322,8 +339,8 @@ const abnfTreeRules = treeRules()
 // the codes above.
 function treeOptions(): any {
   const options = abnfOptions(NUMERIC_VALUE)
-  options.error = { ...TREE_ERRORS }
-  options.hint = { ...TREE_HINTS }
+  options.error = { ...TREE_OPTIONS.error }
+  options.hint = { ...TREE_OPTIONS.hint }
   return options
 }
 

@@ -201,8 +201,8 @@ The tree keeps no comment and no value annotation, and holds no core
 rule the text leaves out. For source the meta-grammar refuses, or that
 the tree has no room for, it throws `AbnfParseError`, whose `cause` is
 the engine's error with one of the codes `abnf_code_point`,
-`abnf_reversed_range`, `abnf_count`, `abnf_reversed_repetition` and
-`abnf_unclosed`, or the engine's own.
+`abnf_reversed_range`, `abnf_count`, `abnf_reversed_repetition`,
+`abnf_unclosed` and `abnf_surrogate`, or the engine's own.
 
 ### `make() => Tabnas`
 

@@ -193,10 +193,14 @@ test('the render writes another notation\'s elements as ABNF spells them', { ski
     'a = ( %x61-7A / %x5F )\n')
   await writes(one({ type: 'class', negated: false, members: [{ from: 48, to: 57 }], repeat: [{ min: 1 }] }),
     'a = 1*%x30-39\n')
-  await writes(one({ type: 'any' }), 'a = %x0-10FFFF\n')
+  await writes(one({ type: 'any' }), 'a = %x00-10FFFF\n')
   await writes(one({ type: 'literal', text: 'a\nb', caseSensitive: true }), 'a = %x61.0A.62\n')
   await writes(one(ref('x', [{ min: 0, max: 1 }])), 'a = *1x\n')
-  await writes(one(ref('x', [{ min: 1 }, { min: 0, max: 1 }])), 'a = *1( 1*x )\n')
+  await writes(one(ref('x', [{ min: 1 }, { min: 0, max: 1 }])), 'a = [ 1*x ]\n')
+  await writes(one(ref('x', [{ min: 0 }, { min: 2, max: 3 }])), 'a = 2*3( *x )\n')
+  // A character past U+FFFF of no script with cases matches as it would
+  // without regard to case, so its numeric value says the same.
+  await writes(one({ type: 'literal', text: '\u{1F600}\n', caseSensitive: false }), 'a = %x1F600.0A\n')
 })
 
 test('the render refuses what ABNF cannot say, naming the rule', { skip }, async () => {
@@ -210,6 +214,13 @@ test('the render refuses what ABNF cannot say, naming the rule', { skip }, async
   await refuses(one({ type: 'prose', text: 'a > b' }), /holds the prose "a > b"/)
   await refuses(one({ type: 'literal', text: 'a\n', caseSensitive: false }),
     /holds the case-insensitive literal "a\\n"/)
+  // Deseret has cases: U+10400 and U+10428 are one letter's two.
+  await refuses(one({ type: 'literal', text: '\u{10400}\n', caseSensitive: false }),
+    /holds the case-insensitive literal/)
+  // A name in angle brackets is a rule's only: ABNF reads it as prose
+  // where an element is due.
+  await refuses(one(ref('<all>')), /the rule "a" references "<all>", a name ABNF cannot spell/)
+  await refuses(one(ref('')), /the rule "a" references the empty name/)
 })
 
 test('the render refuses a tree that is not the schema\'s', { skip }, async () => {

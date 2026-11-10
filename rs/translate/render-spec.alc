@@ -2,7 +2,7 @@
 ; compiler (tabnas-bnf) emits for a grammar, written back as RFC 5234
 ; ABNF. This is a library of definitions, each named `abnf-...`, which a
 ; host links with its own program (alchemy's `compile_sources`); its entry
-; point is `abnf-render`, and nothing else here is the host's to call.
+; point is `abnf-render-spec`, and nothing else here is the host's to call.
 ;
 ; A host reads an ABNF document by compiling it: the grammar-spec tree is
 ; the pure-data GrammarSpec that `abnfCompile(src, {recognition: false,

@@ -89,10 +89,12 @@ both. The fifth is the same fact in a character class: the `regex`
 crate's classes are over scalar values, and a range with no scalar value
 in it at all cannot be built.
 
-The tree a host translates holds the same texts: `parseAbnfTree` reads
-`g = %xD800.0041` as a literal of U+D800 and `A` in TypeScript, and of
-U+FFFD and `A` in Go and Rust, while a lone `%xD800` is the character
-U+D800, a number, in every runtime.
+The tree a host translates does not diverge here: `parseAbnfTree`,
+`ParseAbnfTree` and `parse_abnf_tree` refuse `g = %xD800.0041` with
+`abnf_surrogate`, since a literal's text is characters and a half of a
+surrogate pair standing alone names none, read a pair as the character
+it encodes, and read a lone `%xD800` as the character U+D800, a number.
+`test/spec/tree.tsv` holds the three to it.
 
 **Reason.** `String.fromCodePoint(0xD800)` answers a lone surrogate.
 `char::from_u32(0xD800)` answers `None`, because a `char` is a Unicode

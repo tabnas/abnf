@@ -42,7 +42,14 @@ const TRANSLATION: TranslationParts = Object.freeze({
       "internal"
     ]
   },
-  "errorCodes": [],
+  "errorCodes": [
+    "abnf_code_point",
+    "abnf_reversed_range",
+    "abnf_reversed_repetition",
+    "abnf_count",
+    "abnf_unclosed",
+    "abnf_surrogate"
+  ],
   "docs": "https://tabnas.dev/docs/packages",
   "repository": "https://github.com/tabnas/abnf",
   "versionSource": "ts/package.json",
@@ -56,9 +63,9 @@ const TRANSLATION: TranslationParts = Object.freeze({
     "loss": [
       "Comments, blank lines and layout are not kept, and neither is a value annotation, which a comment carries: each rule is written on one line, its alternatives between slashes and its elements between spaces.",
       "A numeric value is written in hexadecimal, whatever base the text gave it (%d65 is written %x41), a concatenation of numeric values a quoted string can hold as the case-sensitive string %s\\"...\\", and %i\\"...\\" as the quoted string it means: each reads back as the same element.",
-      "The repetition from 0 to 1 is written [ ... ] over a group and *1 before anything else, and a repetition of an element a prefix already repeats, which another notation can write and RFC 5234 cannot, in a group of its own, which reads back with one more group.",
-      "A grammar of another notation is written as ABNF spells it: a literal, which matches exactly, as %s\\"...\\" or, where no quoted string holds it, as the numeric value of its code points; a character or a range as a numeric value; a class as the alternation of its members, each a character or a range, in a group where it has more than one; and GBNF's . as %x0-10FFFF.",
-      "A grammar the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a token terminal, a negated class, an empty class, a name ABNF cannot spell (the empty name among them), prose holding > or a character past ASCII, a case-insensitive literal that no quoted string holds and that holds a letter of ASCII or a character past ASCII that may have cases, and a literal holding a lone surrogate. A tree that is not the schema's is refused the same way, naming what was met."
+      "The repetition from 0 to 1 is written [ ... ] over a group and *1 before anything else, and a repetition of an element a prefix already repeats, which another notation can write and RFC 5234 cannot, in a group of its own, an option [ ... ] where it is from 0 to 1, which reads back with one more group.",
+      "A grammar of another notation is written as ABNF spells it: a literal, which matches exactly, as %s\\"...\\" or, where no quoted string holds it, as the numeric value of its code points; a character or a range as a numeric value; a class as the alternation of its members, each a character or a range, in a group where it has more than one; and GBNF's . as %x00-10FFFF.",
+      "A grammar the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a token terminal, a negated class, an empty class, a name ABNF cannot spell (the empty name among them, and a reference's name in angle brackets, which ABNF reads as prose), prose holding > or a character past ASCII, a case-insensitive literal that no quoted string holds and that holds a letter of ASCII or a character past ASCII that may have cases (one of the Basic Multilingual Plane, or of a script past it that has them), and a literal holding a lone surrogate. A tree that is not the schema's is refused the same way, naming what was met."
     ],
     "spec": {
       "reads": "tree",
@@ -105,13 +112,14 @@ const TRANSLATION: TranslationParts = Object.freeze({
 ; group whose innermost repetition is from 0 to 1, in \`[ ... ]\`; a
 ; repetition as RFC 5234's prefix (\`*\`, \`m*\`, \`*n\`, \`m*n\`, \`n\`), the
 ; repetition from 0 to 1 of an element that is no group as \`*1\`, and a
-; repetition of what a prefix already repeats in a group of its own. A
+; repetition of what a prefix already repeats in a group of its own, an
+; option \`[ ... ]\` where it is from 0 to 1. A
 ; literal is a quoted string, \`%s\` before it where it matches exactly (an
 ; ABNF quoted string matches without regard to case), or, where a quoted
 ; string cannot hold it, the numeric value of its code points, which
 ; matches exactly; a character is \`%x\` and its code point; a range
 ; \`%x<from>-<to>\`; prose \`<...>\`; GBNF's \`.\` the range of every code
-; point, \`%x0-10FFFF\`; and a class, which RFC 5234 has no form for, the
+; point, \`%x00-10FFFF\`; and a class, which RFC 5234 has no form for, the
 ; alternation of its members, each a character or a range, in a group
 ; where it has more than one. The empty grammar is no text at all.
 ;
@@ -122,10 +130,12 @@ const TRANSLATION: TranslationParts = Object.freeze({
 ; with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a
 ; token terminal (GBNF's \`<think>\`), a negated class, an empty class, a
 ; name ABNF cannot spell (a rulename is a letter, then letters, digits and
-; hyphens; a name in angle brackets, the \`<all>\` of a removal, is written
-; as it is), prose holding \`>\` or a character past ASCII, a
-; case-insensitive literal that a quoted string cannot hold and that holds
-; a letter of ASCII or a character past ASCII that may have cases, and a
+; hyphens; a rule's name in angle brackets, the \`<all>\` of a removal, is
+; written as it is, and a reference's is refused, since ABNF reads it as
+; prose), prose holding \`>\` or a character past ASCII, a case-insensitive
+; literal that a quoted string cannot hold and that holds a letter of
+; ASCII or a character past ASCII that may have cases (one of the Basic
+; Multilingual Plane, or of a script past it that has them), and a
 ; literal holding a lone surrogate. A tree that is not the schema's (a
 ; root that is no grammar, a node's type first nowhere, a member a node
 ; does not have, out of its place, missing or of the wrong kind) is
@@ -215,22 +225,50 @@ def abnf-render-point [what n]
 
 ; ---- ABNF's terminals
 
-; A rule name ABNF can spell: a letter, then letters, digits and hyphens;
-; or prose in angle brackets, as the \`<all>\` of a removal is.
+; Whether a name is a rulename: a letter, then letters, digits and
+; hyphens.
+def abnf-render-rulename [name]
+  match name
+    case "" false
+    case _
+      match [(chars-within [[45 45] [48 57] [65 90] [97 122]] name) (abnf-render-some (filter (fn [c] (abnf-render-starts c name)) ["-" "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]))]
+        case [true false] true
+        case _ false
+
+; A rule name ABNF can spell: a rulename, or prose in angle brackets, as
+; the \`<all>\` of a removal is.
 def abnf-render-name [name]
   match name
     case ""
       abnf-render-refuse "a rule has the empty name, which ABNF cannot spell"
     case _
-      match [(chars-within [[45 45] [48 57] [65 90] [97 122]] name) (abnf-render-some (filter (fn [c] (abnf-render-starts c name)) ["-" "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]))]
-        case [true false] name
-        case _
+      match (abnf-render-rulename name)
+        case true name
+        case false
           match [(abnf-render-starts "<" name) (count (split "<" name)) (count (split ">" name)) (chars-within [[32 61] [63 126]] (string-join "" (split ">" name)))]
             case [true 2 2 true]
               match (abnf-render-at (split ">" name) 1)
                 case "" name
                 case _ (abnf-render-refuse (string-join "" ["the rule " (quoted name) " has a name ABNF cannot spell"]))
             case _ (abnf-render-refuse (string-join "" ["the rule " (quoted name) " has a name ABNF cannot spell"]))
+
+; A reference: a rulename, never prose in angle brackets, which ABNF
+; reads as prose where an element is due.
+def abnf-render-reference [rname name]
+  match (abnf-render-rulename name)
+    case true name
+    case false
+      match name
+        case "" (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " references the empty name, which ABNF cannot spell"]))
+        case _ (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " references " (quoted name) ", a name ABNF cannot spell"]))
+
+; The characters a case-insensitive literal's numeric value matches as
+; it would without regard to case, since they have none: ASCII but its
+; letters, and the characters past U+FFFF but those of the scripts that
+; have cases (Deseret, Osage, Vithkuqi, Old Hungarian, Garay, Warang
+; Citi, Medefaidrin, Adlam). A character of the Basic Multilingual Plane
+; past ASCII may have cases.
+def abnf-render-caseless [[0 127] [65536 66559] [66640 66735] [66816 66927] [67008 68735] [68864 68927] [69008 71839] [71936 93759] [93856 125183] [125280 1114111]]
 
 ; A literal: a quoted string where one holds its text, \`%s\` before it
 ; where it matches exactly, and otherwise its code points as one numeric
@@ -243,7 +281,7 @@ def abnf-render-literal [rname text cs]
         case true (string-join "" ["%s\\"" text "\\""])
         case _ (string-join "" ["\\"" text "\\""])
     case false
-      match [cs (abnf-render-has-letter text) (chars-within [[0 127] [65536 1114111]] text)]
+      match [cs (abnf-render-has-letter text) (chars-within abnf-render-caseless text)]
         case [true h a] (string-join "" ["%x" (string-join "." (abnf-render-codes text))])
         case [false false true] (string-join "" ["%x" (string-join "." (abnf-render-codes text))])
         case _ (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds the case-insensitive literal " (quoted text) ", which no quoted string holds and whose numeric value would match one case alone"]))
@@ -331,7 +369,7 @@ def abnf-render-repeated [self state reps]
       let [rep (abnf-render-at reps 0)]
         match state
           case [text inner form]
-            let [next (match [form rep] (case [:group [0 1]] [(string-join "" ["[" inner " ]"]) inner :atom]) (case [:atom [0 1]] [(string-join "" ["*1" text]) inner :prefixed]) (case [:prefixed r] [(string-join "" [(abnf-render-prefix rep) "( " text " )"]) inner :prefixed]) (case _ [(string-join "" [(abnf-render-prefix rep) text]) inner :prefixed]))]
+            let [next (match [form rep] (case [:group [0 1]] [(string-join "" ["[" inner " ]"]) inner :atom]) (case [:atom [0 1]] [(string-join "" ["*1" text]) inner :prefixed]) (case [:prefixed [0 1]] [(string-join "" ["[ " text " ]"]) inner :atom]) (case [:prefixed r] [(string-join "" [(abnf-render-prefix rep) "( " text " )"]) inner :prefixed]) (case _ [(string-join "" [(abnf-render-prefix rep) text]) inner :prefixed]))]
               self self next (abnf-render-rest reps)
 
 ; An element's text, from its members: [name value] pairs, \`alternatives\`
@@ -350,14 +388,14 @@ def abnf-render-element [rname pairs]
 ; An element's text before its repetitions, as [text inner form].
 def abnf-render-atom [rname type pairs]
   match type
-    case "reference" [(abnf-render-name (abnf-render-pair "name" pairs)) "" :atom]
+    case "reference" [(abnf-render-reference rname (abnf-render-pair "name" pairs)) "" :atom]
     case "literal" [(abnf-render-literal rname (abnf-render-pair "text" pairs) (abnf-render-pair "caseSensitive" pairs)) "" :atom]
     case "char" [(string-join "" ["%x" (abnf-render-hex (abnf-render-pair "value" pairs))]) "" :atom]
     case "range"
       match (abnf-render-at-least (abnf-render-pair "to" pairs) (abnf-render-pair "from" pairs))
         case true [(string-join "" ["%x" (abnf-render-hex (abnf-render-pair "from" pairs)) "-" (abnf-render-hex (abnf-render-pair "to" pairs))]) "" :atom]
         case false (abnf-render-shape "a range whose to is below its from")
-    case "any" ["%x0-10FFFF" "" :atom]
+    case "any" ["%x00-10FFFF" "" :atom]
     case "prose" [(abnf-render-prose rname (abnf-render-pair "text" pairs)) "" :atom]
     case "token" (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds the token terminal " (quoted (abnf-render-pair "text" pairs)) ", which ABNF has no form for"]))
     case "class"
@@ -975,7 +1013,7 @@ def abnf-transduce [input]
 ; compiler (tabnas-bnf) emits for a grammar, written back as RFC 5234
 ; ABNF. This is a library of definitions, each named \`abnf-...\`, which a
 ; host links with its own program (alchemy's \`compile_sources\`); its entry
-; point is \`abnf-render\`, and nothing else here is the host's to call.
+; point is \`abnf-render-spec\`, and nothing else here is the host's to call.
 ;
 ; A host reads an ABNF document by compiling it: the grammar-spec tree is
 ; the pure-data GrammarSpec that \`abnfCompile(src, {recognition: false,

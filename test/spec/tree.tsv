@@ -24,9 +24,10 @@ a = %x61.62 %d97.98 %b1100001.1100010	{"type":"grammar","rules":[{"type":"rule",
 a = %x10FFFF %x0	{"type":"grammar","rules":[{"type":"rule","name":"a","alternatives":[[{"type":"char","value":1114111},{"type":"char","value":0}]]}]}
 # The platform integer parse reads the longest prefix of digits valid in the base.
 a = %d5A	{"type":"grammar","rules":[{"type":"rule","name":"a","alternatives":[[{"type":"char","value":5}]]}]}
-# A surrogate pair in a concatenation is the one character it encodes.
+# A surrogate pair in a concatenation is the one character it encodes; one value alone is its code point, a surrogate's too.
 a = %xD83D.DE00	{"type":"grammar","rules":[{"type":"rule","name":"a","alternatives":[[{"type":"char","value":128512}]]}]}
 a = %x41.D83D.DE00	{"type":"grammar","rules":[{"type":"rule","name":"a","alternatives":[[{"type":"literal","text":"A😀","caseSensitive":true}]]}]}
+a = %xD800	{"type":"grammar","rules":[{"type":"rule","name":"a","alternatives":[[{"type":"char","value":55296}]]}]}
 # Prose, its angle brackets taken off; a removal is named <all>.
 a = <a number> <>	{"type":"grammar","rules":[{"type":"rule","name":"a","alternatives":[[{"type":"prose","text":"a number"},{"type":"prose","text":""}]]}]}
 <all> = <remove>	{"type":"grammar","rules":[{"type":"rule","name":"<all>","alternatives":[[{"type":"prose","text":"remove"}]]}]}
@@ -49,6 +50,8 @@ a = %d555864801982	ERROR:abnf_code_point
 a = %x62-61	ERROR:abnf_reversed_range
 a = 3*2b	ERROR:abnf_reversed_repetition
 a = 9007199254740992*b	ERROR:abnf_count
+a = %x41.D800	ERROR:abnf_surrogate
+a = %xDE00.D83D	ERROR:abnf_surrogate
 a = ( b	ERROR:abnf_unclosed
 a = [ b	ERROR:abnf_unclosed
 a = "x	ERROR:unterminated_string

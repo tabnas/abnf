@@ -331,7 +331,9 @@ comment carries; the core rules are the compiler's.
   the same trees, member order included, and to the codes they refuse a
   source with where the tree cannot hold it: `abnf_code_point`,
   `abnf_reversed_range`, `abnf_count` (a count past 2^53 - 1),
-  `abnf_reversed_repetition` and `abnf_unclosed`.
+  `abnf_reversed_repetition`, `abnf_unclosed` and `abnf_surrogate` (a
+  concatenation holding half of a surrogate pair alone, which names no
+  character; one value alone, `%xD800`, is a `char` of its own).
 - The part, [`alchemy/transduce.alc`](alchemy/transduce.alc)
   (`abnf-transduce`, the manifest's `translate.transduce`), makes the
   tree's events from the rule passes of `make()`, a rule at a time, so
@@ -346,7 +348,7 @@ comment carries; the core rules are the compiler's.
   an ABNF document's tree, written, reads back as that tree. A tree of
   another notation is written as ABNF spells it (a literal, which matches
   exactly, as `%s"..."` or its numeric value; a class as the alternation
-  of its members; GBNF's `.` as `%x0-10FFFF`), and what ABNF cannot say
+  of its members; GBNF's `.` as `%x00-10FFFF`), and what ABNF cannot say
   is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule: a token
   terminal, a negated or empty class, a name ABNF cannot spell, and the
   rest the manifest's `loss` list names.
@@ -853,18 +855,17 @@ What "correct" means here, in order of authority:
 
 ## Error codes
 
-This package declares **no** error codes of its own: there is no
-`error`/`hint` catalogue in any runtime, and no fixture pins an
-`ERROR:<code>` row — none of the engine's inherited base codes is exercised
-here either. Compiler diagnostics are thrown exceptions (`AbnfParseError`
-in `ts/src/converter.ts`, and its Go counterpart) whose prose messages
+The compiler declares **no** error codes of its own: there is no
+`error`/`hint` catalogue on the IR parser in any runtime. Compiler
+diagnostics are thrown exceptions (`AbnfParseError` in
+`ts/src/converter.ts`, and its Go counterpart) whose prose messages
 carry the `abnf:` prefix. Rust has no exceptions, so the same diagnostics
 are RETURNED there, as `AbnfParseError` and the `AbnfError` enum that
 wraps it; the text is identical wherever the shared fixtures compare it,
 which is the 35 rows of `alignment-abnf-errors.tsv` and not every
 diagnostic the package can produce.
 
-What the fixtures pin instead is the rendered **message**:
+What the fixtures pin for the compiler is the rendered **message**:
 `test/spec/alignment-abnf-errors.tsv` compares each of its 35 diagnostics
 byte for byte, in all three runtimes, through the parity runners'
 `matchError` hook. The
@@ -874,12 +875,21 @@ contract than a code: rewording a diagnostic and changing which failure
 occurs look the same to it. That fixture is a conversion target for the
 A3/A4 error-code work.
 
+The tree a host translates does declare codes, the ones its parser
+refuses a source with where the tree cannot hold it: `abnf_code_point`,
+`abnf_reversed_range`, `abnf_reversed_repetition`, `abnf_count`,
+`abnf_unclosed` and `abnf_surrogate`. Each is in the catalogue the tree
+parser's options carry (`TREE_OPTIONS` in `ts/src/tree.ts`, `treeOptions`
+in `go/tree.go`, `TREE_ERRORS` in `rs/src/tree.rs`), and each has an
+`ERROR:<code>` row in [`test/spec/tree.tsv`](test/spec/tree.tsv), which
+the three runtimes run; an engine refusal there (`unterminated_string`)
+keeps the engine's code.
+
 The machine-readable list is [`tabnas.plugin.json`](tabnas.plugin.json)
-(`errorCodes`) — deliberately empty today, matching the catalogue-free
-state above. If this package ever declares a code, add it there in the same
-change: the code is the contract a fixture pins with `ERROR:<code>`, and
-two runtimes that reject the same input with different codes have agreed on
-nothing.
+(`errorCodes`): the tree's codes, in the catalogue's order. If this
+package declares another code, add it there in the same change: the code
+is the contract a fixture pins with `ERROR:<code>`, and two runtimes that
+reject the same input with different codes have agreed on nothing.
 
 ## Untrusted input
 

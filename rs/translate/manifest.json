@@ -22,7 +22,14 @@
       "internal"
     ]
   },
-  "errorCodes": [],
+  "errorCodes": [
+    "abnf_code_point",
+    "abnf_reversed_range",
+    "abnf_reversed_repetition",
+    "abnf_count",
+    "abnf_unclosed",
+    "abnf_surrogate"
+  ],
   "docs": "https://tabnas.dev/docs/packages",
   "repository": "https://github.com/tabnas/abnf",
   "versionSource": "ts/package.json",
@@ -36,9 +43,9 @@
     "loss": [
       "Comments, blank lines and layout are not kept, and neither is a value annotation, which a comment carries: each rule is written on one line, its alternatives between slashes and its elements between spaces.",
       "A numeric value is written in hexadecimal, whatever base the text gave it (%d65 is written %x41), a concatenation of numeric values a quoted string can hold as the case-sensitive string %s\"...\", and %i\"...\" as the quoted string it means: each reads back as the same element.",
-      "The repetition from 0 to 1 is written [ ... ] over a group and *1 before anything else, and a repetition of an element a prefix already repeats, which another notation can write and RFC 5234 cannot, in a group of its own, which reads back with one more group.",
-      "A grammar of another notation is written as ABNF spells it: a literal, which matches exactly, as %s\"...\" or, where no quoted string holds it, as the numeric value of its code points; a character or a range as a numeric value; a class as the alternation of its members, each a character or a range, in a group where it has more than one; and GBNF's . as %x0-10FFFF.",
-      "A grammar the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a token terminal, a negated class, an empty class, a name ABNF cannot spell (the empty name among them), prose holding > or a character past ASCII, a case-insensitive literal that no quoted string holds and that holds a letter of ASCII or a character past ASCII that may have cases, and a literal holding a lone surrogate. A tree that is not the schema's is refused the same way, naming what was met."
+      "The repetition from 0 to 1 is written [ ... ] over a group and *1 before anything else, and a repetition of an element a prefix already repeats, which another notation can write and RFC 5234 cannot, in a group of its own, an option [ ... ] where it is from 0 to 1, which reads back with one more group.",
+      "A grammar of another notation is written as ABNF spells it: a literal, which matches exactly, as %s\"...\" or, where no quoted string holds it, as the numeric value of its code points; a character or a range as a numeric value; a class as the alternation of its members, each a character or a range, in a group where it has more than one; and GBNF's . as %x00-10FFFF.",
+      "A grammar the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a token terminal, a negated class, an empty class, a name ABNF cannot spell (the empty name among them, and a reference's name in angle brackets, which ABNF reads as prose), prose holding > or a character past ASCII, a case-insensitive literal that no quoted string holds and that holds a letter of ASCII or a character past ASCII that may have cases (one of the Basic Multilingual Plane, or of a script past it that has them), and a literal holding a lone surrogate. A tree that is not the schema's is refused the same way, naming what was met."
     ],
     "spec": {
       "reads": "tree",
