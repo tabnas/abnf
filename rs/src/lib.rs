@@ -31,6 +31,7 @@ mod compile;
 mod converter;
 mod numeric;
 mod parser_abnf;
+mod tree;
 
 /// The README's Rust examples run as doctests, so a stale one fails the
 /// gate rather than misleading the reader. Its `toml` and `bash` fences
@@ -46,6 +47,7 @@ use tabnas::{Plugin, PluginError, Tabnas, Value};
 pub use compile::abnf_compile;
 pub use converter::{parse_abnf, AbnfParseError};
 pub use parser_abnf::abnf_rules;
+pub use tree::{make, parse_abnf_tree};
 
 pub use tabnas_bnf::{
     attach_action_slots, attach_actions, eliminate_left_recursion, mark_listing, to_jsonic,
@@ -310,6 +312,11 @@ pub struct TranslationParts {
     pub embed: Option<TranslationPart>,
     /// An optional render from the write shape to text.
     pub render: Option<TranslationPart>,
+    /// The transducer part: the tree's events from the parser's rule passes.
+    pub transduce: Option<TranslationPart>,
+    /// The render of the grammar-spec route, the manifest's
+    /// `translate.spec`: a compiled grammar spec written back as ABNF.
+    pub spec: Option<TranslationPart>,
 }
 
 const TRANSLATION: TranslationParts = TranslationParts {
@@ -320,19 +327,30 @@ const TRANSLATION: TranslationParts = TranslationParts {
         entry: "abnf-render",
         source: Some(include_str!("../translate/render.alc")),
     }),
+    transduce: Some(TranslationPart {
+        entry: "abnf-transduce",
+        source: Some(include_str!("../translate/transduce.alc")),
+    }),
+    spec: Some(TranslationPart {
+        entry: "abnf-render-spec",
+        source: Some(include_str!("../translate/render-spec.alc")),
+    }),
 };
 
-/// Return the translation parts of ABNF documents: the manifest, and the
-/// render that writes a grammar spec, the GrammarSpec the compiler emits
-/// for a grammar, back as ABNF. There is no lift and no embed: a host
-/// reads a document by compiling it ([`abnf_compile`] with `recognition`
-/// false and `strict` true, the text the TypeScript compiler writes byte
-/// for byte), and the tree is the spec's own shape, the schema
-/// `grammar-spec`, which EBNF and GBNF share.
+/// Return the translation parts of ABNF documents: the manifest, the part
+/// that streams a document's tree, its rules in source order (the schema
+/// `grammar-rules`, which EBNF and GBNF share), from the rule passes of
+/// [`make`], the render that writes such a tree back as ABNF, and, as
+/// `spec`, the render of the grammar-spec route, which writes the
+/// GrammarSpec the compiler emits back as ABNF (the tree a host reads on
+/// that route is [`abnf_compile`] with `recognition` false and `strict`
+/// true). There is no lift and no embed.
 ///
 /// ```
 /// let parts = tabnas_abnf::translate().expect("abnf carries translation parts");
 /// assert_eq!(parts.render.map(|part| part.entry), Some("abnf-render"));
+/// assert_eq!(parts.transduce.map(|part| part.entry), Some("abnf-transduce"));
+/// assert_eq!(parts.spec.map(|part| part.entry), Some("abnf-render-spec"));
 /// assert_eq!(parts.embed, None);
 /// ```
 #[must_use]
@@ -343,32 +361,63 @@ pub const fn translate() -> Option<TranslationParts> {
 /// The plugin's manifest, `tabnas.plugin.json`, as the repository carries
 /// it. Its `translate` object is what a host that translates reads: the
 /// shape a document is read as and written from (`tree`), the schema of
-/// that tree (`grammar-spec`), the root the render needs (`object`), the
-/// file that holds the render, and the sentences that say what a written
-/// grammar does not keep. The crate embeds its own copy,
-/// `translate/manifest.json`, since a packaged crate holds nothing outside
-/// `rs/`; `tests/translate_test.rs` holds the copy to the file.
+/// that tree (`grammar-rules`), the root the render needs (`object`), the
+/// files that hold the part and the render, the sentences that say what a
+/// written grammar does not keep, and `spec`, the grammar-spec route. The
+/// crate embeds its own copy, `translate/manifest.json`, since a packaged
+/// crate holds nothing outside `rs/`; `tests/translate_test.rs` holds the
+/// copy to the file.
 ///
 /// ```
-/// assert!(tabnas_abnf::manifest_text().contains("\"grammar-spec\""));
+/// assert!(tabnas_abnf::manifest_text().contains("\"grammar-rules\""));
 /// ```
 pub fn manifest_text() -> &'static str {
     TRANSLATION.manifest
 }
 
+/// The text of a part, or the empty text.
+fn part_text(part: Option<TranslationPart>) -> &'static str {
+    match part {
+        Some(part) => part.source.unwrap_or_default(),
+        None => "",
+    }
+}
+
 /// The render, `alchemy/render.alc`, the file the manifest's
 /// `translate.render` names: a library of alchemy definitions, with no
-/// `export`, whose entry point `abnf-render` writes a grammar spec's
-/// events as one ABNF document that compiles back to the same spec. A
-/// host links it with its own program. The crate embeds its own copy,
+/// `export`, whose entry point `abnf-render` writes a grammar-rules
+/// tree's events as one ABNF document that reads back as the same tree.
+/// A host links it with its own program. The crate embeds its own copy,
 /// `translate/render.alc`, held to the file as the manifest's is.
 ///
 /// ```
 /// assert!(tabnas_abnf::render_text().contains("def abnf-render [input]"));
 /// ```
 pub fn render_text() -> &'static str {
-    match TRANSLATION.render {
-        Some(part) => part.source.unwrap_or_default(),
-        None => "",
-    }
+    part_text(TRANSLATION.render)
+}
+
+/// The part, `alchemy/transduce.alc`, the file the manifest's
+/// `translate.transduce` names: its entry point `abnf-transduce` makes the
+/// tree's events from the rule passes of [`make`]. The crate embeds its
+/// own copy, `translate/transduce.alc`.
+///
+/// ```
+/// assert!(tabnas_abnf::transduce_text().contains("def abnf-transduce [input]"));
+/// ```
+pub fn transduce_text() -> &'static str {
+    part_text(TRANSLATION.transduce)
+}
+
+/// The grammar-spec route's render, `alchemy/render-spec.alc`, the file
+/// the manifest's `translate.spec.render` names: its entry point
+/// `abnf-render-spec` writes a grammar spec's events as one ABNF document
+/// that compiles back to the same spec. The crate embeds its own copy,
+/// `translate/render-spec.alc`.
+///
+/// ```
+/// assert!(tabnas_abnf::render_spec_text().contains("def abnf-render-spec [input]"));
+/// ```
+pub fn render_spec_text() -> &'static str {
+    part_text(TRANSLATION.spec)
 }

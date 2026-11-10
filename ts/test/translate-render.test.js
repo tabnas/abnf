@@ -1,11 +1,14 @@
 /* Copyright (c) 2026 Richard Rodger and other contributors, MIT License */
 'use strict'
 
-// The render, run: a grammar spec written as ABNF by the render the
-// package carries (`translate().render`), through the `alchemy` command
-// (tabnas/alchemy-cli), which this package does not depend on. Set
-// TABNAS_ALCHEMY to the command's path to run these tests; without it
-// they skip, as `roundtrip.test.js` does without @tabnas/debug.
+// The render of the grammar-spec route, run: a grammar spec written as
+// ABNF by the render the package carries for it (`translate().spec`,
+// alchemy/render-spec.alc), through the `dmog` command (tabnas/dmog),
+// which this package does not depend on. Set TABNAS_ALCHEMY to the
+// command's path to run these tests; without it they skip, as
+// `roundtrip.test.js` does without @tabnas/debug. The render of the
+// grammar-rules tree, the route a host translates by, is
+// `tree-render.test.js`'s.
 //
 // Each spec is one the compiler writes, changed where a test says, so
 // what the render reads is a tree a host can hand it. The render writes
@@ -63,7 +66,7 @@ function render (what, spec) {
   if (null == dir) {
     dir = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'abnf-render-'))
     Fs.writeFileSync(Path.join(dir, 'render.alc'),
-      translate().render.source + '\ndef export [input] (abnf-render input)\n')
+      translate().spec.source + '\ndef export [input] (abnf-render-spec input)\n')
   }
   if (null == beat) {
     beat = setInterval(() => {
@@ -357,10 +360,9 @@ test('the render keeps alternatives that are alike', { skip }, async () => {
   await writes('start = "a" "b" / "a" "b"\n', 'start = "a" "b" / "a" "b"\n')
 })
 
-// The compiler reads a numeric value as a case-insensitive literal where
-// it holds a letter of ASCII, with the folding the pattern has, and as an
-// exact one where it holds none; so a case-insensitive literal past ASCII
-// with no such letter would come back matching the one case it spells.
+// The compiler reads a numeric value as an exact literal, as RFC 5234
+// section 2.3 does; so a case-insensitive literal past ASCII would come
+// back matching the one case it spells.
 test('the render refuses a case-insensitive literal whose numeric value matches exactly', { skip }, async () => {
   const MIXED = 'start = %x41.E9 word\nword = 1*%x61-7A\n'
   await writes(MIXED, MIXED)

@@ -1,0 +1,184 @@
+; ABNF's transducer part: the tree's JSON events from the rule passes of
+; the ABNF meta-grammar, for a host that reads parser events (dmog's
+; `translate` and `run --grammar abnf`). Every event is the one the walk
+; of the tree `parseAbnfTree` builds gives: the schema `grammar-rules`
+; (tabnas/bnf's docs/grammar-rules.md, and section 13.1 of alchemy's
+; docs/streaming-plan.md), a grammar's rules as the text writes them, in
+; source order, each an object whose `type` comes first and whose other
+; members follow in the order the schema lists them. It is hand-written
+; over the passes of `make()`, the parser whose value that tree is.
+;
+; The passes. `abnf` holds the grammar and `prod` a rule, a production
+; replacing the one before it; `prod` reads its name and its `=` or `=/`,
+; and `alts` its alternatives, each a `seq` of elements. An element is
+; an `elem`, whose open reads the repetition prefix (`*`, `m*`, `*n`,
+; `m*n`, `n`), and the `atom` it pushes, whose open reads what the
+; element is: a quoted string with its `%s` or `%i`, a numeric value (its
+; token carries the element it spells), prose, a rule name, or the `(`
+; or `[` of a group, whose alternatives are an `alts` of their own, and
+; whose close reads the `)` or `]`. A rule whose close pushes another
+; (`alts` on `/`, `seq` on its next element) is still open, so a close
+; ends its rule only where its alternate pushes nothing.
+;
+; An element's `repeat` is its last member and its prefix comes first, so
+; the part keeps a frame for each open element, innermost last, holding
+; the events of its prefix's repetition and whether the element is an
+; option, `[ ... ]`, whose repetition from 0 to 1 is the innermost; the
+; element's close writes them. The state is [started frames]: whether any
+; pass came (a source that makes none, the empty file, is the grammar of
+; no rules at finish), and the frames, which grow with the nesting of
+; groups and never with the document's length.
+
+; Whether a string is not empty.
+def abnf-transduce-full [s]
+  match s
+    case "" false
+    case _ true
+
+; A repetition count, from the text of its `#NUM` token: its digits
+; after any leading zeros, which a JSON number does not spell, read as a
+; number with no lexeme of its own, as the tree's are.
+def abnf-transduce-count [token]
+  let [pieces (split "0" (get :src token))]
+    let [firsts (filter (fn [i] (abnf-transduce-full (get-path (as-path [i]) pieces))) (indices pieces))]
+      match (count firsts)
+        case 0 0
+        case _
+          let [k (get-path (as-path [0]) firsts)]
+            add 0 (number (string-join "0" (map (fn [i] (get-path (as-path [i]) pieces)) (filter (fn [i] (match (compare i k) (case :less false) (case _ true))) (indices pieces)))))
+
+; The events of a repetition from `min` up, or to `max`.
+def abnf-transduce-from [min]
+  vector object-start (key "min") (scalar min) object-end
+
+def abnf-transduce-between [min max]
+  vector object-start (key "min") (scalar min) (key "max") (scalar max) object-end
+
+; The repetition an element's prefix writes, as its events: nothing where
+; the element has no prefix.
+def abnf-transduce-prefix [rule]
+  match (count (get :tokens rule))
+    case 0 []
+    case 1
+      match (get :name (transduce-token 0 rule))
+        case "#STAR" (abnf-transduce-from 0)
+        case _
+          let [n (abnf-transduce-count (transduce-token 0 rule))]
+            abnf-transduce-between n n
+    case 2
+      match (get :name (transduce-token 0 rule))
+        case "#STAR" (abnf-transduce-between 0 (abnf-transduce-count (transduce-token 1 rule)))
+        case _ (abnf-transduce-from (abnf-transduce-count (transduce-token 0 rule)))
+    case 3 (abnf-transduce-between (abnf-transduce-count (transduce-token 0 rule)) (abnf-transduce-count (transduce-token 2 rule)))
+    case _ (fail :protocol-order "an element's repetition prefix is at most three tokens")
+
+; A literal's events, up to its last member.
+def abnf-transduce-literal [text sensitive]
+  vector object-start (key "type") (scalar "literal") (key "text") (scalar text) (key "caseSensitive") (scalar sensitive)
+
+; The element a numeric value spells, which its token carries.
+def abnf-transduce-numeric [val]
+  match (get :type val)
+    case "char" [object-start (key "type") (scalar "char") (key "value") (scalar (get :value val))]
+    case "range" [object-start (key "type") (scalar "range") (key "from") (scalar (get :from val)) (key "to") (scalar (get :to val))]
+    case "literal" (abnf-transduce-literal (get :text val) true)
+    case _ (fail :protocol-order "a numeric value's token carries a char, a range or a literal")
+
+; Prose's text, between its angle brackets, which it cannot hold.
+def abnf-transduce-prose [src]
+  match (first-split "<" src)
+    case [before rest]
+      match (first-split ">" rest)
+        case [text after] text
+
+; What an atom's open writes: an element up to its last member, or a
+; group up to the start of its alternatives.
+def abnf-transduce-atom [rule]
+  let [token (transduce-token 0 rule)]
+    match (get :name token)
+      case "#SS" (abnf-transduce-literal (get :val (transduce-token 1 rule)) true)
+      case "#SI" (abnf-transduce-literal (get :val (transduce-token 1 rule)) false)
+      case "#ST" (abnf-transduce-literal (get :val token) false)
+      case "#NV" (abnf-transduce-numeric (get :val token))
+      case "#PV" [object-start (key "type") (scalar "prose") (key "text") (scalar (abnf-transduce-prose (get :src token)))]
+      case "#TX" [object-start (key "type") (scalar "reference") (key "name") (scalar (get :val token))]
+      case "#LP" [object-start (key "type") (scalar "group") (key "alternatives") array-start]
+      case "#OB" [object-start (key "type") (scalar "group") (key "alternatives") array-start]
+      case _ (fail :protocol-order "an atom opens on a string, a numeric value, prose, a name, ( or [")
+
+; A rule's head: its type, its name (prose's with its angle brackets, the
+; `<all>` of a removal) and `incremental` for `=/`, up to the start of its
+; alternatives.
+def abnf-transduce-rule [rule]
+  let [name (transduce-token 0 rule)]
+    let [head [object-start (key "type") (scalar "rule") (key "name") (scalar (match (get :name name) (case "#PV" (get :src name)) (case _ (get :val name))))]]
+      match (get :name (transduce-token 1 rule))
+        case "#DEFA" (push-all [(key "incremental") (scalar true) (key "alternatives") array-start] head)
+        case _ (push-all [(key "alternatives") array-start] head)
+
+; The rule a pass's alternate pushes, or "".
+def abnf-transduce-pushes [rule]
+  match (get :alt rule)
+    case missing ""
+    case alt (get :p alt)
+
+; An element's close: its repetitions, the option's innermost, then
+; the end of its object.
+def abnf-transduce-element-end [frame]
+  match frame
+    case [prefix optional]
+      let [reps (match optional (case true (push-all prefix (abnf-transduce-between 0 1))) (case false prefix))]
+        match (count reps)
+          case 0 [object-end]
+          case _ (push-all [array-end object-end] (push-all reps [(key "repeat") array-start]))
+
+def abnf-transduce-open [frames rule]
+  match (get :name rule)
+    case "abnf" [frames [object-start (key "type") (scalar "grammar") (key "rules") array-start]]
+    case "prod" [frames (abnf-transduce-rule rule)]
+    case "alts" [frames []]
+    case "seq" [frames [array-start]]
+    case "elem" [(push [(abnf-transduce-prefix rule) false] frames) []]
+    case "atom" [frames (abnf-transduce-atom rule)]
+    case _ (fail :protocol-order "a rule pass of a rule the ABNF meta-grammar does not have")
+
+def abnf-transduce-close [frames rule]
+  match (get :name rule)
+    case "abnf" [frames [array-end object-end]]
+    case "prod" [frames [object-end]]
+    case "alts"
+      match (abnf-transduce-pushes rule)
+        case "seq" [frames []]
+        case _ [frames [array-end]]
+    case "seq"
+      match (abnf-transduce-pushes rule)
+        case "elem" [frames []]
+        case _ [frames [array-end]]
+    case "elem" [(pop frames) (abnf-transduce-element-end (top frames))]
+    case "atom"
+      match (count (get :tokens rule))
+        case 0 [frames []]
+        case _
+          match (get :name (transduce-token 0 rule))
+            case "#CB"
+              match (top frames)
+                case [prefix optional] [(push [prefix true] (pop frames)) []]
+            case _ [frames []]
+    case _ (fail :protocol-order "a rule pass of a rule the ABNF meta-grammar does not have")
+
+def abnf-transduce-step [state pass]
+  match state
+    case [started frames]
+      let [next (match pass (case (open rule) (abnf-transduce-open frames rule)) (case (close rule) (abnf-transduce-close frames rule)))]
+        match next
+          case [fs outputs] (transition [true fs] outputs)
+
+; A source that made no pass is the grammar of no rules.
+def abnf-transduce-finish [state]
+  match state
+    case [false frames] [object-start (key "type") (scalar "grammar") (key "rules") array-start array-end object-end]
+    case [true []] []
+    case _ (fail :protocol-order "the rule passes ended inside an element, which a grammar's never do")
+
+def abnf-transduce [input]
+  as-events (scan-emit [false []] abnf-transduce-step abnf-transduce-finish (parser-events input))

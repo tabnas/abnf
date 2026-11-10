@@ -154,6 +154,38 @@ The same for a spec already converted: `TransduceAlc` of
 `github.com/tabnas/bnf/go`, whose text is the TypeScript `transduceAlc`'s
 byte for byte.
 
+## The tree for translation
+
+A host that translates a grammar between notations reads an ABNF
+document as the schema `grammar-rules`, which `github.com/tabnas/bnf/go`
+defines and EBNF and GBNF share: the grammar's rules as the text writes
+them, in source order. Each object is a `*tabnas.OrderedMap`, so that its
+members keep the order the schema gives them, and each number a
+`float64`.
+
+### `ParseAbnfTree(src string) (*tabnas.OrderedMap, error)`
+
+Read ABNF source whole as the tree, as the TypeScript `parseAbnfTree`
+does. The error is an `*AbnfParseError` whose `Cause` is the engine's
+error, with its code: `abnf_code_point`, `abnf_reversed_range`,
+`abnf_count`, `abnf_reversed_repetition`, `abnf_unclosed` or the
+engine's own.
+
+### `Make() *tabnas.Tabnas`
+
+A fresh parser whose value is the tree: the parser a host streams a
+document through with the transducer part, `Translate().Transduce`.
+
+### `Translate() *TranslationParts`
+
+The translation parts the manifest names, each with its `Entry` and
+`Source`, and the manifest's text:
+
+- `Transduce`, entry `abnf-transduce`, the transducer part.
+- `Render`, entry `abnf-render`, which writes a tree as ABNF.
+- `Spec`, entry `abnf-render-spec`, which writes a compiled grammar spec
+  as ABNF.
+
 ## Errors
 
 ```go

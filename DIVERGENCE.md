@@ -89,6 +89,11 @@ both. The fifth is the same fact in a character class: the `regex`
 crate's classes are over scalar values, and a range with no scalar value
 in it at all cannot be built.
 
+The tree a host translates holds the same texts: `parseAbnfTree` reads
+`g = %xD800.0041` as a literal of U+D800 and `A` in TypeScript, and of
+U+FFFD and `A` in Go and Rust, while a lone `%xD800` is the character
+U+D800, a number, in every runtime.
+
 **Reason.** `String.fromCodePoint(0xD800)` answers a lone surrogate.
 `char::from_u32(0xD800)` answers `None`, because a `char` is a Unicode
 scalar value by definition, and `string(rune(0xD800))` in Go yields the

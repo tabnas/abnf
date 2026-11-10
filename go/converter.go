@@ -537,7 +537,8 @@ func parseNumericValue(src string, tkn *tabnas.Token, rec *numErrRecorder) *abnf
 		hi := codePoint(parts[1])
 		if lo == hi {
 			return &abnfElement{
-				Kind: kindTerm, Literal: string(rune(lo)), NumErr: NumErr, Sp: sp}
+				Kind: kindTerm, Literal: string(rune(lo)), CaseSensitive: true,
+				HasCaseSens: true, NumErr: NumErr, Sp: sp}
 		}
 		toEsc := func(n int64) string {
 			return fmt.Sprintf("\\x{%04x}", n)
@@ -556,7 +557,10 @@ func parseNumericValue(src string, tkn *tabnas.Token, rec *numErrRecorder) *abnf
 	for _, n := range parts {
 		sb.WriteRune(rune(codePoint(n)))
 	}
-	return &abnfElement{Kind: kindTerm, Literal: sb.String(), NumErr: NumErr, Sp: sp}
+	// A numeric value matches exactly, as RFC 5234 section 2.3 says: a
+	// quoted string is what matches without regard to case.
+	return &abnfElement{Kind: kindTerm, Literal: sb.String(), CaseSensitive: true,
+		HasCaseSens: true, NumErr: NumErr, Sp: sp}
 }
 
 // spanOf is the source span of a token, for the IR (bnf.SrcSpan). Every

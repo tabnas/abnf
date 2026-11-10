@@ -541,6 +541,18 @@ const abnfRules: Record<
 // Cached tabnas instance for the ABNF grammar above; built on first use.
 let _abnfParser: ((src: string) => Production[]) | null = null
 
+// The matcher of a numeric value (`#NV`) the IR parser lexes with:
+//   %xNN        single hex code point
+//   %dNN        single decimal code point
+//   %bNN        single binary code point
+//   %xNN-NN     hex range
+//   %xNN.NN.NN  concatenated hex code points (= string)
+// Digits are permissive (hex covers the decimal / binary subsets);
+// `parseNumericValue` re-validates against the actual base. The tree
+// parser (`tree.ts`) lexes the same text with a matcher that also reads
+// it, so that the token carries the element it spells.
+const NUMERIC_VALUE = /^%[xdbXDB][0-9a-fA-F]+(?:[-.][0-9a-fA-F]+)*/
+
 function getAbnfParser(): (src: string) => AbnfProduction[] {
   if (_abnfParser) return _abnfParser
 
@@ -548,7 +560,19 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
 
   // ABNF defines its own grammar from scratch, so we don't load any
   // grammar plugin — just use the bare engine with default tokens.
-  const j = new Tabnas({
+  const j = new Tabnas(abnfOptions(NUMERIC_VALUE))
+  installAbnfRules(j, abnfRules)
+
+  _abnfParser = (src: string) => j.parse(src) as AbnfProduction[]
+  return _abnfParser
+}
+
+
+// The engine options the ABNF meta-grammar reads its source with, `#NV`
+// lexed by `numeric`. The IR parser above and the tree parser
+// (`tree.ts`) share every other option.
+function abnfOptions(numeric: RegExp | ((lex: any, rule: any) => any)): any {
+  return {
     rule: { start: 'abnf' },
     fixed: {
       token: {
@@ -577,16 +601,8 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
       token: {
         // ABNF repetition counts: decimal integers.
         '#NUM': /^[0-9]+/,
-        // ABNF numeric value notation:
-        //   %xNN        single hex code point
-        //   %dNN        single decimal code point
-        //   %bNN        single binary code point
-        //   %xNN-NN     hex range
-        //   %xNN.NN.NN  concatenated hex code points (= string)
-        // Digits are permissive (hex covers the decimal / binary
-        // subsets); `parseNumericValue` re-validates against the
-        // actual base.
-        '#NV': /^%[xdbXDB][0-9a-fA-F]+(?:[-.][0-9a-fA-F]+)*/,
+        // ABNF numeric value notation (see NUMERIC_VALUE above).
+        '#NV': numeric,
         // `%s` / `%i` prefixes on a quoted string. The lookahead
         // requires `"` so they don't steal the `%` of `%xNN`.
         '#SS': /^%[sS](?=")/,
@@ -646,17 +662,21 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
         multi: null as any,
       },
     },
-  })
+  }
+}
 
-  // Drop the default JSON rules — they would otherwise compete with
-  // ours for the starting token set.
+
+// Install a rule table of the ABNF meta-grammar's shape on `j`, in place
+// of the default JSON rules, which would otherwise compete with it for
+// the starting token set.
+function installAbnfRules(j: any, table: typeof abnfRules): void {
   const existing = j.rule()
   for (const name of Object.keys(existing)) {
     j.rule(name, null)
   }
 
-  for (const name of Object.keys(abnfRules)) {
-    const spec = abnfRules[name]
+  for (const name of Object.keys(table)) {
+    const spec = table[name]
     j.rule(name, (rs: any) => {
       if (spec.bo) rs.bo(spec.bo)
       if (spec.bc) rs.bc(spec.bc)
@@ -664,9 +684,6 @@ function getAbnfParser(): (src: string) => AbnfProduction[] {
       if (spec.close) rs.close(spec.close)
     })
   }
-
-  _abnfParser = (src: string) => j.parse(src) as AbnfProduction[]
-  return _abnfParser
 }
 
 
@@ -1052,8 +1069,8 @@ function mergeIncrementals(prods: AbnfProduction[]): AbnfProduction[] {
 // Decode an ABNF numeric value (`%xNN`, `%dNN`, `%bNN`, or one of
 // the range/concatenation forms) into a `AbnfElement`.
 //
-//   %x61            => single-char term "a"
-//   %x66.6f.6f      => concatenated term "foo"
+//   %x61            => single-char term "a", case-sensitive
+//   %x66.6f.6f      => concatenated term "foo", case-sensitive
 //   %x30-39         => regex character class [\u0030-\u0039]
 //
 // Hex is case-insensitive; decimal and binary accept only digits
@@ -1086,7 +1103,7 @@ function parseNumericValue(src: string, tkn?: any): AbnfElement {
     const lo = codePoint(loStr)
     const hi = codePoint(hiStr)
     if (lo === hi) {
-      return { kind: 'term', literal: String.fromCodePoint(lo), sp }
+      return { kind: 'term', literal: String.fromCodePoint(lo), caseSensitive: true, sp }
     }
     // `\uXXXX` only reaches U+FFFF: `%xE000-10FFFF` (JSONPath, TOML)
     // became `[-ჿff]`, which JS reads as the range E000–10FF
@@ -1108,9 +1125,11 @@ function parseNumericValue(src: string, tkn?: any): AbnfElement {
     }
   }
 
+  // A numeric value matches exactly, as RFC 5234 section 2.3 says: a
+  // quoted string is what matches without regard to case.
   const parts = body.split('.')
   const chars = parts.map((n) => String.fromCodePoint(codePoint(n)))
-  return { kind: 'term', literal: chars.join(''), sp }
+  return { kind: 'term', literal: chars.join(''), caseSensitive: true, sp }
 }
 
 
@@ -1143,6 +1162,9 @@ export {
   emitGrammarSpec,
   eliminateLeftRecursion,
   abnfRules,
+  abnfOptions,
+  installAbnfRules,
+  NUMERIC_VALUE,
   AbnfParseError,
 }
 

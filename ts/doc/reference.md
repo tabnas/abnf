@@ -13,6 +13,7 @@ const {
   abnfCompile, toRecognitionSpec, toPureSpec, toJsonic,
   attachActions, attachActionSlots, markListing,
   AbnfCompileError, AbnfActionError,
+  make, parseAbnfTree, abnfTreeRules, translate,
 } = require('@tabnas/abnf')
 ```
 
@@ -181,11 +182,54 @@ The same for a spec already converted: @tabnas/bnf's `transduceAlc`,
 re-exported. It reads only the value actions, so a spec compiled with
 `builtins` on writes the same part as one compiled with it off.
 
+## The tree for translation
+
+A host that translates a grammar between notations reads an ABNF
+document as the schema `grammar-rules`, which `@tabnas/bnf` defines and
+EBNF and GBNF share: the grammar's rules as the text writes them, in
+source order, each `{ type: 'rule', name, incremental?, alternatives }`,
+an alternative a list of elements, and an element an object whose
+`type` comes first and whose repetitions, `repeat`, come last.
+
+### `parseAbnfTree(src) => AbnfTree`
+
+Read ABNF source whole as the tree. A numeric value is a `char`, a
+`range` or, for a concatenation, a case-sensitive `literal`. A quoted
+string is a `literal` that matches without regard to case unless written
+`%s"…"`, and `[ … ]` is a `group` whose first repetition is from 0 to 1.
+The tree keeps no comment and no value annotation, and holds no core
+rule the text leaves out. For source the meta-grammar refuses, or that
+the tree has no room for, it throws `AbnfParseError`, whose `cause` is
+the engine's error with one of the codes `abnf_code_point`,
+`abnf_reversed_range`, `abnf_count`, `abnf_reversed_repetition` and
+`abnf_unclosed`, or the engine's own.
+
+### `make() => Tabnas`
+
+A fresh parser whose value is the tree: the parser a host streams a
+document through with the transducer part, `translate().transduce`,
+which makes the tree's events from its rule passes.
+
+### `abnfTreeRules`
+
+The meta-grammar's rule table with the tree's actions: the alternates of
+`abnfRules`, each action replaced.
+
+### `translate() => TranslationParts`
+
+The translation parts the manifest names, each `{ entry, source }`, and
+the manifest's text:
+
+- `transduce`, entry `abnf-transduce`, the transducer part.
+- `render`, entry `abnf-render`, which writes a tree as ABNF.
+- `spec`, entry `abnf-render-spec`, which writes a compiled grammar spec
+  as ABNF.
+
 ## Errors
 
 | Class | Thrown by | Notable fields |
 |---|---|---|
-| `AbnfParseError` | `parseAbnf` / `abnfConvert` on bad source | `line?`, `column?`, `cause?` |
+| `AbnfParseError` | `parseAbnf` / `abnfConvert` / `parseAbnfTree` on bad source | `line?`, `column?`, `cause?` |
 | `AbnfCompileError` | `toRecognitionSpec` / `toPureSpec` / `abnfCompile` | `rules: string[]` (offending rule names) |
 | `AbnfActionError` | `attachActions` / `attachActionSlots` | (none) |
 
