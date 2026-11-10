@@ -341,6 +341,22 @@ comment carries; the core rules are the compiler's.
   numeric value's token carries the element it spells as its value, which
   the atom's action gives it, since a part reads a token's value and never
   the work an action does with it.
+- A parse from a reader reads the source a window at a time (admin
+  ADR-30): the tree parser, `make()` in TypeScript and Rust and `Make()`
+  in Go, declares `lex.window`. Its matchers read the text only through
+  the lexer's window: `abnf-reach`, a lexer matcher that runs before every
+  other one and cuts no token, reads the window on until the character
+  that decides where one of the meta-grammar's own tokens ends lies inside
+  it (numeric values, `%s` and `%i`, prose and repetition counts), so that
+  they see what the whole text shows them; every other token is the
+  engine's, whose matchers read the window themselves. The compiler's
+  parser declares no window: it reads a text whole.
+  `ts/test/window.test.js`, `go/window_test.go` and
+  `rs/tests/window_test.rs` hold a parse from a reader, in pieces of 1, 3
+  and 64 bytes, and in TypeScript and Rust under windows of a few
+  characters, to the value, tokens, rule passes and errors of the text
+  parsed whole, over every fixture row and corpus grammar and over long
+  documents whose tokens straddle the window.
 - The render, [`alchemy/render.alc`](alchemy/render.alc) (`abnf-render`),
   writes the tree as ABNF, a rule to a line, as each rule's events
   arrive; it holds one element at a time, since an element's repetitions
@@ -778,16 +794,17 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-Five of the twenty-one files in `ts/test/*.test.js`, run against the
-built `dist`, need a word of explanation. The other sixteen name
+Five of the twenty-two files in `ts/test/*.test.js`, run against the
+built `dist`, need a word of explanation. The other seventeen name
 themselves: `class-overlap`, `compile`, `conformance`, `docs`, `lifting`,
 `parity`, `port-deps`, `roundtrip`, `token`, `transduce` (the transducer
 part `abnfTransduce` writes from the value annotations), `translate`,
 `translate-render` (the grammar-spec route's render, run through the
 `dmog` command `TABNAS_ALCHEMY` names, skipped without it), `tree` (the
 tree a host translates, `test/spec/tree.tsv` among it), `tree-render`
-(the tree's render, run as `translate-render`'s is), `value-annotation`
-and `version`.
+(the tree's render, run as `translate-render`'s is), `value-annotation`,
+`version` and `window` (a parse from a reader against the text parsed
+whole).
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.

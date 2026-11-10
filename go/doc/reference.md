@@ -174,7 +174,9 @@ error, with its code: `abnf_code_point`, `abnf_reversed_range`,
 ### `Make() *tabnas.Tabnas`
 
 A fresh parser whose value is the tree: the parser a host streams a
-document through with the transducer part, `Translate().Transduce`.
+document through with the transducer part, `Translate().Transduce`. It
+declares `Lex.Window`, so `ParseReader` reads a document a window at a
+time, never whole.
 
 ### `Translate() *TranslationParts`
 
