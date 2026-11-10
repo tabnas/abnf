@@ -44,6 +44,26 @@ pub struct AbnfParseError {
 }
 
 impl AbnfParseError {
+    /// The engine's refusal of a source, naming its line and column, with
+    /// the engine's code.
+    pub(crate) fn from_engine(error: &tabnas::TabnasError) -> Self {
+        let line = error.row;
+        let column = error.col;
+        let location = if 0 != line && 0 != column {
+            format!(" at line {line}, column {column}")
+        } else {
+            String::new()
+        };
+        let rendered = error.to_string();
+        let raw = rendered.lines().next().unwrap_or_default();
+        Self {
+            message: format!("abnf: parse error{location}: {raw}"),
+            line: (0 != line).then_some(line),
+            column: (0 != column).then_some(column),
+            code: Some(error.code.clone()),
+        }
+    }
+
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -81,23 +101,7 @@ pub fn parse_abnf(src: &str) -> Result<Grammar, AbnfParseError> {
         Ok(parsed) => parsed,
         Err(RawError::Numeric(message)) => return Err(numeric_parse_error(&message)),
         Err(RawError::Message(message)) => return Err(AbnfParseError::new(message)),
-        Err(RawError::Engine(error)) => {
-            let line = error.row;
-            let column = error.col;
-            let location = if 0 != line && 0 != column {
-                format!(" at line {line}, column {column}")
-            } else {
-                String::new()
-            };
-            let rendered = error.to_string();
-            let raw = rendered.lines().next().unwrap_or_default();
-            return Err(AbnfParseError {
-                message: format!("abnf: parse error{location}: {raw}"),
-                line: (0 != line).then_some(line),
-                column: (0 != column).then_some(column),
-                code: Some(error.code.clone()),
-            });
-        }
+        Err(RawError::Engine(error)) => return Err(AbnfParseError::from_engine(&error)),
     };
 
     if productions.is_empty() {

@@ -237,6 +237,7 @@ pub(crate) fn parse_numeric_value(src: &str, token: Option<&Token>) -> Value {
             return object(vec![
                 ("kind", Some(Value::String("term".into()))),
                 ("literal", Some(Value::String(character(low).to_string()))),
+                ("caseSensitive", Some(Value::Bool(true))),
                 ("sp", span),
             ]);
         }
@@ -282,9 +283,12 @@ pub(crate) fn parse_numeric_value(src: &str, token: Option<&Token>) -> Value {
         push_utf16(&mut units, code_point(part));
     }
     let literal = String::from_utf16_lossy(&units);
+    // A numeric value matches exactly, as RFC 5234 section 2.3 says: a
+    // quoted string is what matches without regard to case.
     object(vec![
         ("kind", Some(Value::String("term".into()))),
         ("literal", Some(Value::String(literal))),
+        ("caseSensitive", Some(Value::Bool(true))),
         ("sp", span),
     ])
 }

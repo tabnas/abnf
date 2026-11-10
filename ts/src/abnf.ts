@@ -42,6 +42,19 @@ import {
   TransducePart,
 } from './compile'
 
+import {
+  make,
+  parseAbnfTree,
+  abnfTreeRules,
+} from './tree'
+
+import type {
+  AbnfTree,
+  AbnfTreeRule,
+  AbnfTreeElement,
+  AbnfTreeRepeat,
+} from './tree'
+
 
 // Plugin entry point. Decorates the instance with a callable `abnf`
 // member that converts and installs a grammar, plus `abnf.toSpec` for
@@ -86,9 +99,13 @@ export {
   transduceAlc,
   AbnfCompileError,
   AbnfActionError,
+  make,
+  parseAbnfTree,
+  abnfTreeRules,
 }
 
 export type { AbnfConvertOptions, AbnfCompileOptions, ActionsMap, TransducePart }
+export type { AbnfTree, AbnfTreeRule, AbnfTreeElement, AbnfTreeRepeat }
 
 export { translate } from './translate'
 export type { TranslationPart, TranslationParts } from './translate'

@@ -13,6 +13,8 @@ type TranslationParts = Readonly<{
   lift?: TranslationPart
   embed?: TranslationPart
   render?: TranslationPart
+  transduce?: TranslationPart
+  spec?: TranslationPart
 }>
 
 const TRANSLATION: TranslationParts = Object.freeze({
@@ -21,7 +23,7 @@ const TRANSLATION: TranslationParts = Object.freeze({
   "name": "@tabnas/abnf",
   "go": "github.com/tabnas/abnf/go",
   "rust": "tabnas-abnf",
-  "description": "ABNF (RFC 5234) grammar compiler for the tabnas engine. A host reads an ABNF document by compiling it: the tree it translates is the pure-data GrammarSpec the compiler emits (schema grammar-spec), which the render writes back as ABNF.",
+  "description": "ABNF (RFC 5234) grammar compiler for the tabnas engine. A host translating an ABNF document reads it as its rules in source order (schema grammar-rules, which EBNF and GBNF share), streamed by its transducer part from the rule passes of the parser make() builds, and the render writes them back as ABNF; the compiled GrammarSpec (schema grammar-spec) stays the route of a host that installs a grammar, with its own render under translate.spec.",
   "base": "@tabnas/bnf",
   "engine": "@tabnas/parser",
   "extensions": [
@@ -40,7 +42,14 @@ const TRANSLATION: TranslationParts = Object.freeze({
       "internal"
     ]
   },
-  "errorCodes": [],
+  "errorCodes": [
+    "abnf_code_point",
+    "abnf_reversed_range",
+    "abnf_reversed_repetition",
+    "abnf_count",
+    "abnf_unclosed",
+    "abnf_surrogate"
+  ],
   "docs": "https://tabnas.dev/docs/packages",
   "repository": "https://github.com/tabnas/abnf",
   "versionSource": "ts/package.json",
@@ -48,31 +57,1067 @@ const TRANSLATION: TranslationParts = Object.freeze({
     "reads": "tree",
     "writes": "tree",
     "root": "object",
-    "schema": "grammar-spec",
+    "schema": "grammar-rules",
+    "transduce": "alchemy/transduce.alc",
     "render": "alchemy/render.alc",
     "loss": [
-      "The grammar is written anew from its compiled spec: comments, blank lines and layout are not kept, each rule is written on one line, and the RFC 5234 core rules the compiler added (ALPHA, DIGIT and the rest) are not written, since the compiler adds them again wherever they are referenced.",
-      "A rule is written as the compiler rewrote it: a reference that led an alternative is written back where the alternatives the compiler put in its place still stand together, each followed by one same tail, and is otherwise written as those alternatives; a left recursion is written as the repetition it became, and alternatives the compiler left-factored with their shared prefix written in each of them again.",
-      "Where the compiler reordered a rule's alternatives to tell them apart (a longer lookahead ahead of a shorter one that begins with the same character, a keyword ahead of a character class that can take it), the alternatives that push a helper of the compiler's are put back in the order its numbers record, and the others are written in the compiled order: the rule compiles back the same, and the spec compiled back can differ in the order of the alternates other rules build through it, in the numbers of the compiler's helpers and in the order of its tokens, which is the order the lexer tries two tokens a place expects, so where a keyword and a class that can take it trade places the grammar compiled back accepts what the spec refused (start = ident / \\"if\\" ident with ident = %x61-7A: the spec refuses ifx, and the text compiles back to one that accepts it).",
-      "A left recursion that ran through another rule (P = Q, Q = P \\"+\\" / NR) is written as the compiler rewrote it, with the leading reference that closed the cycle left in place, and compiles back to another spec, since the compiler now substitutes that reference.",
-      "The start rule is written first, as ABNF's start rule is its first; a spec whose start rule was not its first rule compiles back with that rule moved first.",
-      "Terminals are written in RFC 5234's forms: a literal as a quoted string (with %s where it matches exactly and holds a letter) or, where a quoted string cannot hold it, as a numeric value of its code points, a range as %x and its ends, the class of every code point (GBNF's dot) as %x0-10FFFF, and a rule the compiler made a token of (CR = %x0D, referenced as CR) as that rule, after the others.",
-      "A rule the compiler made a token of, whose name is one the compiler could give its literal by itself (B = \\"b\\", or any name of capitals, digits and underscores where the literal holds a character past ASCII), cannot be told from that literal and is written as the literal: it compiles back with the token later in the token table, or under the name the literal gives it.",
-      "Repetitions are written in RFC 5234's forms, *A, 1*A, m*nA, [ A ] for an option over a group and 0*1A for an option over anything else; a repetition of a repetition, which another notation can write and RFC 5234 cannot, is put in a group of its own and compiles back with one more group.",
-      "An empty alternative, which RFC 5234 has no syntax for, is written as nothing between its slashes, which the compiler reads as one; in a rule whose alternatives the compiler emits as its open alternates, where it puts the empty one last wherever it stood, it is written first.",
-      "A spec compiled from another notation compiles back under ABNF's own settings: the group tag on every alternate, and lexer options the other notation adds (GBNF's exact lexing), are ABNF's, and a class of several members, which RFC 5234 cannot write, is written as the alternation of its members, each range a range and each character a string or a range of one, and compiles back as that alternation.",
-      "The tree builders every compiled grammar carries (@node$, @capture$, @bubble$ and @fold$, with their k settings) and its marks are not written, since the compiler makes them again from the rules: a spec whose builders or marks are others compiles back with the compiler's own, and recognises what it recognised.",
-      "A spec the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming what it met: an action (a value annotation's builders, a user action, the probe dispatcher of an optional prefix), a condition or a counter other than a repetition's, an error generator or an alternate modifier, a function reference where a rule or a count is due, a set of tokens at one place, a removal, a clear or the form that edits a rule already installed, a token no ABNF terminal matches (a negated class, a class holding a character past ASCII alone, a class whose flags change what it matches (no u on a class that is negated, reaches past U+FFFF or holds every code point, or u on one that holds a surrogate), a pattern that is neither one class nor an escaped literal, a case-sensitive literal holding a letter and a character no quoted string holds, a case-insensitive literal holding a character past ASCII and no ASCII letter, whose numeric value would match one case alone, a character past U+FFFF), a token set whose tokens are not the class its name gives, a rule with no alternate to open with, a sequence's step with more alternates than a step, a rule the compiler lifted to a token whose name another rule holds, a start that is not the start wrapper every grammar text compiles to (one open alternate that matches nothing and pushes a rule, closed by the end of the source alone), a rule name ABNF cannot spell, the empty name among them, a repetition bounded past what the compiler numbers, a repetition of no copies, whose item the spec does not keep, or a spec that gives its match tokens' order as a list of its own (Go's tokenOrder), whose rules' order, which ranks the tokens, is lost."
+      "Comments, blank lines and layout are not kept, and neither is a value annotation, which a comment carries: each rule is written on one line, its alternatives between slashes and its elements between spaces.",
+      "ABNF starts from its first rule, so a grammar whose start is another (GBNF's, which starts from root) is written with its start rule first: the text of the rules before it is held until that rule arrives and written after it, and nothing is held where the start rule comes first or the grammar names no start. A start naming a rule the grammar does not define, in a grammar that has rules, is refused at its end with TARGET_VALUE_UNREPRESENTABLE, naming the rule.",
+      "A numeric value is written in hexadecimal, whatever base the text gave it (%d65 is written %x41), a concatenation of numeric values a quoted string can hold as the case-sensitive string %s\\"...\\", and %i\\"...\\" as the quoted string it means: each reads back as the same element.",
+      "The repetition from 0 to 1 is written [ ... ] over a group and *1 before anything else, and a repetition of an element a prefix already repeats, which another notation can write and RFC 5234 cannot, in a group of its own, an option [ ... ] where it is from 0 to 1, which reads back with one more group.",
+      "A grammar of another notation is written as ABNF spells it: a literal, which matches exactly, as %s\\"...\\" or, where no quoted string holds it, as the numeric value of its code points; a character or a range as a numeric value; a class as the alternation of its members, each a character or a range, in a group where it has more than one; and GBNF's . as %x00-10FFFF.",
+      "A grammar the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a token terminal, a negated class, an empty class, a name ABNF cannot spell (the empty name among them, and a reference's name in angle brackets, which ABNF reads as prose), prose holding > or a character past ASCII, a case-insensitive literal that no quoted string holds and that holds a letter of ASCII or a character past ASCII that may have cases (one of the Basic Multilingual Plane, or of a script past it that has them), and a literal holding a lone surrogate. A tree that is not the schema's is refused the same way, naming what was met."
     ],
-    "whole": "A rule may be named before it is defined and given more alternatives later, with =/, and the spec is what the compiler makes of the whole grammar, so a document's tree is complete only at its end: it is read whole before anything is written."
+    "spec": {
+      "reads": "tree",
+      "writes": "tree",
+      "root": "object",
+      "schema": "grammar-spec",
+      "render": "alchemy/render-spec.alc",
+      "loss": [
+        "The grammar is written anew from its compiled spec: comments, blank lines and layout are not kept, each rule is written on one line, and the RFC 5234 core rules the compiler added (ALPHA, DIGIT and the rest) are not written, since the compiler adds them again wherever they are referenced.",
+        "A rule is written as the compiler rewrote it: a reference that led an alternative is written back where the alternatives the compiler put in its place still stand together, each followed by one same tail, and is otherwise written as those alternatives; a left recursion is written as the repetition it became, and alternatives the compiler left-factored with their shared prefix written in each of them again.",
+        "Where the compiler reordered a rule's alternatives to tell them apart (a longer lookahead ahead of a shorter one that begins with the same character, a keyword ahead of a character class that can take it), the alternatives that push a helper of the compiler's are put back in the order its numbers record, and the others are written in the compiled order: the rule compiles back the same, and the spec compiled back can differ in the order of the alternates other rules build through it, in the numbers of the compiler's helpers and in the order of its tokens, which is the order the lexer tries two tokens a place expects, so where a keyword and a class that can take it trade places the grammar compiled back accepts what the spec refused (start = ident / \\"if\\" ident with ident = %x61-7A: the spec refuses ifx, and the text compiles back to one that accepts it).",
+        "A left recursion that ran through another rule (P = Q, Q = P \\"+\\" / NR) is written as the compiler rewrote it, with the leading reference that closed the cycle left in place, and compiles back to another spec, since the compiler now substitutes that reference.",
+        "The start rule is written first, as ABNF's start rule is its first; a spec whose start rule was not its first rule compiles back with that rule moved first.",
+        "Terminals are written in RFC 5234's forms: a literal as a quoted string (with %s where it matches exactly and holds a letter) or, where a quoted string cannot hold it, as a numeric value of its code points, a range as %x and its ends, the class of every code point (GBNF's dot) as %x0-10FFFF, and a rule the compiler made a token of (CR = %x0D, referenced as CR) as that rule, after the others.",
+        "A rule the compiler made a token of, whose name is one the compiler could give its literal by itself (B = \\"b\\", or any name of capitals, digits and underscores where the literal holds a character past ASCII), cannot be told from that literal and is written as the literal: it compiles back with the token later in the token table, or under the name the literal gives it.",
+        "Repetitions are written in RFC 5234's forms, *A, 1*A, m*nA, [ A ] for an option over a group and 0*1A for an option over anything else; a repetition of a repetition, which another notation can write and RFC 5234 cannot, is put in a group of its own and compiles back with one more group.",
+        "An empty alternative, which RFC 5234 has no syntax for, is written as nothing between its slashes, which the compiler reads as one; in a rule whose alternatives the compiler emits as its open alternates, where it puts the empty one last wherever it stood, it is written first.",
+        "A spec compiled from another notation compiles back under ABNF's own settings: the group tag on every alternate, and lexer options the other notation adds (GBNF's exact lexing), are ABNF's, and a class of several members, which RFC 5234 cannot write, is written as the alternation of its members, each range a range and each character a string or a range of one, and compiles back as that alternation.",
+        "The tree builders every compiled grammar carries (@node$, @capture$, @bubble$ and @fold$, with their k settings) and its marks are not written, since the compiler makes them again from the rules: a spec whose builders or marks are others compiles back with the compiler's own, and recognises what it recognised.",
+        "A spec the render cannot write as ABNF is refused with TARGET_VALUE_UNREPRESENTABLE, naming what it met: an action (a value annotation's builders, a user action, the probe dispatcher of an optional prefix), a condition or a counter other than a repetition's, an error generator or an alternate modifier, a function reference where a rule or a count is due, a set of tokens at one place, a removal, a clear or the form that edits a rule already installed, a token no ABNF terminal matches (a negated class, a class holding a character past ASCII alone, a class whose flags change what it matches (no u on a class that is negated, reaches past U+FFFF or holds every code point, or u on one that holds a surrogate), a pattern that is neither one class nor an escaped literal, a case-insensitive literal that no quoted string holds and that holds a letter of ASCII or a character past ASCII that may have cases, whose numeric value, which the compiler reads as exact, would match one case alone, a character past U+FFFF), a token set whose tokens are not the class its name gives, a rule with no alternate to open with, a sequence's step with more alternates than a step, a rule the compiler lifted to a token whose name another rule holds, a start that is not the start wrapper every grammar text compiles to (one open alternate that matches nothing and pushes a rule, closed by the end of the source alone), a rule name ABNF cannot spell, the empty name among them, a repetition bounded past what the compiler numbers, a repetition of no copies, whose item the spec does not keep, or a spec that gives its match tokens' order as a list of its own (Go's tokenOrder), whose rules' order, which ranks the tokens, is lost."
+      ]
+    }
   }
 }
 `,
-  render: Object.freeze({ entry: "abnf-render", source: `; ABNF's render: a grammar-spec tree, the GrammarSpec the tabnas BNF
+  render: Object.freeze({ entry: "abnf-render", source: `; ABNF's render: a grammar-rules tree written as RFC 5234 ABNF, a rule at a
+; time as its events arrive. This is a library of definitions, each named
+; \`abnf-render-...\` but its entry point, \`abnf-render\`, which a host links
+; with its own program (alchemy's \`compile_sources\`); nothing else here is
+; the host's to call.
+;
+; The tree is the schema \`grammar-rules\` (tabnas/bnf's
+; docs/grammar-rules.md, and section 13.1 of alchemy's
+; docs/streaming-plan.md): \`{"type": "grammar", ["start": name],
+; "rules": [...]}\`, each rule \`{"type": "rule", "name", ["incremental":
+; true], "alternatives"}\`, an alternative a list of elements, and an
+; element an object whose \`type\` comes first and whose other members
+; follow in the schema's order, its repetitions, \`repeat\`, last. ABNF's
+; reader builds it, and so do EBNF's and GBNF's, so a grammar read in
+; another notation is written here too.
+;
+; The text: a rule on a line of its own, \`name = ...\` or \`name =/ ...\`
+; for an incremental one, its alternatives between \` / \`, the elements
+; of an alternative between spaces, a group in \`( ... )\` and an option,
+; a group whose innermost repetition is from 0 to 1, in \`[ ... ]\`; a
+; repetition as RFC 5234's prefix (\`*\`, \`m*\`, \`*n\`, \`m*n\`, \`n\`), the
+; repetition from 0 to 1 of an element that is no group as \`*1\`, and a
+; repetition of what a prefix already repeats in a group of its own, an
+; option \`[ ... ]\` where it is from 0 to 1. A literal is a quoted
+; string, \`%s\` before it where it matches exactly (an ABNF quoted string
+; matches without regard to case), or, where a quoted string cannot hold
+; it, the numeric value of its code points, which matches exactly; a
+; character is \`%x\` and its code point; a range \`%x<from>-<to>\`; prose
+; \`<...>\`; GBNF's \`.\` the range of every code point, \`%x00-10FFFF\`; and
+; a class, which RFC 5234 has no form for, the alternation of its
+; members, each a character or a range, in a group where it has more
+; than one. The empty grammar is no text at all. ABNF starts from its
+; first rule, so a grammar whose \`start\` names another (GBNF's root) is
+; written with that rule first: the text of the rules before it is held
+; until it arrives and written after it, nothing held where the start
+; rule comes first or there is no start, and a start naming a rule that
+; never arrives is refused at the grammar's end.
+;
+; The contract is the round trip: an ABNF document's tree, written here,
+; reads back as that tree. A grammar of another notation reads back as a
+; tree this render writes as the same text, since what ABNF spells
+; otherwise is written as ABNF spells it. What ABNF cannot say is refused
+; with TARGET_VALUE_UNREPRESENTABLE, naming the rule and what it met: a
+; token terminal (GBNF's \`<think>\`), a negated class, an empty class, a
+; name ABNF cannot spell (a rulename is a letter, then letters, digits and
+; hyphens; a rule's name in angle brackets, the \`<all>\` of a removal, is
+; written as it is, and a reference's is refused, since ABNF reads it as
+; prose), prose holding \`>\` or a character past ASCII, a case-insensitive
+; literal that a quoted string cannot hold and that holds a letter of
+; ASCII or a character past ASCII that may have cases (one of the Basic
+; Multilingual Plane, or of a script past it that has them), and a
+; literal holding a lone surrogate. A tree that is not the schema's (a
+; root that is no grammar, a node's type first nowhere, a member a node
+; does not have, out of its place, missing or of the wrong kind) is
+; refused the same way, naming what was met.
+;
+; The state is a stack of the containers open, innermost last:
+; [:grammar key at] for the root, [:rules] for its rules, [:rule key at
+; name incremental] for a rule, [:alts owner count texts] for a rule's
+; (owner :rule) or a group's (owner :group) alternatives, [:alt owner
+; text] for an alternative, [:element key at pairs] for an element, its
+; members so far as [name value] pairs, [:members items] and [:member key
+; from to] for a class's members, [:repeats items] and [:repeat key min
+; max] for an element's repetitions, and :done once the grammar has
+; closed. A rule's alternatives and their elements are written as each
+; ends; an element is held until its end, since its repetitions come
+; last and ABNF writes them first, so the state holds one element's text
+; at a time, and nothing grows with the grammar's length.
+
+; ---- refusals and small helpers
+
+def abnf-render-refuse [what]
+  fail :unrepresentable (string-join "" ["the grammar cannot be written as ABNF: " what])
+
+def abnf-render-shape [what]
+  fail :unrepresentable (string-join "" ["the tree is not a grammar-rules tree: " what])
+
+def abnf-render-not [x]
+  match x
+    case true false
+    case false true
+
+def abnf-render-at-least [n m]
+  match (compare n m)
+    case :less false
+    case _ true
+
+def abnf-render-has-letter [text]
+  abnf-render-not (chars-within [[0 64] [91 96] [123 1114111]] text)
+
+; The value a pair of an element's members gives the name, or missing.
+def abnf-render-pair [name pairs]
+  let [found (filter (fn [p] (equal (abnf-render-at p 0) name)) pairs)]
+    match (count found)
+      case 0 missing
+      case _ (abnf-render-at (abnf-render-at found 0) 1)
+
+; ---- code points as hexadecimal digits
+
+; Each hexadecimal place's fifteen multiples, from the place of 16^5.
+def abnf-render-places [[1048576 2097152 3145728 4194304 5242880 6291456 7340032 8388608 9437184 10485760 11534336 12582912 13631488 14680064 15728640] [65536 131072 196608 262144 327680 393216 458752 524288 589824 655360 720896 786432 851968 917504 983040] [4096 8192 12288 16384 20480 24576 28672 32768 36864 40960 45056 49152 53248 57344 61440] [256 512 768 1024 1280 1536 1792 2048 2304 2560 2816 3072 3328 3584 3840] [16 32 48 64 80 96 112 128 144 160 176 192 208 224 240] [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]]
+
+; A number's digit at a place: how many of the place's multiples it
+; reaches.
+def abnf-render-digit [n multiples]
+  count (filter (fn [m] (abnf-render-at-least n m)) multiples)
+
+; The number less its digit's multiple of the place.
+def abnf-render-less [n multiples d]
+  match d
+    case 0 n
+    case _ (sub n (abnf-render-at multiples (sub d 1)))
+
+def abnf-render-hex-walk [self places n acc]
+  match (count places)
+    case 0 acc
+    case _
+      let [ms (abnf-render-at places 0)]
+        let [d (abnf-render-digit n ms)]
+          self self (abnf-render-rest places) (abnf-render-less n ms d) (push (abnf-render-at abnf-render-hex-digits d) acc)
+
+; A code point's hexadecimal digits in capitals, without leading zeros
+; but two of them at least: \`0A\`, \`41\`, \`10FFFF\`.
+def abnf-render-hex [n]
+  let [digits (abnf-render-hex-walk abnf-render-hex-walk abnf-render-places n [])]
+    let [firsts (filter (fn [i] (abnf-render-not (equal (abnf-render-at digits i) "0"))) [0 1 2 3])]
+      let [k (match (count firsts) (case 0 4) (case _ (abnf-render-at firsts 0)))]
+        string-join "" (map (fn [i] (abnf-render-at digits i)) (filter (fn [i] (abnf-render-at-least i k)) (indices digits)))
+
+; A number checked to be a code point.
+def abnf-render-point [what n]
+  match (kind n)
+    case :number
+      match [(abnf-render-at-least n 0) (abnf-render-at-least 1114111 n)]
+        case [true true] n
+        case _ (abnf-render-shape (string-join "" [what " is not a code point"]))
+    case _ (abnf-render-shape (string-join "" [what " is not a number"]))
+
+; ---- ABNF's terminals
+
+; Whether a name is a rulename: a letter, then letters, digits and
+; hyphens.
+def abnf-render-rulename [name]
+  match name
+    case "" false
+    case _
+      match [(chars-within [[45 45] [48 57] [65 90] [97 122]] name) (abnf-render-some (filter (fn [c] (abnf-render-starts c name)) ["-" "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]))]
+        case [true false] true
+        case _ false
+
+; A rule name ABNF can spell: a rulename, or prose in angle brackets, as
+; the \`<all>\` of a removal is.
+def abnf-render-name [name]
+  match name
+    case ""
+      abnf-render-refuse "a rule has the empty name, which ABNF cannot spell"
+    case _
+      match (abnf-render-rulename name)
+        case true name
+        case false
+          match [(abnf-render-starts "<" name) (count (split "<" name)) (count (split ">" name)) (chars-within [[32 61] [63 126]] (string-join "" (split ">" name)))]
+            case [true 2 2 true]
+              match (abnf-render-at (split ">" name) 1)
+                case "" name
+                case _ (abnf-render-refuse (string-join "" ["the rule " (quoted name) " has a name ABNF cannot spell"]))
+            case _ (abnf-render-refuse (string-join "" ["the rule " (quoted name) " has a name ABNF cannot spell"]))
+
+; A reference: a rulename, never prose in angle brackets, which ABNF
+; reads as prose where an element is due.
+def abnf-render-reference [rname name]
+  match (abnf-render-rulename name)
+    case true name
+    case false
+      match name
+        case "" (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " references the empty name, which ABNF cannot spell"]))
+        case _ (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " references " (quoted name) ", a name ABNF cannot spell"]))
+
+; The characters a case-insensitive literal's numeric value matches as
+; it would without regard to case, since they have none: ASCII but its
+; letters, and the characters past U+FFFF but those of the scripts that
+; have cases (Deseret, Osage, Vithkuqi, Old Hungarian, Garay, Warang
+; Citi, Medefaidrin, Adlam). A character of the Basic Multilingual Plane
+; past ASCII may have cases.
+def abnf-render-caseless [[0 127] [65536 66559] [66640 66735] [66816 66927] [67008 68735] [68864 68927] [69008 71839] [71936 93759] [93856 125183] [125280 1114111]]
+
+; A literal: a quoted string where one holds its text, \`%s\` before it
+; where it matches exactly, and otherwise its code points as one numeric
+; value, which matches exactly; a case-insensitive literal no quoted
+; string holds is written so only where nothing in it has a case.
+def abnf-render-literal [rname text cs]
+  match (match text (case "" true) (case _ (chars-within [[32 33] [35 126]] text)))
+    case true
+      match cs
+        case true (string-join "" ["%s\\"" text "\\""])
+        case _ (string-join "" ["\\"" text "\\""])
+    case false
+      match [cs (abnf-render-has-letter text) (chars-within abnf-render-caseless text)]
+        case [true h a] (string-join "" ["%x" (string-join "." (abnf-render-codes text))])
+        case [false false true] (string-join "" ["%x" (string-join "." (abnf-render-codes text))])
+        case _ (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds the case-insensitive literal " (quoted text) ", which no quoted string holds and whose numeric value would match one case alone"]))
+
+; A class's member, a character or a range.
+def abnf-render-member [m]
+  match m
+    case [from to]
+      match (equal from to)
+        case true (string-join "" ["%x" (abnf-render-hex from)])
+        case false (string-join "" ["%x" (abnf-render-hex from) "-" (abnf-render-hex to)])
+
+; Prose, which holds neither \`>\` nor a character past ASCII.
+def abnf-render-prose [rname text]
+  match (match text (case "" true) (case _ (chars-within [[32 61] [63 126]] text)))
+    case true (string-join "" ["<" text ">"])
+    case false (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds the prose " (quoted text) ", which holds a character prose cannot"]))
+
+; ---- elements
+
+; The members each type of element has, in the schema's order.
+def abnf-render-members [type]
+  match type
+    case "reference" ["name"]
+    case "literal" ["text" "caseSensitive"]
+    case "char" ["value"]
+    case "range" ["from" "to"]
+    case "class" ["negated" "members"]
+    case "any" []
+    case "token" ["negated" "text"]
+    case "prose" ["text"]
+    case "group" ["alternatives"]
+    case _ missing
+
+; A member's place in its element, 1 for the first after \`type\`; the
+; repetitions come last.
+def abnf-render-place [type name]
+  match name
+    case "repeat" 9
+    case _
+      let [list (as-vector (abnf-render-members type))]
+        let [at (filter (fn [i] (equal (abnf-render-at list i) name)) (indices list))]
+          match (count at)
+            case 0 missing
+            case _ (inc (abnf-render-at at 0))
+
+; The value a scalar member must hold.
+def abnf-render-scalar-kind [name]
+  match name
+    case "name" :string
+    case "text" :string
+    case "caseSensitive" :boolean
+    case "negated" :boolean
+    case "value" :number
+    case "from" :number
+    case "to" :number
+    case _ missing
+
+; A repetition's prefix: \`*\`, \`m*\`, \`*n\`, \`n\` or \`m*n\`; max -1 where
+; there is none.
+def abnf-render-prefix [rep]
+  match rep
+    case [min max]
+      match (equal max -1)
+        case true
+          match (equal min 0)
+            case true "*"
+            case false (string-join "" [(abnf-render-num min) "*"])
+        case false
+          match (equal min max)
+            case true (abnf-render-num min)
+            case false
+              match (equal min 0)
+                case true (string-join "" ["*" (abnf-render-num max)])
+                case false (string-join "" [(abnf-render-num min) "*" (abnf-render-num max)])
+
+; An element's text with its repetitions applied, the innermost first:
+; [text inner form], form :group where the text is a group (\`inner\` its
+; alternatives), :atom where it is one element, :prefixed where a prefix
+; repeats it.
+def abnf-render-repeated [self state reps]
+  match (count reps)
+    case 0 (abnf-render-at state 0)
+    case _
+      let [rep (abnf-render-at reps 0)]
+        match state
+          case [text inner form]
+            let [next (match [form rep] (case [:group [0 1]] [(string-join "" ["[" inner " ]"]) inner :atom]) (case [:atom [0 1]] [(string-join "" ["*1" text]) inner :prefixed]) (case [:prefixed [0 1]] [(string-join "" ["[ " text " ]"]) inner :atom]) (case [:prefixed r] [(string-join "" [(abnf-render-prefix rep) "( " text " )"]) inner :prefixed]) (case _ [(string-join "" [(abnf-render-prefix rep) text]) inner :prefixed]))]
+              self self next (abnf-render-rest reps)
+
+; An element's text, from its members: [name value] pairs, \`alternatives\`
+; the texts of a group's alternatives, \`members\` a class's [from to]
+; spans, \`repeat\` the element's [min max] repetitions.
+def abnf-render-element [rname pairs]
+  let [type (abnf-render-pair "type" pairs)]
+    let [need (filter (fn [m] (match (abnf-render-pair m pairs) (case missing true) (case _ false))) (as-vector (abnf-render-members type)))]
+      match (count need)
+        case 0
+          let [reps (match (abnf-render-pair "repeat" pairs) (case missing []) (case r (as-vector r)))]
+            let [state (abnf-render-atom rname type pairs)]
+              abnf-render-repeated abnf-render-repeated state reps
+        case _ (abnf-render-shape (string-join "" ["a " type " with no " (abnf-render-at need 0)]))
+
+; An element's text before its repetitions, as [text inner form].
+def abnf-render-atom [rname type pairs]
+  match type
+    case "reference" [(abnf-render-reference rname (abnf-render-pair "name" pairs)) "" :atom]
+    case "literal" [(abnf-render-literal rname (abnf-render-pair "text" pairs) (abnf-render-pair "caseSensitive" pairs)) "" :atom]
+    case "char" [(string-join "" ["%x" (abnf-render-hex (abnf-render-pair "value" pairs))]) "" :atom]
+    case "range"
+      match (abnf-render-at-least (abnf-render-pair "to" pairs) (abnf-render-pair "from" pairs))
+        case true [(string-join "" ["%x" (abnf-render-hex (abnf-render-pair "from" pairs)) "-" (abnf-render-hex (abnf-render-pair "to" pairs))]) "" :atom]
+        case false (abnf-render-shape "a range whose to is below its from")
+    case "any" ["%x00-10FFFF" "" :atom]
+    case "prose" [(abnf-render-prose rname (abnf-render-pair "text" pairs)) "" :atom]
+    case "token" (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds the token terminal " (quoted (abnf-render-pair "text" pairs)) ", which ABNF has no form for"]))
+    case "class"
+      match (abnf-render-pair "negated" pairs)
+        case true (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds a negated class, which ABNF has no form for"]))
+        case false
+          let [members (as-vector (abnf-render-pair "members" pairs))]
+            match (count members)
+              case 0 (abnf-render-refuse (string-join "" ["the rule " (quoted rname) " holds an empty class, which ABNF has no form for"]))
+              case 1 [(abnf-render-member (abnf-render-at members 0)) "" :atom]
+              case _
+                let [inner (string-join " /" (map (fn [m] (string-join "" [" " (abnf-render-member m)])) members))]
+                  [(string-join "" ["(" inner " )"]) inner :group]
+    case "group"
+      let [inner (string-join " /" (as-vector (abnf-render-pair "alternatives" pairs)))]
+        [(string-join "" ["(" inner " )"]) inner :group]
+
+; ---- the events
+
+; The stack with its innermost container replaced.
+def abnf-render-put [stack frame]
+  push frame (pop stack)
+
+; The rule an element is in: the third container from the root.
+def abnf-render-rule-name [stack]
+  match (abnf-render-at stack 2)
+    case [:rule key at name incremental] name
+
+; An element has ended: its text, written where a rule's alternative
+; holds it, or held where a group's does.
+def abnf-render-element-end [stack frame]
+  match frame
+    case [:element key at pairs]
+      let [text (abnf-render-element (abnf-render-rule-name stack) pairs) rest (pop stack)]
+        match (top rest)
+          case [:alt :rule t] (transition rest [(string-join "" [" " text])])
+          case [:alt :group t] (transition (abnf-render-put rest [:alt :group (string-join "" [t " " text])]) [])
+
+def abnf-render-object-start [stack]
+  match (count stack)
+    case 0 (transition [[:grammar "" 0]] [])
+    case _
+      match (top stack)
+        case [:rules] (transition (push [:rule "" 0 "" false] stack) [])
+        case [:alt owner text] (transition (push [:element "" 0 []] stack) [])
+        case [:members items] (transition (push [:member "" -1 -1] stack) [])
+        case [:repeats items] (transition (push [:repeat "" -1 -1] stack) [])
+        case _ (abnf-render-shape "an object where none is")
+
+def abnf-render-object-end [stack]
+  match (top stack)
+    case [:grammar key at]
+      match at
+        case 2 (transition [:done] [])
+        case _ (abnf-render-shape "a grammar with no rules")
+    case [:rule key at name incremental]
+      match at
+        case 4 (transition (pop stack) ["\\n"])
+        case _ (abnf-render-shape (string-join "" ["the rule " (quoted name) " has no alternatives"]))
+    case [:element key at pairs] (abnf-render-element-end stack (top stack))
+    case [:member key from to]
+      match [(abnf-render-at-least from 0) (abnf-render-at-least to 0)]
+        case [true true]
+          match (abnf-render-at-least to from)
+            case true
+              let [rest (pop stack)]
+                match (top rest)
+                  case [:members items] (transition (abnf-render-put rest [:members (push [from to] items)]) [])
+            case false (abnf-render-shape "a class's member whose to is below its from")
+        case _ (abnf-render-shape "a class's member with no from or no to")
+    case [:repeat key min max]
+      match (abnf-render-at-least min 0)
+        case true
+          match (match (equal max -1) (case true true) (case false (abnf-render-at-least max min)))
+            case true
+              let [rest (pop stack)]
+                match (top rest)
+                  case [:repeats items] (transition (abnf-render-put rest [:repeats (push [min max] items)]) [])
+            case false (abnf-render-shape "a repetition whose max is below its min")
+        case false (abnf-render-shape "a repetition with no min")
+    case _ (abnf-render-shape "an object's end where none is open")
+
+; An element's member that is a list begins: a group's alternatives, a
+; class's members or the repetitions.
+def abnf-render-element-array [stack frame]
+  match frame
+    case [:element key at pairs]
+      let [type (abnf-render-pair "type" pairs)]
+        match [key (abnf-render-place type key)]
+          case [k missing] (abnf-render-shape (string-join "" ["a " type " has no member " key]))
+          case [k place]
+            match (abnf-render-at-least at place)
+              case true (abnf-render-shape (string-join "" ["a " type "'s " key " comes after what it precedes, or twice"]))
+              case false
+                let [here (abnf-render-put stack [:element "" place pairs])]
+                  match key
+                    case "alternatives" (transition (push [:alts :group 0 []] here) [])
+                    case "members" (transition (push [:members []] here) [])
+                    case "repeat" (transition (push [:repeats []] here) [])
+                    case _ (abnf-render-shape (string-join "" ["a " type "'s " key " is not a list"]))
+
+def abnf-render-array-start [stack]
+  match (top stack)
+    case [:grammar "rules" 1] (transition (push [:rules] (abnf-render-put stack [:grammar "" 2])) [])
+    case [:rule "alternatives" at name incremental]
+      match at
+        case 2 (transition (push [:alts :rule 0 []] (abnf-render-put stack [:rule "" 4 name incremental])) [(string-join "" [(abnf-render-name name) " ="])])
+        case 3 (transition (push [:alts :rule 0 []] (abnf-render-put stack [:rule "" 4 name incremental])) [(string-join "" [(abnf-render-name name) " =/"])])
+        case _ (abnf-render-shape "a rule's alternatives come before its name, or twice")
+    case [:alts owner n texts]
+      match [owner n]
+        case [:rule 0] (transition (push [:alt :rule ""] (abnf-render-put stack [:alts owner 1 texts])) [])
+        case [:rule k] (transition (push [:alt :rule ""] (abnf-render-put stack [:alts owner (inc k) texts])) [" /"])
+        case [:group k] (transition (push [:alt :group ""] (abnf-render-put stack [:alts owner (inc k) texts])) [])
+    case [:element key at pairs] (abnf-render-element-array stack (top stack))
+    case _ (abnf-render-shape "a list where none is")
+
+def abnf-render-array-end [stack]
+  match (top stack)
+    case [:rules] (transition (pop stack) [])
+    case [:alts owner n texts]
+      match n
+        case 0 (abnf-render-shape "a list of alternatives that is empty")
+        case _
+          let [rest (pop stack)]
+            match owner
+              case :rule (transition rest [])
+              case :group
+                match (top rest)
+                  case [:element key at pairs] (transition (abnf-render-put rest [:element key at (push ["alternatives" texts] pairs)]) [])
+    case [:alt owner text]
+      let [rest (pop stack)]
+        match owner
+          case :rule (transition rest [])
+          case :group
+            match (top rest)
+              case [:alts o n texts] (transition (abnf-render-put rest [:alts o n (push text texts)]) [])
+    case [:members items]
+      let [rest (pop stack)]
+        match (top rest)
+          case [:element key at pairs] (transition (abnf-render-put rest [:element key at (push ["members" items] pairs)]) [])
+    case [:repeats items]
+      match (count items)
+        case 0 (abnf-render-shape "a list of repetitions that is empty")
+        case _
+          let [rest (pop stack)]
+            match (top rest)
+              case [:element key at pairs] (transition (abnf-render-put rest [:element key at (push ["repeat" items] pairs)]) [])
+    case _ (abnf-render-shape "a list's end where none is open")
+
+; A key names the member whose value follows.
+def abnf-render-key [stack name]
+  match (top stack)
+    case [:grammar key at] (transition (abnf-render-put stack [:grammar name at]) [])
+    case [:rule key at n i] (transition (abnf-render-put stack [:rule name at n i]) [])
+    case [:element key at pairs] (transition (abnf-render-put stack [:element name at pairs]) [])
+    case [:member key from to] (transition (abnf-render-put stack [:member name from to]) [])
+    case [:repeat key min max] (transition (abnf-render-put stack [:repeat name min max]) [])
+    case _ (abnf-render-shape "a key outside an object")
+
+; A scalar member of an element: its type first, then each member in the
+; schema's order, of the kind the schema gives it.
+def abnf-render-element-scalar [stack frame value]
+  match frame
+    case [:element "type" 0 []]
+      match (abnf-render-members value)
+        case missing (abnf-render-shape (string-join "" ["an element of the type " (quoted (scalar-text csv-options value)) ", which no element has"]))
+        case list (transition (abnf-render-put stack [:element "" 0 [["type" value]]]) [])
+    case [:element key 0 []] (abnf-render-shape "an element whose first member is not its type")
+    case [:element key at pairs]
+      let [type (abnf-render-pair "type" pairs)]
+        match (abnf-render-place type key)
+          case missing (abnf-render-shape (string-join "" ["a " type " has no member " key]))
+          case place
+            match (abnf-render-at-least at place)
+              case true (abnf-render-shape (string-join "" ["a " type "'s " key " comes after what it precedes, or twice"]))
+              case false
+                match (equal (kind value) (abnf-render-scalar-kind key))
+                  case false (abnf-render-shape (string-join "" ["a " type "'s " key " is not of its kind"]))
+                  case true
+                    let [checked (match key (case "value" (abnf-render-point "a char's value" value)) (case "from" (abnf-render-point "a range's from" value)) (case "to" (abnf-render-point "a range's to" value)) (case _ value))]
+                      transition (abnf-render-put stack [:element "" place (push [key checked] pairs)]) []
+
+def abnf-render-count [what n]
+  match (kind n)
+    case :number
+      match (abnf-render-at-least n 0)
+        case true n
+        case false (abnf-render-shape (string-join "" [what " is below 0"]))
+    case _ (abnf-render-shape (string-join "" [what " is not a number"]))
+
+def abnf-render-scalar [stack value]
+  match (top stack)
+    case [:grammar "type" 0]
+      match value
+        case "grammar" (transition (abnf-render-put stack [:grammar "" 1]) [])
+        case _ (abnf-render-shape "the root's type is not grammar")
+    case [:rule "type" 0 n i]
+      match value
+        case "rule" (transition (abnf-render-put stack [:rule "" 1 n i]) [])
+        case _ (abnf-render-shape "a rule's type is not rule")
+    case [:rule "name" 1 n i]
+      match (kind value)
+        case :string (transition (abnf-render-put stack [:rule "" 2 value i]) [])
+        case _ (abnf-render-shape "a rule's name is not text")
+    case [:rule "incremental" 2 n i]
+      match value
+        case true (transition (abnf-render-put stack [:rule "" 3 n true]) [])
+        case _ (abnf-render-shape "a rule's incremental is true where it is written")
+    case [:element key at pairs] (abnf-render-element-scalar stack (top stack) value)
+    case [:member "from" from to] (transition (abnf-render-put stack [:member "" (abnf-render-point "a class member's from" value) to]) [])
+    case [:member "to" from to] (transition (abnf-render-put stack [:member "" from (abnf-render-point "a class member's to" value)]) [])
+    case [:repeat "min" -1 max] (transition (abnf-render-put stack [:repeat "" (abnf-render-count "a repetition's min" value) max]) [])
+    case [:repeat "max" min -1] (transition (abnf-render-put stack [:repeat "" min (abnf-render-count "a repetition's max" value)]) [])
+    case _ (abnf-render-shape "a value where none is, or a member out of its place")
+
+def abnf-render-step [stack event]
+  match (count stack)
+    case 0
+      match event
+        case object-start (abnf-render-object-start stack)
+        case _ (abnf-render-shape "the root is not an object")
+    case _
+      match (top stack)
+        case :done (fail :protocol-order "the events hold more after the grammar, which a tree's never do")
+        case _
+          match event
+            case object-start (abnf-render-object-start stack)
+            case object-end (abnf-render-object-end stack)
+            case array-start (abnf-render-array-start stack)
+            case array-end (abnf-render-array-end stack)
+            case (key name) (abnf-render-key stack name)
+            case (scalar value) (abnf-render-scalar stack value)
+
+def abnf-render-finish [stack]
+  match stack
+    case [:done] []
+    case [] (fail :protocol-order "the events hold no value, where a tree's hold one")
+    case _ (fail :protocol-order "the events ended inside a container, which a tree's never do")
+
+; ---- the start rule
+;
+; A grammar's \`start\` names the rule it starts from, where its notation
+; names one whatever the rules' order (GBNF's root). It comes after the
+; grammar's type and before its rules, and these definitions read it, so
+; the events the render beneath them reads hold none. Where the notation
+; written starts from its first rule (abnf-render-holds), the start rule
+; is written first: until it arrives the text of the rules before it is
+; held, and written after it; nothing is held when it comes first, or
+; where there is no start. A start naming a rule that never arrives, in a
+; grammar that has rules, is refused at the grammar's end, rather than
+; written as a grammar that starts from another rule; a grammar of no
+; rules starts nowhere, and is written as it is.
+;
+; The state is [stack start]: the render's own stack, and where the start
+; stands: [:none], no start; [:due], its key read and its name due;
+; [:wait name held any], not met yet, \`held\` the text held back and \`any\`
+; whether a rule has been; [:in name held], being written; [:met],
+; written.
+
+; The grammar's place among its members, 1 after its type and before its
+; rules, or -1 inside it.
+def abnf-render-grammar-at [stack]
+  match (count stack)
+    case 1
+      match (top stack)
+        case [:grammar key at] at
+        case [:grammar key at info] at
+        case _ -1
+    case _ -1
+
+; The name of the rule being written, or "" between rules.
+def abnf-render-current-rule [stack]
+  match (abnf-render-at-least (count stack) 3)
+    case false ""
+    case true
+      match (abnf-render-at stack 2)
+        case [:rule key at name incremental] name
+        case _ ""
+
+; The text one event makes, written or held as the start stands.
+def abnf-render-start-out [stack start out]
+  match start
+    case [:wait name held any]
+      let [rule (abnf-render-current-rule stack)]
+        match (equal rule name)
+          case true (transition [stack [:in name held]] out)
+          case false
+            let [seen (match rule (case "" any) (case _ true))]
+              match abnf-render-holds
+                case true (transition [stack [:wait name (push-all out held) seen]] [])
+                case false (transition [stack [:wait name held seen]] out)
+    case [:in name held]
+      match (equal (abnf-render-current-rule stack) name)
+        case true (transition [stack start] out)
+        case false (transition [stack [:met]] (push-all held out))
+    case _ (transition [stack start] out)
+
+def abnf-render-start-step [state event]
+  match state
+    case [stack start]
+      match start
+        case [:due]
+          match event
+            case (scalar value)
+              match [(kind value) value]
+                case [:string ""] (abnf-render-shape "a grammar's start is empty")
+                case [:string name] (transition [(abnf-render-start-noted stack name) [:wait name [] false]] [])
+                case _ (abnf-render-shape "a grammar's start is not text")
+            case _ (abnf-render-shape "a grammar's start has no name")
+        case _
+          match [event (abnf-render-grammar-at stack)]
+            case [(key "start") 1]
+              match start
+                case [:none] (transition [stack [:due]] [])
+                case _ (abnf-render-shape "a grammar's start comes twice")
+            case _
+              match (abnf-render-step stack event)
+                case (transition next out) (abnf-render-start-out next start out)
+
+def abnf-render-start-finish [state]
+  match state
+    case [stack start]
+      match start
+        case [:wait name held true] (abnf-render-refuse (string-join "" ["the grammar starts from the rule " (quoted name) ", which it does not define"]))
+        case [:wait name held false] (abnf-render-finish stack)
+        case [:due] (abnf-render-shape "a grammar's start has no name")
+        case _ (abnf-render-finish stack)
+
+; ABNF starts from its first rule, so it holds the rules before a start
+; that is not its first, and its stack notes nothing of the start.
+def abnf-render-holds true
+
+def abnf-render-start-noted [stack name]
+  stack
+
+; The render: the tree's events in, the ABNF text out, the start rule held
+; to its place.
+def abnf-render [input]
+  join ""
+    scan-emit [[] [:none]] abnf-render-start-step abnf-render-start-finish (events input)
+
+; ---- a literal's code points
+
+; A literal's characters as their code points, where a quoted string
+; cannot hold it: its ASCII characters found by a table of them, each
+; character past U+FFFF by its bits, and each other character of the Basic
+; Multilingual Plane by the block of 256 it is in. A lone surrogate, which
+; no character is, is refused.
+
+def abnf-render-codes [text]
+  let [present (filter (fn [ch] (abnf-render-some (abnf-render-rest (split (abnf-render-at ch 0) text)))) abnf-render-ascii)]
+    let [astral (abnf-render-astral abnf-render-astral text [])]
+      let [segs (abnf-render-code-walk abnf-render-code-walk (abnf-render-cat present astral) [(abnf-render-raw-seg text)])]
+        abnf-render-flat (map (fn [seg] (abnf-render-wide-codes text seg)) segs)
+
+; The characters past U+FFFF a text holds, each with its digits, the least
+; first: the least is found a bit at a time, from the block of 2^19 code
+; points above U+FFFF down to one, by whether the text holds a character
+; in the lower half of what is left, and taken out of the text before the
+; next is found.
+def abnf-render-astral [self run acc]
+  match (chars-within [[0 65535]] run)
+    case true acc
+    case false
+      let [cp (abnf-render-least-walk abnf-render-least-walk run abnf-render-bits 65536)]
+        let [ch (abnf-render-astral-char cp)]
+          self self (string-join "" (split ch run)) (push [ch (abnf-render-hex cp)] acc)
+
+def abnf-render-bits [524288 262144 131072 65536 32768 16384 8192 4096 2048 1024 512 256 128 64 32 16 8 4 2 1]
+
+def abnf-render-least-walk [self run bits lo]
+  match (count bits)
+    case 0 lo
+    case _
+      let [b (abnf-render-at bits 0)]
+        match (chars-within [[0 (sub lo 1)] [(add lo b) 1114111]] run)
+          case true (self self run (abnf-render-rest bits) (add lo b))
+          case false (self self run (abnf-render-rest bits) lo)
+
+; A character past U+FFFF, from its code point: the surrogate pair that
+; encodes it, written as two JSON escapes and read back. Its high half is
+; U+D800 and the code point's bits above the tenth, past U+10000; its low
+; half U+DC00 and the ten below, found a bit at a time.
+def abnf-render-astral-char [cp]
+  let [v (sub cp 65536)]
+    match (abnf-render-split-walk abnf-render-split-walk v abnf-render-kilos abnf-render-halves 0 0)
+      case [q acc]
+        unquoted (string-join "" ["\\"\\\\u" (abnf-render-hex (add 55296 q)) "\\\\u" (abnf-render-hex (add 56320 (sub v acc))) "\\""])
+
+def abnf-render-kilos [524288 262144 131072 65536 32768 16384 8192 4096 2048 1024]
+
+def abnf-render-halves [512 256 128 64 32 16 8 4 2 1]
+
+def abnf-render-split-walk [self v kilos halves acc q]
+  match (count kilos)
+    case 0 [q acc]
+    case _
+      let [k (abnf-render-at kilos 0) h (abnf-render-at halves 0)]
+        match (abnf-render-at-least v (add acc k))
+          case true (self self v (abnf-render-rest kilos) (abnf-render-rest halves) (add acc k) (add q h))
+          case false (self self v (abnf-render-rest kilos) (abnf-render-rest halves) acc q)
+
+def abnf-render-code-walk [self chars segs]
+  match (count chars)
+    case 0 segs
+    case _
+      let [ch (top chars)]
+        self self (pop chars) (filter abnf-render-kept-seg (abnf-render-flat (map (fn [seg] (abnf-render-cut-seg (abnf-render-at ch 0) (abnf-render-at ch 1) seg)) segs)))
+
+def abnf-render-cut-seg [c h seg]
+  match (kind (get :raw seg))
+    case :string
+      let [pieces (split c (get :raw seg))]
+        abnf-render-flat (map (fn [i] (match i (case 0 [(abnf-render-raw-seg (abnf-render-at pieces 0))]) (case _ [(abnf-render-cp-seg h) (abnf-render-raw-seg (abnf-render-at pieces i))]))) (indices pieces))
+    case _ [seg]
+
+def abnf-render-raw-seg [s]
+  record
+    entry :raw s
+
+def abnf-render-cp-seg [h]
+  record
+    entry :cp h
+
+def abnf-render-kept-seg [seg]
+  match (get :raw seg)
+    case "" false
+    case _ true
+
+def abnf-render-wide-codes [text seg]
+  match (kind (get :raw seg))
+    case :string
+      let [raw (get :raw seg)]
+        match (chars-within [[128 55295] [57344 65535]] raw)
+          case false (abnf-render-refuse (string-join "" ["the literal " (quoted text) " holds a lone surrogate, which no numeric value spells"]))
+          case true
+            let [found (abnf-render-wide-chars abnf-render-wide-chars text raw [])]
+              map (fn [piece] (get :cp piece)) (abnf-render-code-walk abnf-render-code-walk found [(abnf-render-raw-seg raw)])
+    case _ [(get :cp seg)]
+
+def abnf-render-wide-chars [self text run acc]
+  match run
+    case "" acc
+    case _
+      let [b (top (filter (fn [i] (chars-within [[(abnf-render-at abnf-render-blocks i) 65535]] run)) (indices abnf-render-blocks)))]
+        let [hh (abnf-render-at abnf-render-hex-pairs b)]
+          let [found (filter (fn [ch] (abnf-render-some (abnf-render-rest (split (abnf-render-at ch 0) run)))) (map (fn [l] [(unquoted (string-join "" ["\\"\\\\u" (abnf-render-hex-lower hh) (abnf-render-hex-lower l) "\\""])) (abnf-render-point-hex hh l)]) abnf-render-hex-pairs))]
+            match (count found)
+              case 0 (abnf-render-refuse (string-join "" ["the literal " (quoted text) " holds a character the render cannot spell"]))
+              case _ (self self text (abnf-render-strip-chars abnf-render-strip-chars found run) (abnf-render-cat acc found))
+
+def abnf-render-point-hex [hh l]
+  match hh
+    case "00" l
+    case _
+      match (abnf-render-starts "0" hh)
+        case true (string-join "" [(abnf-render-after "0" hh) l])
+        case false (string-join "" [hh l])
+
+def abnf-render-hex-pairs
+  abnf-render-flat (map (fn [a] (map (fn [b] (string-join "" [a b])) abnf-render-hex-digits)) abnf-render-hex-digits)
+
+def abnf-render-hex-digits ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "A" "B" "C" "D" "E" "F"]
+
+def abnf-render-flat [vv]
+  map
+    fn [t]
+      let [p (split "." t)]
+        get-path (as-path [(number (abnf-render-at p 0)) (number (abnf-render-at p 1))]) vv
+    filter abnf-render-full
+      split ","
+        string-join ","
+          map
+            fn [j]
+              string-join "," (map (fn [i] (string-join "." [(abnf-render-num j) (abnf-render-num i)])) (indices (abnf-render-at vv j)))
+            indices vv
+
+def abnf-render-rest [v]
+  map (fn [i] (abnf-render-at v i)) (filter (fn [i] (match i (case 0 false) (case _ true))) (indices v))
+
+def abnf-render-starts [p s]
+  match s
+    case "" false
+    case _ (abnf-render-empty (abnf-render-at (split p s) 0))
+
+def abnf-render-after [p s]
+  string-join p (abnf-render-rest (split p s))
+
+def abnf-render-cat [a b]
+  abnf-render-flat [a b]
+
+def abnf-render-strip-chars [self chars s]
+  match (count chars)
+    case 0 s
+    case _ (self self (pop chars) (string-join "" (split (abnf-render-at (top chars) 0) s)))
+
+def abnf-render-empty [s]
+  match s
+    case "" true
+    case _ false
+
+def abnf-render-full [s]
+  match s
+    case "" false
+    case _ true
+
+def abnf-render-num [n]
+  scalar-text csv-options n
+
+def abnf-render-some [v]
+  match (count v)
+    case 0 false
+    case _ true
+
+def abnf-render-hex-lower [h]
+  string-join "a" (split "A" (string-join "b" (split "B" (string-join "c" (split "C" (string-join "d" (split "D" (string-join "e" (split "E" (string-join "f" (split "F" h)))))))))))
+
+def abnf-render-ascii [["\\u0000" "00"] ["\\u0001" "01"] ["\\u0002" "02"] ["\\u0003" "03"] ["\\u0004" "04"] ["\\u0005" "05"] ["\\u0006" "06"] ["\\u0007" "07"] ["\\b" "08"] ["\\t" "09"] ["\\n" "0A"] ["\\u000b" "0B"] ["\\f" "0C"] ["\\r" "0D"] ["\\u000e" "0E"] ["\\u000f" "0F"] ["\\u0010" "10"] ["\\u0011" "11"] ["\\u0012" "12"] ["\\u0013" "13"] ["\\u0014" "14"] ["\\u0015" "15"] ["\\u0016" "16"] ["\\u0017" "17"] ["\\u0018" "18"] ["\\u0019" "19"] ["\\u001a" "1A"] ["\\u001b" "1B"] ["\\u001c" "1C"] ["\\u001d" "1D"] ["\\u001e" "1E"] ["\\u001f" "1F"] [" " "20"] ["!" "21"] ["\\"" "22"] ["#" "23"] ["$" "24"] ["%" "25"] ["&" "26"] ["'" "27"] ["(" "28"] [")" "29"] ["*" "2A"] ["+" "2B"] ["," "2C"] ["-" "2D"] ["." "2E"] ["/" "2F"] ["0" "30"] ["1" "31"] ["2" "32"] ["3" "33"] ["4" "34"] ["5" "35"] ["6" "36"] ["7" "37"] ["8" "38"] ["9" "39"] [":" "3A"] [";" "3B"] ["<" "3C"] ["=" "3D"] [">" "3E"] ["?" "3F"] ["@" "40"] ["A" "41"] ["B" "42"] ["C" "43"] ["D" "44"] ["E" "45"] ["F" "46"] ["G" "47"] ["H" "48"] ["I" "49"] ["J" "4A"] ["K" "4B"] ["L" "4C"] ["M" "4D"] ["N" "4E"] ["O" "4F"] ["P" "50"] ["Q" "51"] ["R" "52"] ["S" "53"] ["T" "54"] ["U" "55"] ["V" "56"] ["W" "57"] ["X" "58"] ["Y" "59"] ["Z" "5A"] ["[" "5B"] ["\\\\" "5C"] ["]" "5D"] ["^" "5E"] ["_" "5F"] ["\`" "60"] ["a" "61"] ["b" "62"] ["c" "63"] ["d" "64"] ["e" "65"] ["f" "66"] ["g" "67"] ["h" "68"] ["i" "69"] ["j" "6A"] ["k" "6B"] ["l" "6C"] ["m" "6D"] ["n" "6E"] ["o" "6F"] ["p" "70"] ["q" "71"] ["r" "72"] ["s" "73"] ["t" "74"] ["u" "75"] ["v" "76"] ["w" "77"] ["x" "78"] ["y" "79"] ["z" "7A"] ["{" "7B"] ["|" "7C"] ["}" "7D"] ["~" "7E"] ["\\u007f" "7F"]]
+
+def abnf-render-blocks [0 256 512 768 1024 1280 1536 1792 2048 2304 2560 2816 3072 3328 3584 3840 4096 4352 4608 4864 5120 5376 5632 5888 6144 6400 6656 6912 7168 7424 7680 7936 8192 8448 8704 8960 9216 9472 9728 9984 10240 10496 10752 11008 11264 11520 11776 12032 12288 12544 12800 13056 13312 13568 13824 14080 14336 14592 14848 15104 15360 15616 15872 16128 16384 16640 16896 17152 17408 17664 17920 18176 18432 18688 18944 19200 19456 19712 19968 20224 20480 20736 20992 21248 21504 21760 22016 22272 22528 22784 23040 23296 23552 23808 24064 24320 24576 24832 25088 25344 25600 25856 26112 26368 26624 26880 27136 27392 27648 27904 28160 28416 28672 28928 29184 29440 29696 29952 30208 30464 30720 30976 31232 31488 31744 32000 32256 32512 32768 33024 33280 33536 33792 34048 34304 34560 34816 35072 35328 35584 35840 36096 36352 36608 36864 37120 37376 37632 37888 38144 38400 38656 38912 39168 39424 39680 39936 40192 40448 40704 40960 41216 41472 41728 41984 42240 42496 42752 43008 43264 43520 43776 44032 44288 44544 44800 45056 45312 45568 45824 46080 46336 46592 46848 47104 47360 47616 47872 48128 48384 48640 48896 49152 49408 49664 49920 50176 50432 50688 50944 51200 51456 51712 51968 52224 52480 52736 52992 53248 53504 53760 54016 54272 54528 54784 55040 55296 55552 55808 56064 56320 56576 56832 57088 57344 57600 57856 58112 58368 58624 58880 59136 59392 59648 59904 60160 60416 60672 60928 61184 61440 61696 61952 62208 62464 62720 62976 63232 63488 63744 64000 64256 64512 64768 65024 65280]
+
+def abnf-render-at [v i]
+  get-path (as-path [i]) v
+` }),
+  transduce: Object.freeze({ entry: "abnf-transduce", source: `; ABNF's transducer part: the tree's JSON events from the rule passes of
+; the ABNF meta-grammar, for a host that reads parser events (dmog's
+; \`translate\` and \`run --grammar abnf\`). Every event is the one the walk
+; of the tree \`parseAbnfTree\` builds gives: the schema \`grammar-rules\`
+; (tabnas/bnf's docs/grammar-rules.md, and section 13.1 of alchemy's
+; docs/streaming-plan.md), a grammar's rules as the text writes them, in
+; source order, each an object whose \`type\` comes first and whose other
+; members follow in the order the schema lists them. It is hand-written
+; over the passes of \`make()\`, the parser whose value that tree is.
+;
+; The passes. \`abnf\` holds the grammar and \`prod\` a rule, a production
+; replacing the one before it; \`prod\` reads its name and its \`=\` or \`=/\`,
+; and \`alts\` its alternatives, each a \`seq\` of elements. An element is
+; an \`elem\`, whose open reads the repetition prefix (\`*\`, \`m*\`, \`*n\`,
+; \`m*n\`, \`n\`), and the \`atom\` it pushes, whose open reads what the
+; element is: a quoted string with its \`%s\` or \`%i\`, a numeric value (its
+; token carries the element it spells), prose, a rule name, or the \`(\`
+; or \`[\` of a group, whose alternatives are an \`alts\` of their own, and
+; whose close reads the \`)\` or \`]\`. A rule whose close pushes another
+; (\`alts\` on \`/\`, \`seq\` on its next element) is still open, so a close
+; ends its rule only where its alternate pushes nothing.
+;
+; An element's \`repeat\` is its last member and its prefix comes first, so
+; the part keeps a frame for each open element, innermost last, holding
+; the events of its prefix's repetition and whether the element is an
+; option, \`[ ... ]\`, whose repetition from 0 to 1 is the innermost; the
+; element's close writes them. The state is [started frames]: whether any
+; pass came (a source that makes none, the empty file, is the grammar of
+; no rules at finish), and the frames, which grow with the nesting of
+; groups and never with the document's length.
+
+; Whether a string is not empty.
+def abnf-transduce-full [s]
+  match s
+    case "" false
+    case _ true
+
+; A repetition count, from the text of its \`#NUM\` token: its digits
+; after any leading zeros, which a JSON number does not spell, read as a
+; number with no lexeme of its own, as the tree's are.
+def abnf-transduce-count [token]
+  let [pieces (split "0" (get :src token))]
+    let [firsts (filter (fn [i] (abnf-transduce-full (get-path (as-path [i]) pieces))) (indices pieces))]
+      match (count firsts)
+        case 0 0
+        case _
+          let [k (get-path (as-path [0]) firsts)]
+            add 0 (number (string-join "0" (map (fn [i] (get-path (as-path [i]) pieces)) (filter (fn [i] (match (compare i k) (case :less false) (case _ true))) (indices pieces)))))
+
+; The events of a repetition from \`min\` up, or to \`max\`.
+def abnf-transduce-from [min]
+  vector object-start (key "min") (scalar min) object-end
+
+def abnf-transduce-between [min max]
+  vector object-start (key "min") (scalar min) (key "max") (scalar max) object-end
+
+; The repetition an element's prefix writes, as its events: nothing where
+; the element has no prefix.
+def abnf-transduce-prefix [rule]
+  match (count (get :tokens rule))
+    case 0 []
+    case 1
+      match (get :name (transduce-token 0 rule))
+        case "#STAR" (abnf-transduce-from 0)
+        case _
+          let [n (abnf-transduce-count (transduce-token 0 rule))]
+            abnf-transduce-between n n
+    case 2
+      match (get :name (transduce-token 0 rule))
+        case "#STAR" (abnf-transduce-between 0 (abnf-transduce-count (transduce-token 1 rule)))
+        case _ (abnf-transduce-from (abnf-transduce-count (transduce-token 0 rule)))
+    case 3 (abnf-transduce-between (abnf-transduce-count (transduce-token 0 rule)) (abnf-transduce-count (transduce-token 2 rule)))
+    case _ (fail :protocol-order "an element's repetition prefix is at most three tokens")
+
+; A literal's events, up to its last member.
+def abnf-transduce-literal [text sensitive]
+  vector object-start (key "type") (scalar "literal") (key "text") (scalar text) (key "caseSensitive") (scalar sensitive)
+
+; The element a numeric value spells, which its token carries.
+def abnf-transduce-numeric [val]
+  match (get :type val)
+    case "char" [object-start (key "type") (scalar "char") (key "value") (scalar (get :value val))]
+    case "range" [object-start (key "type") (scalar "range") (key "from") (scalar (get :from val)) (key "to") (scalar (get :to val))]
+    case "literal" (abnf-transduce-literal (get :text val) true)
+    case _ (fail :protocol-order "a numeric value's token carries a char, a range or a literal")
+
+; Prose's text, between its angle brackets, which it cannot hold.
+def abnf-transduce-prose [src]
+  match (first-split "<" src)
+    case [before rest]
+      match (first-split ">" rest)
+        case [text after] text
+
+; What an atom's open writes: an element up to its last member, or a
+; group up to the start of its alternatives.
+def abnf-transduce-atom [rule]
+  let [token (transduce-token 0 rule)]
+    match (get :name token)
+      case "#SS" (abnf-transduce-literal (get :val (transduce-token 1 rule)) true)
+      case "#SI" (abnf-transduce-literal (get :val (transduce-token 1 rule)) false)
+      case "#ST" (abnf-transduce-literal (get :val token) false)
+      case "#NV" (abnf-transduce-numeric (get :val token))
+      case "#PV" [object-start (key "type") (scalar "prose") (key "text") (scalar (abnf-transduce-prose (get :src token)))]
+      case "#TX" [object-start (key "type") (scalar "reference") (key "name") (scalar (get :val token))]
+      case "#LP" [object-start (key "type") (scalar "group") (key "alternatives") array-start]
+      case "#OB" [object-start (key "type") (scalar "group") (key "alternatives") array-start]
+      case _ (fail :protocol-order "an atom opens on a string, a numeric value, prose, a name, ( or [")
+
+; A rule's head: its type, its name (prose's with its angle brackets, the
+; \`<all>\` of a removal) and \`incremental\` for \`=/\`, up to the start of its
+; alternatives.
+def abnf-transduce-rule [rule]
+  let [name (transduce-token 0 rule)]
+    let [head [object-start (key "type") (scalar "rule") (key "name") (scalar (match (get :name name) (case "#PV" (get :src name)) (case _ (get :val name))))]]
+      match (get :name (transduce-token 1 rule))
+        case "#DEFA" (push-all [(key "incremental") (scalar true) (key "alternatives") array-start] head)
+        case _ (push-all [(key "alternatives") array-start] head)
+
+; The rule a pass's alternate pushes, or "".
+def abnf-transduce-pushes [rule]
+  match (get :alt rule)
+    case missing ""
+    case alt (get :p alt)
+
+; An element's close: its repetitions, the option's innermost, then
+; the end of its object.
+def abnf-transduce-element-end [frame]
+  match frame
+    case [prefix optional]
+      let [reps (match optional (case true (push-all prefix (abnf-transduce-between 0 1))) (case false prefix))]
+        match (count reps)
+          case 0 [object-end]
+          case _ (push-all [array-end object-end] (push-all reps [(key "repeat") array-start]))
+
+def abnf-transduce-open [frames rule]
+  match (get :name rule)
+    case "abnf" [frames [object-start (key "type") (scalar "grammar") (key "rules") array-start]]
+    case "prod" [frames (abnf-transduce-rule rule)]
+    case "alts" [frames []]
+    case "seq" [frames [array-start]]
+    case "elem" [(push [(abnf-transduce-prefix rule) false] frames) []]
+    case "atom" [frames (abnf-transduce-atom rule)]
+    case _ (fail :protocol-order "a rule pass of a rule the ABNF meta-grammar does not have")
+
+def abnf-transduce-close [frames rule]
+  match (get :name rule)
+    case "abnf" [frames [array-end object-end]]
+    case "prod" [frames [object-end]]
+    case "alts"
+      match (abnf-transduce-pushes rule)
+        case "seq" [frames []]
+        case _ [frames [array-end]]
+    case "seq"
+      match (abnf-transduce-pushes rule)
+        case "elem" [frames []]
+        case _ [frames [array-end]]
+    case "elem" [(pop frames) (abnf-transduce-element-end (top frames))]
+    case "atom"
+      match (count (get :tokens rule))
+        case 0 [frames []]
+        case _
+          match (get :name (transduce-token 0 rule))
+            case "#CB"
+              match (top frames)
+                case [prefix optional] [(push [prefix true] (pop frames)) []]
+            case _ [frames []]
+    case _ (fail :protocol-order "a rule pass of a rule the ABNF meta-grammar does not have")
+
+def abnf-transduce-step [state pass]
+  match state
+    case [started frames]
+      let [next (match pass (case (open rule) (abnf-transduce-open frames rule)) (case (close rule) (abnf-transduce-close frames rule)))]
+        match next
+          case [fs outputs] (transition [true fs] outputs)
+
+; A source that made no pass is the grammar of no rules.
+def abnf-transduce-finish [state]
+  match state
+    case [false frames] [object-start (key "type") (scalar "grammar") (key "rules") array-start array-end object-end]
+    case [true []] []
+    case _ (fail :protocol-order "the rule passes ended inside an element, which a grammar's never do")
+
+def abnf-transduce [input]
+  as-events (scan-emit [false []] abnf-transduce-step abnf-transduce-finish (parser-events input))
+` }),
+  spec: Object.freeze({ entry: "abnf-render-spec", source: `; ABNF's render: a grammar-spec tree, the GrammarSpec the tabnas BNF
 ; compiler (tabnas-bnf) emits for a grammar, written back as RFC 5234
 ; ABNF. This is a library of definitions, each named \`abnf-...\`, which a
 ; host links with its own program (alchemy's \`compile_sources\`); its entry
-; point is \`abnf-render\`, and nothing else here is the host's to call.
+; point is \`abnf-render-spec\`, and nothing else here is the host's to call.
 ;
 ; A host reads an ABNF document by compiling it: the grammar-spec tree is
 ; the pure-data GrammarSpec that \`abnfCompile(src, {recognition: false,
@@ -125,10 +1170,10 @@ const TRANSLATION: TranslationParts = Object.freeze({
 ;   name, once its tokens are found to be that range), \`[\\s\\S]\` (GBNF's
 ;   \`.\`) as \`%x0-10FFFF\`, and the engine's \`#TX\`, \`#NR\`, \`#ST\` and \`#VL\`
 ;   by their names. A string a quoted string cannot hold is written as a
-;   numeric value, \`%x<hex>.<hex>\`, which the compiler reads as
-;   case-insensitive where it holds a letter of ASCII and as exact where
-;   it holds none: a case-folding string past ASCII with no such letter,
-;   whose numeric value would match one case alone, is refused. A token
+;   numeric value, \`%x<hex>.<hex>\`, which the compiler reads as exact, as
+;   RFC 5234 does: a case-folding string holding a letter of ASCII, or a
+;   character past ASCII that may have cases, whose numeric value would
+;   match one case alone, is refused. A token
 ;   named for a rule the
 ;   compiler lifted to it (\`CR = %x0D\` becomes the token \`#CR\`) is
 ;   written as that rule, after the others, and referenced by name.
@@ -1730,11 +2775,10 @@ def abnf-unsub-at [cx alts best accepted covers i]
 ; A literal: a quoted string where it can hold the text (\`%s\` before it
 ; when the match is exact and the text holds a letter), and otherwise a
 ; numeric value, \`%x\` and each character's code point, which tabnas-abnf
-; reads as a case-insensitive string where it holds a letter of ASCII,
-; with the folding a case-insensitive pattern has, and as an exact one
-; where it holds none. So a case-insensitive literal holding a character
-; past ASCII, which may have cases, and no letter of ASCII is refused: its
-; numeric value would match the one case it spells.
+; reads as an exact string, as RFC 5234 section 2.3 does. So a
+; case-insensitive literal a quoted string cannot hold is refused where it
+; holds a letter of ASCII, or a character past ASCII, which may have
+; cases: its numeric value would match the one case it spells.
 def abnf-lit-text [text cs]
   match text
     case "" "\\"\\""
@@ -1749,14 +2793,14 @@ def abnf-lit-text [text cs]
             case false (string-join "" ["\\"" text "\\""])
         case false
           match cs
-            case true
-              match (abnf-has-letter text)
-                case true (abnf-fail (string-join "" ["the case-sensitive literal " (quoted text) " holds a character a quoted string cannot hold, and a numeric value matches case-insensitively"]))
-                case false (string-join "" ["%x" (string-join "." (abnf-codes text))])
+            case true (string-join "" ["%x" (string-join "." (abnf-codes text))])
             case false
-              match (match (abnf-has-letter text) (case true true) (case false (chars-within [[0 127] [65536 1114111]] text)))
-                case true (string-join "" ["%x" (string-join "." (abnf-codes text))])
-                case false (abnf-fail (string-join "" ["the case-insensitive literal " (quoted text) " holds a character past ASCII that may have cases and no ASCII letter, and a numeric value without a letter matches exactly"]))
+              match (abnf-has-letter text)
+                case true (abnf-fail (string-join "" ["the case-insensitive literal " (quoted text) " holds a character a quoted string cannot hold and a letter of ASCII, and a numeric value matches exactly"]))
+                case false
+                  match (chars-within [[0 127] [65536 1114111]] text)
+                    case true (string-join "" ["%x" (string-join "." (abnf-codes text))])
+                    case false (abnf-fail (string-join "" ["the case-insensitive literal " (quoted text) " holds a character past ASCII that may have cases and no ASCII letter, and a numeric value matches exactly"]))
 
 ; A code point of a class's pattern, \`\\uXXXX\` or \`\\u{X...}\`, as ABNF's
 ; hexadecimal digits.
@@ -2020,7 +3064,7 @@ def abnf-file [spec]
                         string-join "\\n" (abnf-cat (map (fn [n] (abnf-production cx cands lifted n)) ordered) (map (fn [t] (abnf-lifted-production cx t)) lifted))
                         "\\n"
 
-def abnf-render [input]
+def abnf-render-spec [input]
   concat-map abnf-file (select root input)
 ` })
 })

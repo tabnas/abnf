@@ -553,72 +553,81 @@ var (
 // production list. Built once, lazily.
 func getAbnfParser() (*tabnas.Tabnas, error) {
 	abnfParserOnce.Do(func() {
-		j := tabnas.Make(abnfParserOptions())
-
-		// `%s` / `%i` prefixes require a following `"` (RFC 5234 string
-		// prefixes). RE2 has no lookahead, so use function-form matchers
-		// that consume only the 2-char prefix, leaving the `"` for #ST.
-		// Resolve the tins now (after Make) and capture them.
-		ssTin := j.Token("#SS")
-		siTin := j.Token("#SI")
-		prefixMatcher := func(letters string, name string, tin tabnas.Tin) tabnas.LexMatcher {
-			return func(l *tabnas.Lex, _ *tabnas.Rule) *tabnas.Token {
-				fwd := l.Fwd(3)
-				if len(fwd) < 3 || fwd[0] != '%' || fwd[2] != '"' {
-					return nil
-				}
-				c := fwd[1]
-				found := false
-				for i := 0; i < len(letters); i++ {
-					if letters[i] == c {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return nil
-				}
-				src := fwd[:2]
-				tkn := l.Token(name, tin, src, src)
-				pnt := l.Cursor()
-				pnt.SI += 2
-				pnt.CI += 2
-				return tkn
-			}
-		}
-		j.SetOptions(tabnas.Options{Match: &tabnas.MatchOptions{
-			TokenFn: map[string]tabnas.LexMatcher{
-				"#SS": prefixMatcher("sS", "#SS", ssTin),
-				"#SI": prefixMatcher("iI", "#SI", siTin),
-			},
-		}})
-
-		// Register the ATOM token set. Make() does not apply
-		// Options.TokenSet (only SetOptions does), and the set must be
-		// applied after #NV / #SS / #SI tins exist so the names resolve.
-		j.SetOptions(tabnas.Options{
-			TokenSet: map[string][]string{
-				"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI", "#PV"},
-			},
-		})
-
-		// Drop the default JSON rules — they would compete with ours for
-		// the starting token set.
-		for name := range j.RSM() {
-			j.Rule(name, nil)
-		}
-
-		ref := abnfParseRef()
-		if err := j.Grammar(&tabnas.GrammarSpec{
-			Ref:  ref,
-			Rule: AbnfRules(),
-		}); err != nil {
-			abnfParserErr = err
-			return
-		}
-		abnfParserInst = j
+		abnfParserInst, abnfParserErr = newAbnfParser(abnfParseRef(), tabnas.Options{})
 	})
 	return abnfParserInst, abnfParserErr
+}
+
+// newAbnfParser builds a tabnas instance that reads ABNF with the
+// meta-grammar AbnfRules, its actions the ones `ref` names, and `extra`
+// set on it last (the tree parser's error codes). The IR parser above and
+// the tree parser (tree.go) share everything else.
+func newAbnfParser(ref map[tabnas.FuncRef]any, extra tabnas.Options) (*tabnas.Tabnas, error) {
+	j := tabnas.Make(abnfParserOptions())
+
+	// `%s` / `%i` prefixes require a following `"` (RFC 5234 string
+	// prefixes). RE2 has no lookahead, so use function-form matchers
+	// that consume only the 2-char prefix, leaving the `"` for #ST.
+	// Resolve the tins now (after Make) and capture them.
+	ssTin := j.Token("#SS")
+	siTin := j.Token("#SI")
+	prefixMatcher := func(letters string, name string, tin tabnas.Tin) tabnas.LexMatcher {
+		return func(l *tabnas.Lex, _ *tabnas.Rule) *tabnas.Token {
+			fwd := l.Fwd(3)
+			if len(fwd) < 3 || fwd[0] != '%' || fwd[2] != '"' {
+				return nil
+			}
+			c := fwd[1]
+			found := false
+			for i := 0; i < len(letters); i++ {
+				if letters[i] == c {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil
+			}
+			src := fwd[:2]
+			tkn := l.Token(name, tin, src, src)
+			pnt := l.Cursor()
+			pnt.SI += 2
+			pnt.CI += 2
+			return tkn
+		}
+	}
+	j.SetOptions(tabnas.Options{Match: &tabnas.MatchOptions{
+		TokenFn: map[string]tabnas.LexMatcher{
+			"#SS": prefixMatcher("sS", "#SS", ssTin),
+			"#SI": prefixMatcher("iI", "#SI", siTin),
+		},
+	}})
+
+	// Register the ATOM token set. Make() does not apply
+	// Options.TokenSet (only SetOptions does), and the set must be
+	// applied after #NV / #SS / #SI tins exist so the names resolve.
+	j.SetOptions(tabnas.Options{
+		TokenSet: map[string][]string{
+			"ATOM": {"#ST", "#NV", "#TX", "#LP", "#OB", "#SS", "#SI", "#PV"},
+		},
+	})
+
+	// Drop the default JSON rules — they would compete with ours for
+	// the starting token set.
+	for name := range j.RSM() {
+		j.Rule(name, nil)
+	}
+
+	if nil != extra.Error || nil != extra.Hint {
+		j.SetOptions(extra)
+	}
+	if err := j.Grammar(&tabnas.GrammarSpec{
+		Ref:  ref,
+		Rule: AbnfRules(),
+	}); err != nil {
+		return nil, err
+	}
+	return j, nil
 }
 
 // parseAbnfRaw runs the ABNF parser grammar over src and returns the raw

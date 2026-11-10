@@ -102,7 +102,9 @@ Rules are RFC 5234 ABNF, **not** the `<x> ::= a | b` style:
   three forms: single (`%x41`, `%d65`, `%b1000001`), range
   (`%x41-5A`), and concatenation (`%x0D.0A`). Code points above the BMP
   work (`%x1F600`, `%xE000-10FFFF`); anything above `%x10FFFF` is
-  rejected with a diagnostic naming the value.
+  rejected with a diagnostic naming the value. A numeric value matches
+  exactly, as RFC 5234 section 2.3 says (`%x61` does not match `A`);
+  only a quoted string matches without regard to case.
 - **Rulenames are not keyword-restricted.** RFC 5234 `rulename` is
   `ALPHA *(ALPHA / DIGIT / "-")`, so `true`, `false` and `null` are
   ordinary rule names — which JSON's own ABNF relies on. The parser sets
@@ -226,8 +228,11 @@ the point: they are what would have caught this.
 | [`go/`](go/) | Go port (`package tabnasabnf`), tracking the TS implementation; facade in [`go/facade.go`](go/facade.go), ABNF parser in [`go/parser_abnf.go`](go/parser_abnf.go), CLI in [`go/cmd/tabnas-abnf`](go/cmd/tabnas-abnf). |
 | [`rs/`](rs/) | Rust port (crate `tabnas-abnf`, library `tabnas_abnf`), tracking the TS implementation; front-end in [`rs/src/converter.rs`](rs/src/converter.rs), ABNF meta-grammar in [`rs/src/parser_abnf.rs`](rs/src/parser_abnf.rs), public surface in [`rs/src/lib.rs`](rs/src/lib.rs). No CLI. |
 | [`DIVERGENCE.md`](DIVERGENCE.md) | Every input on which a port answers something the canonical TypeScript does not, each one measured and each one pinned by a test in [`rs/tests/divergence_test.rs`](rs/tests/divergence_test.rs) so it cannot go stale. |
-| [`alchemy/render.alc`](alchemy/render.alc) | The render: a grammar spec written back as ABNF (entry `abnf-render`). See "Translation". |
-| [`ts/embed-translate.js`](ts/embed-translate.js) | Copies `tabnas.plugin.json` and the render into `ts/src/translate.ts`, `go/translate/` and `rs/translate/`, all three GENERATED; `npm run embed` runs it, and so does the build. |
+| [`ts/src/tree.ts`](ts/src/tree.ts) | The tree a host translates: `make()`, the parser that reads ABNF as the schema grammar-rules with the meta-grammar's alternates and actions of its own (`abnfTreeRules`), and `parseAbnfTree`. Its ports are [`go/tree.go`](go/tree.go) and [`rs/src/tree.rs`](rs/src/tree.rs). See "Translation". |
+| [`alchemy/transduce.alc`](alchemy/transduce.alc) | The part: the tree's events from the rule passes of `make()` (entry `abnf-transduce`). |
+| [`alchemy/render.alc`](alchemy/render.alc) | The render: a grammar-rules tree written back as ABNF (entry `abnf-render`). |
+| [`alchemy/render-spec.alc`](alchemy/render-spec.alc) | The grammar-spec route's render: a compiled grammar spec written back as ABNF (entry `abnf-render-spec`). |
+| [`ts/embed-translate.js`](ts/embed-translate.js) | Copies `tabnas.plugin.json`, the part and both renders into `ts/src/translate.ts`, `go/translate/` and `rs/translate/`, all three GENERATED; `npm run embed` runs it, and so does the build. |
 
 The usual tabnas "the port tracks TS" contract applies: `go/` and `rs/`
 mirror the TypeScript implementation (`Abnf` / `abnf_convert`,
@@ -282,22 +287,97 @@ recursion is measured by nesting, not by repeating.
 
 ## Translation
 
-A host that translates between formats (aless, `alchemy translate`, the
-design in tabnas/transduce `docs/translation.md`) reads this format's
-parts from the `translate` object of
-[`tabnas.plugin.json`](tabnas.plugin.json): an ABNF document is read as a
-tree and written from one (`reads`, `writes`), an object (`root`), of the
-schema `grammar-spec` (`schema`), which EBNF and GBNF share, since the
-three compile through the one compiler, so a host can translate a grammar
-from one notation to another. There is no embed, so the target is
-schema-only: a host composes into the render only from a source of the
-same schema, or from a program that builds a grammar spec, and refuses
-any other source before reading it.
+A host that translates between formats (`dmog translate`, the design in
+tabnas/transduce `docs/translation.md`) reads this format's parts from
+the `translate` object of [`tabnas.plugin.json`](tabnas.plugin.json). An
+ABNF document is read as a tree and written from one (`reads`, `writes`),
+an object (`root`), of the schema `grammar-rules` (`schema`): the
+grammar's rules as the text writes them, uncompiled and in source order,
+which tabnas/bnf defines (`docs/grammar-rules.md` there) and EBNF and
+GBNF share, so a host can translate a grammar from one notation to
+another. This is step 23 of alchemy's streaming plan (section 13.1 of its
+`docs/streaming-plan.md`, from ruling 4 of 2026-11-08, admin ADR-33).
+There is no embed, so the target is schema-only: a host composes into
+the render only from a source of the same schema, or from a program that
+builds such a tree.
 
-There is no `lift` either. A lift is an alchemy program a composition runs
-over a source's events; reading an ABNF document means compiling it,
-which is the host's registry concern, as aless and alchemy-cli wire each
-format's reader. The tree a host reads is the pure-data GrammarSpec of
+```text
+{ "type": "grammar", "rules": [
+  { "type": "rule", "name": "a", ["incremental": true],
+    "alternatives": [ [ element, ... ], ... ] }, ... ] }
+```
+
+An element is an object whose first member names its type: `reference`
+(`name`), `literal` (`text`, `caseSensitive`: false for a quoted string
+or `%i"..."`, true for `%s"..."` and a concatenation of numeric values),
+`char` (`value`, a code point: `%x61`), `range` (`from`, `to`:
+`%x61-7A`), `prose` (`text`, without its angle brackets) and `group`
+(`alternatives`: `( ... )`, and `[ ... ]` with the repetition from 0 to
+1). A repetition prefix is the element's last member, `repeat`, written
+after an option's own repetition: `*[ a ]` is a group whose `repeat` is
+`[{"min": 0, "max": 1}, {"min": 0}]`, and `1a` keeps its `{"min": 1,
+"max": 1}`. `a =/ b` is a rule entry of its own, `incremental` after its
+name, where the text writes it; a compiler merges it, and the tree does
+not. Comments are not kept, and neither is a value annotation, which a
+comment carries; the core rules are the compiler's.
+
+- The tree is `parseAbnfTree` in TypeScript, `ParseAbnfTree` in Go and
+  `parse_abnf_tree` in Rust ([`ts/src/tree.ts`](ts/src/tree.ts),
+  [`go/tree.go`](go/tree.go), [`rs/src/tree.rs`](rs/src/tree.rs)): the
+  value of the parser `make()` / `Make()` / `make()` builds, which reads
+  ABNF with the meta-grammar's lexer and every alternate as they are, and
+  actions of its own in place of the ones that build the compiler's IR.
+  [`test/spec/tree.tsv`](test/spec/tree.tsv) holds the three runtimes to
+  the same trees, member order included, and to the codes they refuse a
+  source with where the tree cannot hold it: `abnf_code_point`,
+  `abnf_reversed_range`, `abnf_count` (a count past 2^53 - 1),
+  `abnf_reversed_repetition`, `abnf_unclosed` and `abnf_surrogate` (a
+  concatenation holding half of a surrogate pair alone, which names no
+  character; one value alone, `%xD800`, is a `char` of its own).
+- The part, [`alchemy/transduce.alc`](alchemy/transduce.alc)
+  (`abnf-transduce`, the manifest's `translate.transduce`), makes the
+  tree's events from the rule passes of `make()`, a rule at a time, so
+  `translate.whole` is gone: nothing waits for the document's end. A
+  numeric value's token carries the element it spells as its value, which
+  the atom's action gives it, since a part reads a token's value and never
+  the work an action does with it.
+- The render, [`alchemy/render.alc`](alchemy/render.alc) (`abnf-render`),
+  writes the tree as ABNF, a rule to a line, as each rule's events
+  arrive; it holds one element at a time, since an element's repetitions
+  come last and ABNF writes them first. Its contract is the round trip:
+  an ABNF document's tree, written, reads back as that tree. A tree of
+  another notation is written as ABNF spells it (a literal, which matches
+  exactly, as `%s"..."` or its numeric value; a class as the alternation
+  of its members; GBNF's `.` as `%x00-10FFFF`), and what ABNF cannot say
+  is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule: a token
+  terminal, a negated or empty class, a name ABNF cannot spell, and the
+  rest the manifest's `loss` list names.
+- A tree whose `start` names a rule other than its first (GBNF's, which
+  starts from `root` wherever it stands) is written with that rule first,
+  since ABNF starts from its first rule: the text of the rules before it
+  is held until it has been written, and nothing is held where the start
+  rule comes first or there is no start. A start naming a rule the
+  grammar does not define is refused at its end, naming the rule; a
+  grammar of no rules is no text. `ts/test/tree-render.test.js` holds a
+  GBNF grammar whose `root` comes last to a text that starts from `root`
+  and recognises what GBNF's does.
+
+Repetition is replacement here too: the rules of a grammar are a replace
+loop of `prod`, and the alternatives of a rule or a group and the
+elements of an alternative are close-phase pushes of one rule, which
+come back to it, so none of them adds rule depth however many there are.
+The tree tests in every runtime hold ten thousand of each to the depth
+two reach.
+
+### The grammar-spec route
+
+The compiled grammar spec stays the route of a host that installs a
+grammar, and of a host that still translates by it: the manifest's
+`translate.spec` names its schema (`grammar-spec`), its render
+([`alchemy/render-spec.alc`](alchemy/render-spec.alc), entry
+`abnf-render-spec`) and its `loss` list, and the parts API hands the
+render over as `spec` beside the others. The tree a host reads on this
+route is the pure-data GrammarSpec of
 `abnfCompile(src, { recognition: false, strict: true })` (`abnf_compile`
 with `recognition: false` and `strict: true` in Rust, `AbnfCompile` with
 `Recognition` false and `Strict` true in Go), parsed as JSON: the
@@ -320,9 +400,9 @@ lexer tries two tokens a place expects); the render refuses such a spec
 when its `tokenOrder` holds two tokens or more, rather than write rules
 whose tokens rank otherwise.
 
-[`alchemy/render.alc`](alchemy/render.alc) is the render, an
+[`alchemy/render-spec.alc`](alchemy/render-spec.alc) is that route's render, an
 [alchemy](https://github.com/tabnas/alchemy) library whose entry point
-`abnf-render` writes a grammar spec as one ABNF document. Its contract is
+`abnf-render-spec` writes a grammar spec as one ABNF document. Its contract is
 the round trip: the text compiles back to the spec it was written from.
 The spec is a compiled grammar, not the grammar's text, so the render
 reads the compiler's shapes back into the notation:
@@ -370,8 +450,9 @@ a set of tokens at one place, a removal, a clear or the form that edits a
 rule already installed (`{alts, inject}`), a token no ABNF terminal
 matches (a class whose flags change what it matches, a pattern that is
 neither one class nor an escaped literal, and a case-insensitive literal
-holding a character past ASCII and no ASCII letter, whose numeric value
-the compiler reads as exact, among them), a token set whose
+no quoted string holds that holds a letter of ASCII or a character past
+ASCII that may have cases, whose numeric value the compiler reads as
+exact, among them), a token set whose
 tokens are not the class its name gives, a rule with no alternate to open
 with, a sequence's step with more alternates than a step, a rule the
 compiler lifted to a token whose name another rule holds,
@@ -395,18 +476,25 @@ sentence), and the indirect left recursion of `P = Q`, `Q = P PL / NR`
 annotations, 2 probe dispatchers (`jid.abnf`, `ts/test/grammar/rfc3986-uri.abnf`),
 a literal past U+FFFF and a removal.
 
-`npm run embed` in `ts/` (the build runs it) copies the manifest and the
-render into every runtime: `ts/src/translate.ts`, `go/translate/` and
-`rs/translate/`, served as `translate()` in TypeScript, `Translate()` in
-Go and `translate()`, `manifest_text()` and `render_text()` in Rust. The
-translation tests (`ts/test/translate.test.js`, `go/translate_test.go`,
-`rs/tests/translate_test.rs`) hold the copies to the files and the tree to
-what the compiler writes, so change the files at the root and run the
-embed. Running the render needs alchemy, which this repository does not
-depend on: `ts/test/translate-render.test.js` runs it through the
-`alchemy` command `TABNAS_ALCHEMY` names, over specs the compiler writes
-and specs changed to hold what the render must refuse, and skips without
-it; the round trip over the corpora is the hosts'.
+### The parts in every runtime
+
+`npm run embed` in `ts/` (the build runs it) copies the manifest, the
+part and both renders into every runtime: `ts/src/translate.ts`,
+`go/translate/` and `rs/translate/`, served as `translate()` in
+TypeScript, `Translate()` in Go and `translate()`, `manifest_text()`,
+`render_text()`, `transduce_text()` and `render_spec_text()` in Rust,
+the part as `transduce` and the spec route's render as `spec` beside
+`render`. The translation tests (`ts/test/translate.test.js`,
+`go/translate_test.go`, `rs/tests/translate_test.rs`) hold the copies to
+the files, so change the files at the root and run the embed. Running a
+part needs alchemy, which this repository does not depend on:
+`ts/test/tree-render.test.js` runs the tree's render and
+`ts/test/translate-render.test.js` the spec route's, through the `dmog`
+command `TABNAS_ALCHEMY` names, and each skips without it. That the
+part's events are the walk of the tree is held where alchemy runs: over
+every document of this repository's fixtures and corpora, in all three
+runtimes, it was, when the part was written (the pull request that added
+it has the counts).
 
 ## How the compiler is itself a tabnas grammar
 
@@ -623,7 +711,7 @@ npm run test-conformance                # the corpus dial, on its own
 
 `conformance.test.js` measures this compiler against 68 grammars from four
 third-party ABNF implementations. It takes ~28s on a fast machine and ~85s
-on an older one — one of its cases alone is 64s. The other 55 suites finish
+on an older one — one of its cases alone is 64s. The other 56 suites finish
 in seconds.
 
 Run together with default concurrency, the fast suites drain and Node's
@@ -690,14 +778,16 @@ anyone, not just an agent. They predate
 Use the workflow. These targets are left in place because removing them is
 a separate change, not because they still work.
 
-Five of the nineteen files in `ts/test/*.test.js`, run against the built
-`dist`, need a word of explanation. The other fourteen name themselves:
-`class-overlap`, `compile`, `conformance`, `docs`, `lifting`, `parity`,
-`port-deps`, `roundtrip`, `token`, `transduce` (the transducer part
-`abnfTransduce` writes from the value annotations), `translate`,
-`translate-render` (the render run through the `alchemy` command
-`TABNAS_ALCHEMY` names, skipped without it), `value-annotation` and
-`version`.
+Five of the twenty-one files in `ts/test/*.test.js`, run against the
+built `dist`, need a word of explanation. The other sixteen name
+themselves: `class-overlap`, `compile`, `conformance`, `docs`, `lifting`,
+`parity`, `port-deps`, `roundtrip`, `token`, `transduce` (the transducer
+part `abnfTransduce` writes from the value annotations), `translate`,
+`translate-render` (the grammar-spec route's render, run through the
+`dmog` command `TABNAS_ALCHEMY` names, skipped without it), `tree` (the
+tree a host translates, `test/spec/tree.tsv` among it), `tree-render`
+(the tree's render, run as `translate-render`'s is), `value-annotation`
+and `version`.
 
 - `abnf.test.js` — the core converter/parser unit suite.
 - `probe.test.js` — the probe + phase-retry disambiguation pattern.
@@ -774,18 +864,17 @@ What "correct" means here, in order of authority:
 
 ## Error codes
 
-This package declares **no** error codes of its own: there is no
-`error`/`hint` catalogue in any runtime, and no fixture pins an
-`ERROR:<code>` row — none of the engine's inherited base codes is exercised
-here either. Compiler diagnostics are thrown exceptions (`AbnfParseError`
-in `ts/src/converter.ts`, and its Go counterpart) whose prose messages
+The compiler declares **no** error codes of its own: there is no
+`error`/`hint` catalogue on the IR parser in any runtime. Compiler
+diagnostics are thrown exceptions (`AbnfParseError` in
+`ts/src/converter.ts`, and its Go counterpart) whose prose messages
 carry the `abnf:` prefix. Rust has no exceptions, so the same diagnostics
 are RETURNED there, as `AbnfParseError` and the `AbnfError` enum that
 wraps it; the text is identical wherever the shared fixtures compare it,
 which is the 35 rows of `alignment-abnf-errors.tsv` and not every
 diagnostic the package can produce.
 
-What the fixtures pin instead is the rendered **message**:
+What the fixtures pin for the compiler is the rendered **message**:
 `test/spec/alignment-abnf-errors.tsv` compares each of its 35 diagnostics
 byte for byte, in all three runtimes, through the parity runners'
 `matchError` hook. The
@@ -795,12 +884,21 @@ contract than a code: rewording a diagnostic and changing which failure
 occurs look the same to it. That fixture is a conversion target for the
 A3/A4 error-code work.
 
+The tree a host translates does declare codes, the ones its parser
+refuses a source with where the tree cannot hold it: `abnf_code_point`,
+`abnf_reversed_range`, `abnf_reversed_repetition`, `abnf_count`,
+`abnf_unclosed` and `abnf_surrogate`. Each is in the catalogue the tree
+parser's options carry (`TREE_OPTIONS` in `ts/src/tree.ts`, `treeOptions`
+in `go/tree.go`, `TREE_ERRORS` in `rs/src/tree.rs`), and each has an
+`ERROR:<code>` row in [`test/spec/tree.tsv`](test/spec/tree.tsv), which
+the three runtimes run; an engine refusal there (`unterminated_string`)
+keeps the engine's code.
+
 The machine-readable list is [`tabnas.plugin.json`](tabnas.plugin.json)
-(`errorCodes`) — deliberately empty today, matching the catalogue-free
-state above. If this package ever declares a code, add it there in the same
-change: the code is the contract a fixture pins with `ERROR:<code>`, and
-two runtimes that reject the same input with different codes have agreed on
-nothing.
+(`errorCodes`): the tree's codes, in the catalogue's order. If this
+package declares another code, add it there in the same change: the code
+is the contract a fixture pins with `ERROR:<code>`, and two runtimes that
+reject the same input with different codes have agreed on nothing.
 
 ## Untrusted input
 

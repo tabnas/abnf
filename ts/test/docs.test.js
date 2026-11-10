@@ -722,8 +722,10 @@ describe('doc-counts', () => {
     const WORDS = {
       twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
       seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+      'twenty-one': 21, 'twenty-two': 22, 'twenty-three': 23,
+      'twenty-four': 24, 'twenty-five': 25,
     }
-    const m = /Five of the (\w+) files in `ts\/test\/\*\.test\.js`/.exec(AGENTS)
+    const m = /Five of the ([\w-]+) files in `ts\/test\/\*\.test\.js`/.exec(AGENTS)
     Assert.ok(null != m,
       'AGENTS.md no longer counts the test files in the form this test reads')
     Assert.equal(WORDS[m[1]], files.length,

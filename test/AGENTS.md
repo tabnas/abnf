@@ -60,6 +60,7 @@ language, the first column is the ABNF source under test, not the input.
 | `alignment-abnf-tokens` | `grammar`, `expected` | JSON of the emitted fixed-token map |
 | `alignment-abnf-rules` | `grammar`, `expected` | JSON array of emitted rule names, sorted |
 | `alignment-abnf-errors` | `grammar`, `expected` | `ERROR:<message>` — the exact message, byte for byte |
+| `tree` | `grammar`, `expected` | the JSON text of the tree a host translates (the schema grammar-rules), member order included, compared as text; or `ERROR:<code>`, the engine's code |
 
 `alignment-*` follows the parser repo's meaning: behaviours pinned
 identical across TS, Go and Rust.
@@ -70,8 +71,12 @@ identical across TS, Go and Rust.
 - Go: `go/parity_test.go` — a `support.Runner{...}` per fixture.
 - Rust: `rs/tests/parity_test.rs` — a `tabnas_support::Runner` per fixture.
 
-One runner per FILE, because each of the four asserts a different thing
-about the same `grammar` column. Everything else — finding `test/spec`,
+`tree.tsv` has runners of its own, beside the tree's other tests:
+`ts/test/tree.test.js`, `go/tree_test.go` and `rs/tests/tree_test.rs`,
+which also hold every tree to tabnas/bnf's check of the schema.
+
+One runner per FILE, because each of the four alignment fixtures asserts
+a different thing about the same `grammar` column. Everything else — finding `test/spec`,
 reading the file, decoding escapes, the `ERROR:` contract, the
 comparison, the `<file>:<line>` in a failure message — comes from the
 shared package, so the three loaders cannot drift from each other
