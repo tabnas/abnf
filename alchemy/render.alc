@@ -6,29 +6,35 @@
 ;
 ; The tree is the schema `grammar-rules` (tabnas/bnf's
 ; docs/grammar-rules.md, and section 13.1 of alchemy's
-; docs/streaming-plan.md): `{"type": "grammar", "rules": [...]}`, each rule
-; `{"type": "rule", "name", ["incremental": true], "alternatives"}`, an
-; alternative a list of elements, and an element an object whose `type`
-; comes first and whose other members follow in the schema's order, its
-; repetitions, `repeat`, last. ABNF's reader builds it, and so do EBNF's
-; and GBNF's, so a grammar read in another notation is written here too.
+; docs/streaming-plan.md): `{"type": "grammar", ["start": name],
+; "rules": [...]}`, each rule `{"type": "rule", "name", ["incremental":
+; true], "alternatives"}`, an alternative a list of elements, and an
+; element an object whose `type` comes first and whose other members
+; follow in the schema's order, its repetitions, `repeat`, last. ABNF's
+; reader builds it, and so do EBNF's and GBNF's, so a grammar read in
+; another notation is written here too.
 ;
 ; The text: a rule on a line of its own, `name = ...` or `name =/ ...`
-; for an incremental one, its alternatives between ` / `, the elements of
-; an alternative between spaces, a group in `( ... )` and an option, a
-; group whose innermost repetition is from 0 to 1, in `[ ... ]`; a
+; for an incremental one, its alternatives between ` / `, the elements
+; of an alternative between spaces, a group in `( ... )` and an option,
+; a group whose innermost repetition is from 0 to 1, in `[ ... ]`; a
 ; repetition as RFC 5234's prefix (`*`, `m*`, `*n`, `m*n`, `n`), the
 ; repetition from 0 to 1 of an element that is no group as `*1`, and a
 ; repetition of what a prefix already repeats in a group of its own, an
-; option `[ ... ]` where it is from 0 to 1. A
-; literal is a quoted string, `%s` before it where it matches exactly (an
-; ABNF quoted string matches without regard to case), or, where a quoted
-; string cannot hold it, the numeric value of its code points, which
-; matches exactly; a character is `%x` and its code point; a range
-; `%x<from>-<to>`; prose `<...>`; GBNF's `.` the range of every code
-; point, `%x00-10FFFF`; and a class, which RFC 5234 has no form for, the
-; alternation of its members, each a character or a range, in a group
-; where it has more than one. The empty grammar is no text at all.
+; option `[ ... ]` where it is from 0 to 1. A literal is a quoted
+; string, `%s` before it where it matches exactly (an ABNF quoted string
+; matches without regard to case), or, where a quoted string cannot hold
+; it, the numeric value of its code points, which matches exactly; a
+; character is `%x` and its code point; a range `%x<from>-<to>`; prose
+; `<...>`; GBNF's `.` the range of every code point, `%x00-10FFFF`; and
+; a class, which RFC 5234 has no form for, the alternation of its
+; members, each a character or a range, in a group where it has more
+; than one. The empty grammar is no text at all. ABNF starts from its
+; first rule, so a grammar whose `start` names another (GBNF's root) is
+; written with that rule first: the text of the rules before it is held
+; until it arrives and written after it, nothing held where the start
+; rule comes first or there is no start, and a start naming a rule that
+; never arrives is refused at the grammar's end.
 ;
 ; The contract is the round trip: an ABNF document's tree, written here,
 ; reads back as that tree. A grammar of another notation reads back as a
@@ -543,10 +549,107 @@ def abnf-render-finish [stack]
     case [] (fail :protocol-order "the events hold no value, where a tree's hold one")
     case _ (fail :protocol-order "the events ended inside a container, which a tree's never do")
 
-; The render: the tree's events in, the ABNF text out.
+; ---- the start rule
+;
+; A grammar's `start` names the rule it starts from, where its notation
+; names one whatever the rules' order (GBNF's root). It comes after the
+; grammar's type and before its rules, and these definitions read it, so
+; the events the render beneath them reads hold none. Where the notation
+; written starts from its first rule (abnf-render-holds), the start rule
+; is written first: until it arrives the text of the rules before it is
+; held, and written after it; nothing is held when it comes first, or
+; where there is no start. A start naming a rule that never arrives, in a
+; grammar that has rules, is refused at the grammar's end, rather than
+; written as a grammar that starts from another rule; a grammar of no
+; rules starts nowhere, and is written as it is.
+;
+; The state is [stack start]: the render's own stack, and where the start
+; stands: [:none], no start; [:due], its key read and its name due;
+; [:wait name held any], not met yet, `held` the text held back and `any`
+; whether a rule has been; [:in name held], being written; [:met],
+; written.
+
+; The grammar's place among its members, 1 after its type and before its
+; rules, or -1 inside it.
+def abnf-render-grammar-at [stack]
+  match (count stack)
+    case 1
+      match (top stack)
+        case [:grammar key at] at
+        case [:grammar key at info] at
+        case _ -1
+    case _ -1
+
+; The name of the rule being written, or "" between rules.
+def abnf-render-current-rule [stack]
+  match (abnf-render-at-least (count stack) 3)
+    case false ""
+    case true
+      match (abnf-render-at stack 2)
+        case [:rule key at name incremental] name
+        case _ ""
+
+; The text one event makes, written or held as the start stands.
+def abnf-render-start-out [stack start out]
+  match start
+    case [:wait name held any]
+      let [rule (abnf-render-current-rule stack)]
+        match (equal rule name)
+          case true (transition [stack [:in name held]] out)
+          case false
+            let [seen (match rule (case "" any) (case _ true))]
+              match abnf-render-holds
+                case true (transition [stack [:wait name (push-all out held) seen]] [])
+                case false (transition [stack [:wait name held seen]] out)
+    case [:in name held]
+      match (equal (abnf-render-current-rule stack) name)
+        case true (transition [stack start] out)
+        case false (transition [stack [:met]] (push-all held out))
+    case _ (transition [stack start] out)
+
+def abnf-render-start-step [state event]
+  match state
+    case [stack start]
+      match start
+        case [:due]
+          match event
+            case (scalar value)
+              match [(kind value) value]
+                case [:string ""] (abnf-render-shape "a grammar's start is empty")
+                case [:string name] (transition [(abnf-render-start-noted stack name) [:wait name [] false]] [])
+                case _ (abnf-render-shape "a grammar's start is not text")
+            case _ (abnf-render-shape "a grammar's start has no name")
+        case _
+          match [event (abnf-render-grammar-at stack)]
+            case [(key "start") 1]
+              match start
+                case [:none] (transition [stack [:due]] [])
+                case _ (abnf-render-shape "a grammar's start comes twice")
+            case _
+              match (abnf-render-step stack event)
+                case (transition next out) (abnf-render-start-out next start out)
+
+def abnf-render-start-finish [state]
+  match state
+    case [stack start]
+      match start
+        case [:wait name held true] (abnf-render-refuse (string-join "" ["the grammar starts from the rule " (quoted name) ", which it does not define"]))
+        case [:wait name held false] (abnf-render-finish stack)
+        case [:due] (abnf-render-shape "a grammar's start has no name")
+        case _ (abnf-render-finish stack)
+
+; ABNF starts from its first rule, so it holds the rules before a start
+; that is not its first, and its stack notes nothing of the start.
+def abnf-render-holds true
+
+def abnf-render-start-noted [stack name]
+  stack
+
+; The render: the tree's events in, the ABNF text out, the start rule held
+; to its place.
 def abnf-render [input]
   join ""
-    scan-emit [] abnf-render-step abnf-render-finish (events input)
+    scan-emit [[] [:none]] abnf-render-start-step abnf-render-start-finish (events input)
 
 ; ---- a literal's code points
 

@@ -21,9 +21,10 @@ const Path = require('node:path')
 const { spawn } = require('node:child_process')
 const { after, test } = require('node:test')
 
+const { Tabnas } = require('@tabnas/parser')
 const { findSpecDir } = require('@tabnas/support')
 
-const { parseAbnfTree, translate } = require('..')
+const { abnf: abnfPlugin, parseAbnfTree, translate } = require('..')
 
 const ALCHEMY = process.env.TABNAS_ALCHEMY
 const skip = ALCHEMY ? false : 'TABNAS_ALCHEMY does not name the alchemy command'
@@ -154,6 +155,22 @@ async function refuses (tree, what) {
   Assert.match(out.message, what)
 }
 
+// What a grammar text recognises, compiled by this package: each sample
+// it accepts.
+function recognises (text, samples) {
+  const tn = new Tabnas({ plugins: [abnfPlugin] })
+  return samples.filter((sample) => {
+    const j = tn.make()
+    j.abnf(text)
+    try {
+      j.parse(sample)
+      return true
+    } catch {
+      return false
+    }
+  })
+}
+
 // A grammar of one rule `a`, its one alternative the elements given.
 const one = (...elements) => ({
   type: 'grammar',
@@ -232,4 +249,43 @@ test('the render refuses a tree that is not the schema\'s', { skip }, async () =
   await refuses(one({ type: 'range', to: 2, from: 1 }), /a range's from comes after what it precedes/)
   await refuses(one({ type: 'range', from: 2, to: 1 }), /a range whose to is below its from/)
   await refuses(one(ref('x', [{ min: 2, max: 1 }])), /a repetition whose max is below its min/)
+})
+
+// GBNF starts from the rule named root, wherever it stands, and its tree
+// names it as the start: GBNF's reader reads `digit ::= [0-9]`,
+// `num ::= digit+` and `root ::= num ("," num)*` as this tree, which
+// tabnas/gbnf's tests hold. ABNF starts from its first rule, so the render
+// writes root first, holding the rules before it until it has, and the
+// grammar compiled from the text recognises what GBNF's does.
+const NUMBERS = {
+  type: 'grammar',
+  start: 'root',
+  rules: [
+    { type: 'rule', name: 'digit', alternatives: [[{ type: 'class', negated: false, members: [{ from: 48, to: 57 }] }]] },
+    { type: 'rule', name: 'num', alternatives: [[ref('digit', [{ min: 1 }])]] },
+    { type: 'rule', name: 'root', alternatives: [[ref('num'), { type: 'group', alternatives: [[{ type: 'literal', text: ',', caseSensitive: true }, ref('num')]], repeat: [{ min: 0 }] }]] },
+  ],
+}
+const ACCEPTED = ['1', '12', '1,2', '12,345,6']
+const REFUSED = ['', 'a', '1,', ',1', '1,,2', '1;2']
+
+test('the render writes the start rule first, holding the rules before it', { skip }, async () => {
+  const text = 'root = num *( %s"," num )\ndigit = %x30-39\nnum = 1*digit\n'
+  await writes(NUMBERS, text)
+  Assert.deepEqual(recognises(text, [...ACCEPTED, ...REFUSED]), ACCEPTED)
+  // Nothing is held where the start rule comes first, and the rules
+  // between it and the one before stay in their order.
+  const [digit, num, root] = NUMBERS.rules
+  await writes({ ...NUMBERS, rules: [root, digit, num] }, text)
+  await writes({ ...NUMBERS, rules: [digit, root, num] }, text)
+  // A tree with no start starts from its first rule, and is written in
+  // its order.
+  await writes({ type: 'grammar', rules: NUMBERS.rules }, 'digit = %x30-39\nnum = 1*digit\nroot = num *( %s"," num )\n')
+})
+
+test('the render refuses a start the grammar does not define', { skip }, async () => {
+  await refuses({ ...NUMBERS, start: 'top' }, /the grammar starts from the rule "top", which it does not define/)
+  // A grammar of no rules starts nowhere, and is no text.
+  await writes({ type: 'grammar', start: 'root', rules: [] }, '')
+  await refuses({ type: 'grammar', start: 1, rules: [] }, /a grammar's start is not text/)
 })

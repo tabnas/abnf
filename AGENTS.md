@@ -352,6 +352,15 @@ comment carries; the core rules are the compiler's.
   is refused with TARGET_VALUE_UNREPRESENTABLE, naming the rule: a token
   terminal, a negated or empty class, a name ABNF cannot spell, and the
   rest the manifest's `loss` list names.
+- A tree whose `start` names a rule other than its first (GBNF's, which
+  starts from `root` wherever it stands) is written with that rule first,
+  since ABNF starts from its first rule: the text of the rules before it
+  is held until it has been written, and nothing is held where the start
+  rule comes first or there is no start. A start naming a rule the
+  grammar does not define is refused at its end, naming the rule; a
+  grammar of no rules is no text. `ts/test/tree-render.test.js` holds a
+  GBNF grammar whose `root` comes last to a text that starts from `root`
+  and recognises what GBNF's does.
 
 Repetition is replacement here too: the rules of a grammar are a replace
 loop of `prod`, and the alternatives of a rule or a group and the
