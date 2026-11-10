@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "tabnas-abnf"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "indexmap",
  "regex",
