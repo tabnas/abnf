@@ -480,7 +480,7 @@ declared subset says (an action or a mark is not written): the compiler
 makes them again from the rules, and a loss sentence says so. The file's
 header comment says how each shape is read.
 
-Measured with the `alchemy` command (alchemy-cli) over every grammar this
+Measured with the `alchemy` command (alchemy-cli, now `dmog`) over every grammar this
 repository's corpora hold: the 68 files of `test/abnf-corpus/`, the 7 of
 `ts/test/grammar/` and the 95 distinct grammars of `test/spec/*.tsv`,
 170 in all. 115 compile; of those, 87 come back as the same spec, byte
